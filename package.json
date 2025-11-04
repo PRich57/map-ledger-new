@@ -1,0 +1,21 @@
+{
+  "name": "map-ledger",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "build": "npm run -w frontend build && npm run -w backend build",
+    "dev": "concurrently -n FRONT,BACK -c blue,magenta \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "npm run -w frontend dev",
+    "dev:backend": "npm run -w backend dev",
+    "lint": "npm run -w frontend lint && npm run -w backend lint",
+    "lint:css": "npm run -w frontend lint:css",
+    "test": "npm run -w frontend test && npm run -w backend test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

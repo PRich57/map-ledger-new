@@ -1,0 +1,19 @@
+{
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["get"],
+      "route": "user-clients"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ],
+  "scriptFile": "../dist/userClients/index.js",
+  "entryPoint": "default"
+}

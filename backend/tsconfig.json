@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "health/**/*.ts",
+    "aiGenerate/**/*.ts",
+    "userClients/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "src/entities/**/*",
+    "src/functions/**/*"
+  ]
+}

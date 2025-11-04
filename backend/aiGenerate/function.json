@@ -1,0 +1,19 @@
+{
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["post"],
+      "route": "ai/generate"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ],
+  "scriptFile": "../dist/aiGenerate/index.js",
+  "entryPoint": "default"
+}

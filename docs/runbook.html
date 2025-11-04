@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>MapLedger Runbook — Master Copy (Updated 23 Jun 2025)</title>
+<style>
+body{font-family:system-ui,sans-serif;line-height:1.5;margin:0 2rem 4rem;color:#1a1a1a}
+h1,h2,h3,h4{color:#104e8b;margin-top:2.2rem}
+h1{font-size:2rem;border-bottom:4px solid #104e8b;padding-bottom:.3rem;margin-top:1.5rem}
+h2{font-size:1.4rem;border-left:6px solid #104e8b;padding-left:.6rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem}
+th,td{border:1px solid #dadada;padding:.4rem .6rem;vertical-align:top}
+tr:nth-child(even){background:#f8f8f8}
+code,pre{background:#f3f3f3;border:1px solid #e2e2e2;border-radius:4px;padding:.1rem .3rem;font-size:.85rem}
+.example-block{border:2px dashed #777;padding:1rem;margin:1.2rem 0;background:#fafafa}
+.toc a{color:#104e8b;text-decoration:none}
+</style>
+<style>
+#side-nav{position:fixed;left:0;top:0;height:100%;width:220px;background:#f2f6fa;border-right:1px solid #d0d7de;padding:1rem;overflow-y:auto}
+#side-nav a{display:block;color:#104e8b;text-decoration:none;margin:.4rem 0;font-size:.9rem}
+#content{margin-left:240px}
+@media(max-width:900px){#side-nav{display:none}#content{margin-left:0}}
+</style>
+</head>
+<body>
+<div id="side-nav"><h3>Runbook</h3><a href="#vision">1 · Vision &amp; Objectives</a><a href="#terminology">2 · Core Terminology</a><a href="#architecture">3 · System Architecture</a><a href="#ingestion">4 · Data‑Ingestion Pipeline</a><a href="#scoa">5 · Standard Chart of Accounts (S‑COA)</a><a href="#workflow">&gt;6 · Consolidate → Map → Allocate Workflow</a><a href="#examples">7 · Visual Examples (from Trial‑Balance workbook)</a><a href="#distribution">
+&gt;8 · Distribution Methods &amp; Metrics</a><a href="#frontend">9 · Front‑End UX Flow</a><a href="#permissions">10 · Roles &amp; Permissions</a><a href="#nfr">11 · Non‑Functional Requirements</a><a href="#release">12 · Release Timeline</a><a href="#codex">13 · Codex Workflow &amp; Repo Docs</a></div><div id="content">
+<h1>MapLedger Runbook — Master Copy <small>(updated 23 Jun 2025)</small></h1>
+<p><em>This self‑contained HTML replaces all previous Markdown runbooks. Commit as <code>docs/runbook.html</code>.</em></p>
+<section class="toc">
+<h2>Table of Contents</h2>
+<ol>
+<li><a href="#vision">Vision &amp; Objectives</a></li>
+<li><a href="#terminology">Core Terminology</a></li>
+<li><a href="#architecture">System Architecture</a></li>
+<li><a href="#ingestion">Data‑Ingestion Pipeline</a></li>
+<li><a href="#scoa">Standard Chart of Accounts</a></li>
+<li><a href="#workflow">Consolidate → Map → Allocate</a></li>
+<li><a href="#examples">Visual Examples</a></li>
+<li><a href="#distribution">Distribution Methods &amp; Metrics</a></li>
+<li><a href="#frontend">Front‑End UX Flow</a></li>
+<li><a href="#permissions">Roles &amp; Permissions</a></li>
+<li><a href="#nfr">Non‑Functional Requirements</a></li>
+<li><a href="#release">Release Timeline</a></li>
+<li><a href="#codex">Codex Guidance &amp; Repo Docs</a></li>
+</ol>
+</section>
+<hr/>
+<h2 id="vision">1 · Vision &amp; Objectives</h2>
+<ul>
+<li><strong>One‑click ingestion</strong> of any client Trial Balance (CSV/XLSX) regardless of layout.</li>
+<li><strong>AI‑assisted mapping</strong> to a single Standard COA (S‑COA) with confidence scoring.</li>
+<li><strong>Multi‑entity consolidation</strong> across periods, ledgers, operations.</li>
+<li><strong>Rule‑driven allocation</strong> of consolidated balances to operations (direct or metric ratios).</li>
+<li><strong>Governed access</strong> through Azure AD roles from organisation → client → operation.</li>
+<li><strong>MVP go‑live</strong> target: <strong>16 Nov 2025</strong>.</li>
+</ul>
+<h3>Screenshots (placeholders)</h3>
+<p><img alt="Dashboard mock" src="screenshots/dashboard.png" style="width:100%;max-width:600px;border:1px solid #ccc"/></p>
+<p><img alt="GL Upload" src="screenshots/upload.png" style="width:100%;max-width:600px;border:1px solid #ccc"/></p>
+<p><img alt="Mapping UI" src="screenshots/mapping.png" style="width:100%;max-width:600px;border:1px solid #ccc"/></p>
+<h2 id="terminology">2 · Core Terminology</h2>
+<table>
+<thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><strong>Company</strong></td><td>Legal ledger supplying its own Trial Balance (e.g. VAN LLC).</td></tr>
+<tr><td><strong>Operation</strong></td><td>Business line that receives allocated costs (Van, Flatbed, …).</td></tr>
+<tr><td><strong>S‑COA</strong></td><td>Canonical chart defined in §5.</td></tr>
+<tr><td><strong>Distribution Method</strong></td><td>Rule for splitting a value: <code>Direct</code>, <code>PctOfMiles</code>, <code>PctOf&lt;Metric&gt;</code>, <code>CustomRatio</code>.</td></tr>
+<tr><td><strong>Layout Hash</strong></td><td>SHA‑256 fingerprint of the first 20 rows; key for cached column maps.</td></tr>
+<tr><td><strong>GLAccountRaw</strong></td><td>Staging table holding every cleaned TB line.</td></tr>
+<tr><td><strong>GLUpload</strong></td><td>Upload session header (blob URL, status, user).</td></tr>
+</tbody>
+</table>
+<h2 id="architecture">3 · System Architecture</h2>
+<pre>
+React SPA ──► Azure Blob (SAS) ──► ProcessGL (Function)
+                        ▲                    │   ↳ Redis (layout cache)
+                        │                    ▼
+                Browser ◄──── REST JSON ◄── SuggestMappings (Function + GPT‑4)
+                                                   │
+                                                   ▼
+                                           Azure SQL (stg &amp; dbo)
+</pre>
+<p><em>For full endpoint lists, CLI snippets, and DDL, see <a href="runbook_detailed.html">Runbook Detailed Spec</a>.</em></p>
+<p><strong>Numeric Storage Rule:</strong> persist raw decimals (no $ or commas). Formatting is applied only in the UI via <code>Intl.NumberFormat</code>.</p>
+<p><em>Store numeric facts without <code>$</code> or commas; UI formats using <code>Intl.NumberFormat</code>.</em></p>
+<h2 id="ingestion">4 · Data‑Ingestion Pipeline</h2>
+<ol>
+<li><strong>Fingerprint</strong> sheet → <code>layoutHash</code>.</li>
+<li><strong>Detect layout</strong> – reuse cache or invoke GPT‑4 (few‑shot with sample sheets).</li>
+<li><strong>Parse &amp; normalise</strong> – drop metadata/subtotals, merge multi‑row headers, melt wide months, strip symbols.</li>
+<li><strong>Deduplicate</strong> on entity + account + period.</li>
+<li><strong>Insert</strong> into <code>stg.GLAccountRaw</code>; <code>MERGE</code> into <code>dbo.GLAccountFact</code>.</li>
+<li><strong>Totals view</strong> rebuilds group/subtotal lines for reports.</li>
+</ol>
+<h2 id="scoa">5 · Standard Chart of Accounts (S‑COA)</h2>
+<p>The FreightMath Standard Chart of Accounts (S‑COA) currently contains <strong>80</strong> GL accounts. Each line supplies a <code>GL_ID</code>, <code>GL_NAME</code>, and <code>DETAIL_LEVEL</code> (1 = leaf / 2 = roll‑up).</p>
+<h3>5.1 JSON Export</h3>
+<p>The full COA is generated from the spreadsheet by <code>scripts/build_coa_json.ts</code>. Below is an excerpt; Codex should reference the JSON rather than hard‑coding IDs.</p>
+<pre>{
+  "templateId": "default-freight-v1",
+  "accountCount": 80,
+  "accountsSample": [
+    {
+      "glId": "2990",
+      "glName": "OPERATING RATIO - TOTAL ASSET OPERATIONS",
+      "detailLevel": 1
+    },
+    {
+      "glId": "2",
+      "glName": "FREIGHT REVENUE LINEHAUL - COMPANY FLEET",
+      "detailLevel": 1
+    },
+    {
+      "glId": "3",
+      "glName": "FREIGHT REVENUE LINEHAUL - OWNER OPERATOR",
+      "detailLevel": 1
+    },
+    {
+      "glId": "296",
+      "glName": "FREIGHT REVENUE LINEHAUL - LEASE PURCHASE",
+      "detailLevel": 1
+    },
+    {
+      "glId": "102",
+      "glName": "FREIGHT REVENUE LINEHAUL - BROKERAGE",
+      "detailLevel": 1
+    },
+    {
+      "glId": "4",
+      "glName": "ACCESSORIAL REVENUE - COMPANY FLEET",
+      "detailLevel": 1
+    },
+    {
+      "glId": "5",
+      "glName": "ACCESSORIAL REVENUE - OWNER OPERATOR",
+      "detailLevel": 1
+    },
+    {
+      "glId": "299",
+      "glName": "ACCESSORIAL REVENUE - LEASE PURCHASE",
+      "detailLevel": 1
+    },
+    {
+      "glId": "105",
+      "glName": "ACCESSORIAL REVENUE - BROKERAGE",
+      "detailLevel": 1
+    },
+    {
+      "glId": "6",
+      "glName": "FUEL SURCHARGE REVENUE - COMPANY FLEET",
+      "detailLevel": 1
+    }
+  ]
+}</pre>
+<h3>5.2 Preview (first 15 rows)</h3>
+<table class="dataframe coa-preview">
+<thead>
+<tr style="text-align: right;">
+<th>GL_ID</th>
+<th>GL_NAME</th>
+<th>DETAIL_LEVEL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2990</td>
+<td>OPERATING RATIO - TOTAL ASSET OPERATIONS</td>
+<td>1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>FREIGHT REVENUE LINEHAUL - COMPANY FLEET</td>
+<td>1</td>
+</tr>
+<tr>
+<td>3</td>
+<td>FREIGHT REVENUE LINEHAUL - OWNER OPERATOR</td>
+<td>1</td>
+</tr>
+<tr>
+<td>296</td>
+<td>FREIGHT REVENUE LINEHAUL - LEASE PURCHASE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>102</td>
+<td>FREIGHT REVENUE LINEHAUL - BROKERAGE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>ACCESSORIAL REVENUE - COMPANY FLEET</td>
+<td>1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>ACCESSORIAL REVENUE - OWNER OPERATOR</td>
+<td>1</td>
+</tr>
+<tr>
+<td>299</td>
+<td>ACCESSORIAL REVENUE - LEASE PURCHASE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>105</td>
+<td>ACCESSORIAL REVENUE - BROKERAGE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>6</td>
+<td>FUEL SURCHARGE REVENUE - COMPANY FLEET</td>
+<td>1</td>
+</tr>
+<tr>
+<td>7</td>
+<td>FUEL SURCHARGE REVENUE - OWNER OPERATOR</td>
+<td>1</td>
+</tr>
+<tr>
+<td>302</td>
+<td>FUEL SURCHARGE REVENUE - LEASE PURCHASE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>108</td>
+<td>FUEL SURCHARGE REVENUE - BROKERAGE</td>
+<td>1</td>
+</tr>
+<tr>
+<td>8</td>
+<td>DRIVER WAGES - COMPANY FLEET</td>
+<td>1</td>
+</tr>
+<tr>
+<td>89</td>
+<td>DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET</td>
+<td>1</td>
+</tr>
+</tbody>
+</table>
+<h3>5.3 Update Script</h3>
+<ol><li>Run <code>npm run build:coa</code> to refresh <code>data/fm_coa.json</code> whenever the Excel changes.</li><li>CI checks will fail if the JSON is out of sync.</li></ol>
+<h2 id="workflow">&gt;6 · Consolidate → Map → Allocate Workflow</h2>
+<ol>
+<li>Upload each entity’s TB.</li>
+<li>System creates <strong>Consolidated</strong> totals per period.</li>
+<li>AI suggests S‑COA mapping; user approves/overrides.</li>
+<li>Wizard allocates each mapped total to operations:<br/>
+   • <code>DirectCompany</code> auto‑links entity rows.<br/>
+   • <code>DirectConsolidated</code> manual % on the total.<br/>
+   • Ratio methods pull reference metrics (miles, headcount…).</li>
+<li>Commit writes <code>dbo.OpGLFact</code> (operation‑level facts).</li>
+</ol>
+<h2 id="examples">7 · Visual Examples (from Trial‑Balance workbook)</h2>
+<h3>7.1 Consolidation (Entities ➜ Consolidated)</h3>
+<div class="example-block">
+<table>
+<thead><tr><th>Row Type</th><th>Concat ID</th><th>Description</th><th>USD</th></tr></thead>
+<tbody>
+<tr><td><strong>Consolidated</strong></td><td>10100</td><td>Accounts Receivable</td><td>501 000</td></tr>
+<tr><td>Company Row</td><td>VAN‑10100</td><td>Accounts Receivable – VAN</td><td>500 000</td></tr>
+<tr><td>Company Row</td><td>META‑10100</td><td>Accounts Receivable – META</td><td>  1 000</td></tr>
+<tr><td><strong>Consolidated</strong></td><td>11000</td><td>Prepaid Expense</td><td>    9 500</td></tr>
+<tr><td>Company Row</td><td>VAN‑11000</td><td>Prepaid Expense – VAN</td><td>    9 000</td></tr>
+<tr><td>Company Row</td><td>META‑11000</td><td>Prepaid Expense – META</td><td>      500</td></tr>
+</tbody></table>
+</div>
+<h3>7.2 Mapping (Consolidated ➜ S‑COA)</h3>
+<div class="example-block">
+<table>
+<thead><tr><th>Consolidated ID</th><th>Suggested S‑COA GL_ID</th><th>Name</th><th>Confidence</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>10100</td><td>10100</td><td>Accounts Receivable</td><td>95 %</td><td>✔ Accepted</td></tr>
+<tr><td>21107‑800 (Credit Card)</td><td>70000</td><td>Credit Card Fees</td><td>78 %</td><td>⚠ Review</td></tr>
+<tr><td>23150 (Tolls / Scales)</td><td>53300 → Tolls<br/>53400 → Scales</td><td>Split Mapping</td><td>80 %</td><td>🛠 User split</td></tr>
+</tbody></table>
+</div>
+<h3>7.3 Allocation (Mapped Total ➜ Operations)</h3>
+<div class="example-block">
+<table>
+<thead><tr><th>S‑COA GL_ID</th><th>Operation</th><th>Method</th><th>% of Source</th><th>Allocated USD</th></tr></thead>
+<tbody>
+<tr><td>10100</td><td>VAN</td><td>DirectCompany</td><td>100 %</td><td>500 000</td></tr>
+<tr><td>10100</td><td>LOG</td><td>DirectCompany</td><td>100 %</td><td>  1 000</td></tr>
+<tr><td>11000</td><td>VAN</td><td>DirectConsolidated</td><td>50 %</td><td>4 750</td></tr>
+<tr><td>11000</td><td>LOG</td><td>DirectConsolidated</td><td>50 %</td><td>4 750</td></tr>
+<tr><td>21107‑800</td><td>VAN</td><td>PctOfMiles</td><td>90 %</td><td>2 700</td></tr>
+<tr><td>21107‑800</td><td>LOG</td><td>PctOfMiles</td><td>10 %</td><td>   300</td></tr>
+<tr><td>53300 (Tolls)</td><td>VAN</td><td>CustomRatio</td><td>80 %</td><td>16 000</td></tr>
+<tr><td>53400 (Scales)</td><td>VAN</td><td>CustomRatio</td><td>20 %</td><td> 4 000</td></tr>
+</tbody></table>
+<p style="font-size:.85rem"><em>The CustomRatio rows inherit a second‑level split once the 80 % Tolls total is itself distributed across VAN vs LOG if required.</em></p>
+</div>
+<h3>7.4 Operational Metrics Entry &amp; History</h3>
+<div class="example-block">
+<table>
+<thead><tr><th>Metric</th><th>Current Value</th><th>Last Updated</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Office Headcount</td><td>42</td><td>2025‑05‑31</td><td>✅ Up to date</td></tr>
+<tr><td>Maintenance Headcount</td><td>7</td><td>2025‑03‑31</td><td style="color:red">⚠ 2 months overdue</td></tr>
+<tr><td>Miles Driven</td><td>2 145 000</td><td>2025‑05‑31</td><td>✅</td></tr>
+</tbody></table>
+</div>
+<p>Admins update these per period on <code>/client/:id/metrics</code>. Ratio distribution methods (e.g. <code>PctOfMiles</code>) pull the values automatically.</p>
+<h2 id="distribution">
+&gt;8 · Distribution Methods &amp; Metrics</h2>
+<table>
+<thead><tr><th>Method</th><th>Metric Source</th><th>Auto</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>DirectCompany</strong></td><td>Company value</td><td>Yes</td><td>1‑to‑1.</td></tr>
+<tr><td><strong>DirectConsolidated</strong></td><td>Total value</td><td>User</td><td>Manual % split.</td></tr>
+<tr><td><strong>PctOfMiles</strong></td><td>Metrics.Miles</td><td>Yes</td><td>Period miles per op.</td></tr>
+<tr><td><strong>PctOf&lt;Metric&gt;</strong></td><td>Any metric</td><td>Yes</td><td>Headcount, tractors …</td></tr>
+<tr><td><strong>CustomRatio</strong></td><td>User input</td><td>Manual</td><td>Multi‑GL splits.</td></tr>
+</tbody>
+</table>
+<h2 id="frontend">9 · Front‑End UX Flow</h2>
+<ol>
+<li><strong>ImportForm</strong> – upload file, choose entities/ops.</li>
+<li><strong>PreviewTable</strong> – inspect parsed sheets, dedup duplicates.</li>
+<li><strong>Mapping &amp; Allocation Wizard</strong><br/>
+   Step 1 MappingTable → Step 2 RatioAllocationManager.</li>
+<li><strong>Review &amp; Commit</strong>.</li>
+<li><strong>Dashboards</strong> – Consolidated &amp; Op P&amp;L.</li>
+</ol>
+<h2 id="permissions">10 · Roles &amp; Permissions</h2>
+<pre>
+            ┌───────────────┐
+            │ Organisation  │ (OrgAdmin)
+            └──────┬────────┘
+                   │
+        ┌──────────┴────────┐
+        │      Client       │ (ClientAdmin)
+        └───┬─────────┬─────┘
+            │         │
+   ┌────────┴──┐   ┌──┴────────┐
+   │  Company   │   │ Operation │ (OpUser)
+   │ (no role) │   └───────────┘
+   └───────────┘
+</pre>
+<table>
+<thead><tr><th>Scope</th><th>Role</th><th>Access</th></tr></thead>
+<tbody>
+<tr><td>System</td><td>SysAdmin</td><td>All organisations</td></tr>
+<tr><td>Organisation</td><td>OrgAdmin</td><td>All clients inside org</td></tr>
+<tr><td>Client</td><td>ClientAdmin</td><td>All entities &amp; ops</td></tr>
+<tr><td>Operation</td><td>OpUser</td><td>Single operation</td></tr>
+</tbody>
+</table>
+<h2 id="nfr">11 · Non‑Functional Requirements</h2>
+<ul>
+<li>Ingest 50 × 10 k‑row workbooks in under 2 minutes cumulative.</li>
+<li>Row‑level security, audit trail of every mapping/allocation change.</li>
+<li>App Insights telemetry + OpenAI usage logging.</li>
+<li>GitHub Actions CI/CD; staging autodeploy on <code>main</code>.</li>
+</ul>
+<h2 id="release">12 · Release Timeline</h2>
+<table>
+<thead>
+<tr>
+<th>Week</th>
+<th>Dates</th>
+<th>Key Tasks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Jun 2 – Jun 8, 2025</td>
+<td>
+<ul class="task-list">
+<li><strong>Kickoff &amp; Requirements Gathering:</strong>
+<ul class="subtask-list">
+<li>Schedule and conduct project kickoff meeting (all stakeholders present).</li>
+<li>Document detailed functional requirements:
+                      <ul class="subtask-list">
+<li>Client hierarchy specifications (Master vs. Operations).</li>
+<li>COA template fields and expected JSON format.</li>
+<li>AI mapping acceptance thresholds.</li>
+<li>Reporting KPIs and benchmarking logic.</li>
+</ul>
+</li>
+<li>Define initial use cases and user stories:
+                      <ul class="subtask-list">
+<li>“As an Admin User, I want to upload a GL CSV so that I can map accounts.”</li>
+<li>“As a Super User, I want to create a new industry and upload its COA.”</li>
+</ul>
+</li>
+<li>Set up project repository structure (GitHub):
+                      <ul class="subtask-list">
+<li>Create monorepo with two folders: <code>/frontend</code> and <code>/backend</code>.</li>
+<li>Initialize ESLint, Prettier, Husky, and CI skeleton pipelines.</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</td>
+</tr>
+<tr>
+<td>2–3</td>
+<td>Jun 9 – Jun 22, 2025</td>
+<td>
+<ul class="task-list">
+<li><strong>Architecture &amp; Data Modeling:</strong>
+<ul class="subtask-list">
+<li>Design high-level architecture diagram:
+                      <ul class="subtask-list">
+<li>Frontend SPA (React + TypeScript) → Backend Azure Functions (TypeScript) → Database Azure SQL → Azure Blob Storage → Azure AD → OpenAI API → Azure Synapse Analytics.</li>
+</ul>
+</li>
+<li>Define data model ER diagram:
+                      <ul class="subtask-list">
+<li>Entities: Industry, COATemplate, COAAccount, MasterClient, ClientOperation, GLUpload, GLAccountRaw, MappingSuggestion, FinalMapping, AuditLog, User.</li>
+<li>Relationships, cardinalities, and cascades.</li>
+</ul>
+</li>
+<li>Draft OpenAPI (Swagger) spec for all endpoints:
+                      <ul class="subtask-list">
+<li>Organize by resource: <code>/api/industries</code>, <code>/api/masterclients</code>, <code>/api/operations</code>, <code>/api/coa</code>, <code>/api/gl</code>, <code>/api/mapping</code>, <code>/api/report</code>.</li>
+<li>Define request/response schemas using JSON Schema ($ref to entity definitions).</li>
+</ul>
+</li>
+<li>Set up Azure Resource Group (RG) naming conventions and folder structure in Terraform or ARM templates (if using IaC this early).</li>
+</ul>
+</li>
+</ul>
+</td>
+</tr>
+<tr>
+<td>3–4</td>
+<td>Jun 23 – Jul 6, 2025</td>
+<td>
+<ul class="task-list">
+<li><strong>Database &amp; Infrastructure Provisioning:</strong>
+<ul class="subtask-list">
+<li>Provision Azure SQL Server &amp; Database (<code>mapledger-sql-server</code>, <code>mapledger-db</code>):
+                      <ul class="subtask-list">
+<li>Enable TDE and Geo-Replication to secondary region.</li>
+<li>Configure Azure AD Admin for SQL server.</li>
+</ul>
+</li>
+<li>Execute initial SQL migrations:
+                      <ul class="subtask-list">
+<li>Create tables: <code>Industry, MasterClient, ClientOperation, COATemplate, COAAccount, GLUpload, GLAccountRaw, MappingSuggestion, FinalMapping, AuditLog, [User Table—if needed]</code>.</li>
+<li>Seed data: initial industries (Retail, Manufacturing, Services).</li>
+</ul>
+</li>
+<li>Provision Azure Blob Storage (<code>mapledgerstorage</code>):
+                      <ul class="subtask-list">
+<li>Create container <code>gl-uploads</code> (private).</li>
+<li>Set lifecycle rule to delete uploads after 90 days.</li>
+</ul>
+</li>
+<li>Provision Azure Cache for Redis (for mapping caching) if decision made.</li>
+<li>Provision Azure Synapse Analytics workspace or dedicate reporting DB if chosen.</li>
+</ul>
+</li>
+<li><strong>Backend Project Setup (Azure Functions):</strong>
+<ul class="subtask-list">
+<li>Initialize Node.js + TypeScript Function project (<code>func init mapledger-backend --typescript</code>).</li>
+<li>Create folder structure:
+                      <ul class="subtask-list">
+<li><code>/src/functions</code> (each function in its own folder).</li>
+<li><code>/src/entities</code> for TypeORM entities.</li>
+<li><code>/src/repositories</code> for DB access.</li>
+<li><code>/src/utils</code> (logging, common helpers).</li>
+<li><code>/tests</code> for unit/integration tests.</li>
+</ul>
+</li>
+<li>Configure <code>tsconfig.json</code> with <code>target: ES2020</code>, <code>module: commonjs</code>, and <code>strict</code> enabled.</li>
+<li>Install dependencies:
+                      <ul class="subtask-list">
+<li><code>npm install azure-functions-core-tools @azure/storage-blob typeorm reflect-metadata mssql dotenv ajv</code></li>
+<li>DevDependencies: <code>typescript ts-node jest @types/jest ts-jest eslint prettier</code></li>
+</ul>
+</li>
+<li>Configure ESLint &amp; Prettier for consistent styling and run on commit via Husky pre-commit hook.</li>
+</ul>
+</li>
+<li><strong>Front-End Project Setup (React + TypeScript):</strong>
+<ul class="subtask-list">
+<li>Initialize React project with Vite (<code>npm create vite@latest mapledger-frontend --template react-ts</code>).</li>
+<li>Install dependencies:
+                      <ul class="subtask-list">
+<li><code>npm install react-router-dom@6 axios @azure/msal-browser @azure/msal-react tailwindcss@latest postcss autoprefixer</code></li>
+<li>DevDependencies: <code>@testing-library/react jest @types/jest eslint-config-airbnb-typescript</code></li>
+</ul>
+</li>
+<li>Configure TailwindCSS:
+                      <ul class="subtask-list">
+<li>Initialize Tailwind (<code>npx tailwindcss init -p</code>).</li>
+<li>Edit <code>tailwind.config.js</code> to enable JIT mode and purge paths (<code>./src/**/*.{js,jsx,ts,tsx,html}</code>).</li>
+<li>Import Tailwind directives in <code>index.css</code>:
+                          <pre>
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+                          </pre>
+</li>
+</ul>
+</li>
+<li>Set up ESLint with Airbnb + TypeScript rules; configure import/order and React plugin rules.</li>
+<li>Implement folder structure:
+                      <ul class="subtask-list">
+<li><code>/src/components</code> (UI components).</li>
+<li><code>/src/pages</code> (routeable pages: Dashboard, Upload, Mapping, Admin).</li>
+<li><code>/src/hooks</code> for custom React hooks (e.g., <code>useAuth</code>, <code>usePolling</code>).</li>
+<li><code>/src/context</code> for global contexts (AuthContext, ThemeContext).</li>
+<li><code>/src/services</code> for API calls (Axios instances, typed interfaces).</li>
+<li><code>/src/utils</code> for shared utilities (formatters, validators).</li>
+<li><code>/src/tests</code> for front-end Jest tests.</li>
+</ul>
+</li>
+<li>Configure React Router v6 with routes:
+                      <ul class="subtask-list">
+<li><code>/login</code></li>
+<li><code>/dashboard</code> (protected)</li>
+<li><code>/gl/upload</code> (Admin)</li>
+<li><code>/gl/mapping/{glUploadId}</code> (Admin)</li>
+<li><code>/admin/industries</code> (SuperUser)</li>
+<li><code>/admin/clients</code> (SuperUser)</li>
+<li><code>/admin/users</code> (Admin &amp; SuperUser)</li>
+<li><code>/reports</code> (Admin &amp; Viewer)</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</td>
+</tr><tr><td colspan="3" style="background:#fff2cc;text-align:center;">Company holiday – no sprint work (Jun 28 – Jul 6, 2025)</td></tr>
+<tr>
+  <td>5–6</td>
+  <td>Jul 7 – Jul 20, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>AI Mapping Engine (Backend):</strong>
+        <ul class="subtask-list">
+          <li>Create Azure OpenAI resource; set <code>gpt‑4o</code> deployment &amp; fallback <code>gpt‑3.5‑turbo</code>.</li>
+          <li>Design &amp; run prompt‑engineering matrix; document top‑2 prompt formats in <code>docs/prompts/</code>.</li>
+          <li>Implement <code>MappingSuggestion</code> DAL + migration (idempotent script).</li>
+          <li>Rate‑limit with Durable Functions semaphore (throttle ≤ 20 rps per key).</li>
+          <li>GDPR compliance review: purge PII from prompt payloads; add masking helper.</li>
+        </ul>
+      </li>
+      <li><strong>COA Template Builder (Front‑End):</strong>
+        <ul class="subtask-list">
+          <li>Tree‑view MVP in Storybook; keyboard a11y (arrow keys, space = toggle).</li>
+          <li>Drag &amp; drop reorder; inline code/name validation (regex + duplicates).</li>
+          <li>Auto‑save debounce (2 s) → <code>PUT /api/coa/template/{id}</code>.</li>
+          <li>Write unit tests with RTL + Jest; target ≥ 90 % branch coverage for builder.</li>
+        </ul>
+      </li>
+      <li><strong>Docs &amp; QA:</strong>
+        <ul class="subtask-list">
+          <li>Add <code>AI‑MAPPING.md</code> with prompt structure + error codes.</li>
+          <li>Code‑review checklist: latency budget (≤ 3 s / 100 lines).</li>
+        </ul>
+      </li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>7–8</td>
+  <td>Jul 21 – Aug 3, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>GL Upload Workflow:</strong>
+        <ul class="subtask-list">
+          <li>SAS‑URL endpoint emits 15‑min token; implement server‑clock skew guard.</li>
+          <li>Drag‑and‑drop zone + multi‑file batch upload (limit 10).</li>
+          <li>Excel parser: cross‑sheet handling, hidden‑row skip, date serial fix.</li>
+          <li>Invalid‑column highlight (red header) + inline “map column” dropdown.</li>
+        </ul>
+      </li>
+      <li><strong>Blob Processing Function:</strong>
+        <ul class="subtask-list">
+          <li>Chunk insert 1 000 rows; resume on retry using <code>continuationToken</code>.</li>
+          <li>Emit telemetry (<code>AppInsights</code>) – bytes read, parse ms, rows/s.</li>
+          <li>Dead‑letter queue for parsing failures; SendGrid alert to uploader.</li>
+        </ul>
+      </li>
+      <li><strong>Testing &amp; Metrics:</strong>
+        <ul class="subtask-list">
+          <li>Cypress E2E: CSV happy‑path + Excel edge‑case workbook.</li>
+          <li>Define SLIs: “parse‑rate”, “upload‑fail %”; plot in Grafana dashboard.</li>
+        </ul>
+      </li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>9–10</td>
+  <td>Aug 4 – Aug 17, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>Mapping UX Enhancements:</strong>
+        <ul class="subtask-list">
+          <li>Virtualised grid (react‑window) – target 50 k rows @ 60 fps scroll.</li>
+          <li>Confidence colour scale via design tokens; WCAG contrast check.</li>
+          <li>Keyboard bulk‑actions: <kbd>Ctrl +A</kbd> select high‑confidence; <kbd>Delete</kbd> = clear overrides.</li>
+          <li>Undo/redo stack (last 20 ops) stored in React context.</li>
+        </ul>
+      </li>
+      <li><strong>Finalize &amp; Audit:</strong>
+        <ul class="subtask-list">
+          <li>Implement optimistic‑UI save; rollback on 409 (conflict).</li>
+          <li>Write <code>auditLog()</code> wrapper; log every field diff JSON.</li>
+          <li>Expose <code>/api/audit/{entity}/{id}</code> for internal auditors.</li>
+        </ul>
+      </li>
+      <li><strong>Perf &amp; QA:</strong>
+        <ul class="subtask-list">
+          <li>Profile mapping render with React DevTools; memoise heavy cells.</li>
+          <li>Cross‑browser tests (Chrome, Edge, Firefox latest‑2).</li>
+        </ul>
+      </li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>11–12</td>
+  <td>Aug 18 – Aug 31, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>Allocation Engine v1:</strong>
+        <ul class="subtask-list">
+          <li>Create <code>dbo.OperationMetric</code> &amp; <code>dbo.AllocationRule</code> tables.</li>
+          <li>Ingest metrics CSV → Function timer nightly.</li>
+          <li>Implement rule executor library with strategy pattern.</li>
+          <li>Allocation preview table with variance column.</li>
+          <li>Unit tests (jest) for each strategy; branch ≥ 85 %.</li>
+        </ul>
+      </li>
+      <li><strong>Metrics Entry UI:</strong>
+        <ul class="subtask-list">
+          <li>Inline‑edit grid (AG‑Grid) with validation &amp; autosave.</li>
+          <li>History side‑panel (diff view) – colour add/del.</li>
+        </ul>
+      </li>
+      <li><strong>Docs:</strong> add “Allocation Rules” page to runbook §6.</li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>13–14</td>
+  <td>Sep 1 – Sep 14, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>Admin Console:</strong>
+        <ul class="subtask-list">
+          <li>CRUD pages for Industries, Master Clients, Ops (collapsible rows).</li>
+          <li>Bulk‑import ops via CSV template.</li>
+          <li>Azure AD group picker (Graph API) for role assignment.</li>
+        </ul>
+      </li>
+      <li><strong>Role &amp; Access:</strong>
+        <ul class="subtask-list">
+          <li>Add <code>withRoleGuard()</code> HOC; lazy‑load protected routes.</li>
+          <li>Graph delta‑sync job (Function timer) → refresh group memberships nightly.</li>
+          <li>Email‑invite template in SendGrid with deep‑link to onboarding wizard.</li>
+        </ul>
+      </li>
+      <li><strong>Audit surfacing:</strong> simple admin UI table for log review.</li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>15–16</td>
+  <td>Sep 15 – Sep 28, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>Benchmarking Layer:</strong>
+        <ul class="subtask-list">
+          <li>Create Synapse pipeline – copy <code>OpGLFact</code> nightly to DW.</li>
+          <li>DAX measures: Gross Margin %, Opex per Mile, EBITDA margin.</li>
+          <li>Row‑level security role filters by <code>OperationID</code>.</li>
+        </ul>
+      </li>
+      <li><strong>Reports UI &amp; Export:</strong>
+        <ul class="subtask-list">
+          <li>Embed Power BI dashboard w/ token auth.</li>
+          <li>Custom React chart fallback (Recharts) for viewers w/o BI license.</li>
+          <li>Generate PDF via puppeteer – branded header/footer.</li>
+          <li>Excel export with <code>exceljs</code>; number formatting &amp; formulas.</li>
+        </ul>
+      </li>
+      <li><strong>KPI Dictionary page</strong> in Docs → auto‑publish to GitHub Pages.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td>17–18</td>
+  <td>Sep 29 – Oct 12, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>CI/CD Hardening:</strong>
+        <ul class="subtask-list">
+          <li>Matrix test (Node 18 &amp; 20) + Web Vitals budget in pipeline.</li>
+          <li>Blue/Green slot swap for Functions; 5‑min baked‑in smoke tests.</li>
+          <li>Static code analysis via SonarCloud; quality‑gate ≥ B.</li>
+          <li>OpenAPI contract tests with Dredd.</li>
+        </ul>
+      </li>
+      <li><strong>System‑wide Integration Tests:</strong>
+        <ul class="subtask-list">
+          <li>Dockerised MSSQL + Azurite in GitHub Actions.</li>
+          <li>Run Cypress in headless Chrome + Edge.</li>
+          <li>Publish coverage &amp; lint reports as PR annotations.</li>
+        </ul>
+      </li>
+      <li><strong>Disaster‑Recovery Script:</strong> one‑click restore from geo‑replica to test slot.</li>
+    </ul>
+  </td>
+</tr>
+
+<tr>
+  <td>19–21</td>
+  <td>Oct 13 – Nov 9, 2025</td>
+  <td>
+    <ul class="task-list">
+      <li><strong>Load &amp; Chaos Testing:</strong>
+        <ul class="subtask-list">
+          <li>JMeter – 1 million GL lines (5 parallel uploads) &lt; 10 min ingest.</li>
+          <li>Gremlin: kill Function instance; verify Durable resume.</li>
+          <li>SQL DTU spike throttle test; auto‑scale to Hyperscale tier.</li>
+        </ul>
+      </li>
+      <li><strong>UAT &amp; Go‑Live Prep:</strong>
+        <ul class="subtask-list">
+          <li>Stakeholder walkthrough; gather sign‑offs for Freight, Retail clients.</li>
+          <li>Update onboarding docs + Loom videos.</li>
+          <li>Freeze non‑critical PRs (code‑freeze – Oct 31).</li>
+        </ul>
+      </li>
+      <li><strong>Operational Readiness:</strong>
+        <ul class="subtask-list">
+          <li>24×7 alert rota, runbook links in PagerDuty.</li>
+          <li>Knowledge‑transfer sessions with Support team.</li>
+        </ul>
+      </li>
+    </ul>
+  </td>
+</tr>
+<tr>
+<td>22–23</td>
+<td>Nov 10 – Nov 23, 2025</td>
+<td>
+<ul class="task-list">
+<li><strong>Final Adjustments &amp; Production Deployment:</strong>
+<ul class="subtask-list">
+<li>Merge changes from <code>main</code> to <code>release</code> branch; resolve conflicts.</li>
+<li>Trigger GitHub Actions release workflow; await manual approval for production.</li>
+<li>Smoke test production deployment:
+                      <ul class="subtask-list">
+<li>Perform sanity checks: login, upload small GL, generate mapping suggestions, finalize, view benchmarks.</li>
+<li>Check Application Insights for any errors or performance anomalies.</li>
+</ul>
+</li>
+<li>Set up Alert Rules in Azure Monitor:
+                      <ul class="subtask-list">
+<li>Function failures (status code ≥ 500): email + Teams alert.</li>
+<li>High SQL DTU usage (&gt; 70%): notify DB admin.</li>
+<li>Unusual spikes in OpenAI API errors: notify dev team.</li>
+</ul>
+</li>
+<li>Conduct Production Readiness Review with stakeholders (security, compliance, performance).</li>
+</ul>
+</li>
+<li><strong>Project Retrospective &amp; Documentation Finalization:</strong>
+<ul class="subtask-list">
+<li>Hold retrospective meeting with dev team:
+                      <ul class="subtask-list">
+<li>What went well, what could improve, lessons learned.</li>
+<li>Create action items for post-MVP enhancements (e.g., multi-currency support, additional AI logic).</li>
+</ul>
+</li>
+<li>Update this Run Book with final production details:
+                      <ul class="subtask-list">
+<li>Production connection strings, resource URIs, DNS records.</li>
+<li>Final user documentation and training guides.</li>
+<li>Maintenance plan: patch schedule, backup/restoration procedures.</li>
+</ul>
+</li>
+<li>Archive code branches, tag release in Git with version <code>v1.0.0</code>.</li>
+</ul>
+</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+<h2 id="codex">13 · Codex Workflow &amp; Repo Docs</h2>
+<h3>13.1 House Rules</h3>
+<ul>
+<li><strong>Authoritative source:</strong> treat this runbook as ground truth. If a user request conflicts, ask for clarification before coding.</li>
+<li><strong>Additive changes:</strong> default to additive PRs that keep existing functionality intact unless the ticket explicitly requests deletion/refactor.</li>
+<li><strong>Migration safety:</strong> all DB migrations must be idempotent and backward‑compatible until the schema version is bumped in <code>db/meta</code>.</li>
+<li><strong>Testing gate:</strong> PRs must pass <code>npm test</code> (front‑end) and <code>pytest</code> (Azure Functions) with ≥ 80 % coverage. CI fails otherwise.</li>
+<li><strong>PR hygiene:</strong> one logical feature per PR, conventional‑commit style titles (<code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>refactor:</code> …).</li>
+</ul>
+<h3>13.2 AGENTS.md Auto‑Refresh Prompt</h3>
+<p>Copy &amp; paste the block below into a Codex chat. It will scan the repo and either create or update an <code>AGENTS.md</code> in every top‑level folder.</p>
+<pre><code>You are Codex acting as a repository doc bot.
+====================  TASK ====================
+For every top‑level folder under /src and /azure:
+1.  Open the existing AGENTS.md or create a new one.
+2.  Populate it using the template below.
+3.  Commit all changes in a single PR titled **docs: refresh agents overview**.
+4.  Do NOT modify application logic or non‑documentation files.
+
+==================  TEMPLATE  ==================
+# &lt;Folder Name&gt;
+
+**Purpose**  
+One‑line description of what lives here.
+
+## Key Exports
+| Name | Type | Description |
+|------|------|-------------|
+| &lt;export1&gt; | function / component | What it does |
+| … | … | … |
+
+## Runbook Cross‑References
+§3 System Architecture, §4 Ingestion, §8 UX (edit as relevant)
+
+## TODO (owner: @unassigned)
+1. Meaningful doc‑only tasks or tech‑debt (max 5)
+2. …
+================================================</code></pre>
+<p><em>After Codex runs, each folder will have a quick‑start summary that future agents (or humans) can read before editing code.</em></p>
+<hr/>
+<footer><p style="font-size:.8rem;color:#555">© 2025 KSM – MapLedger Team   Last updated: 23 Jun 2025</p></footer>
+</div>
+</body>
+</html>

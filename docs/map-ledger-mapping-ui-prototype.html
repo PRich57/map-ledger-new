@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Map Ledger – Mapping UI Prototype</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <style>
+    /* THEME TOKENS */
+    :root{
+      --bg:#f6f7fb; --panel:#ffffff; --muted:#5b6473; --text:#0b1020; --accent:#1d4ed8;
+      --accent-2:#15803d; --warn:#b45309; --danger:#b91c1c; --line:#e6e8ef; --soft:#f0f2f8;
+      --th:#f7f8fc;
+      --chip-fg:#0b1020; --chip-bd:#e6e8ef;
+      --new-bg:#fff9db; --new-fg:#92400e;
+      --unmapped-bg:#ffe4e6; --unmapped-fg:#9f1239;
+      --mapped-bg:#dcfce7; --mapped-fg:#065f46;
+      --excluded-bg:#fee2e2; --excluded-fg:#991b1b;
+    }
+    [data-theme="dark"]{
+      --bg:#0b1020; --panel:#141a2e; --muted:#667084; --text:#eef2ff; --accent:#2563eb;
+      --accent-2:#16a34a; --warn:#b45309; --danger:#b91c1c; --line:#232a41; --soft:#0f1528;
+      --th:#0f1528;
+      --chip-fg:#e5e7eb; --chip-bd:#2a3352;
+      --new-bg:#1b243b; --new-fg:#fef08a;
+      --unmapped-bg:#2a1b2a; --unmapped-fg:#fca5a5;
+      --mapped-bg:#142a1b; --mapped-fg:#86efac;
+      --excluded-bg:#2a1b1b; --excluded-fg:#f87171;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    a{color:var(--accent)}
+    .topbar{display:flex;gap:12px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+    .badge{background:var(--soft);border:1px solid var(--line);padding:3px 8px;border-radius:8px;color:var(--muted);font-size:12px}
+    .select, .input, .button{background:var(--soft);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px}
+    .button{cursor:pointer}
+    .button.primary{background:linear-gradient(180deg,var(--accent),#123a9c);border:none;color:white}
+    .button.ghost{background:transparent;border:1px dashed var(--line)}
+    .button.warn{background:var(--warn);border:none;color:white}
+    .tabs{display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:58px;z-index:4}
+    .tab{padding:8px 12px;border-radius:8px;border:1px solid var(--line);cursor:pointer;color:var(--muted);background:var(--panel)}
+    .tab.active{background:var(--soft);color:var(--text)}
+    .wrap{padding:18px}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+    .pill{padding:6px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);display:inline-flex;gap:6px;align-items:center;background:var(--panel)}
+    .grid{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel)}
+    .grid-scroll{max-height:60vh;overflow:auto}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    th, td{padding:10px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle;background:var(--panel)}
+    th{position:sticky;top:0;z-index:3;text-align:left;color:var(--text);background:var(--th);}
+    tr:hover td{background:rgba(0,0,0,0.03)}
+    [data-theme="dark"] tr:hover td{background:rgba(255,255,255,0.03)}
+    .status{font-size:12px;padding:3px 8px;border-radius:14px;border:1px solid var(--chip-bd);display:inline-block}
+    .status.new{background:var(--new-bg);color:var(--new-fg)}
+    .status.unmapped{background:var(--unmapped-bg);color:var(--unmapped-fg)}
+    .status.mapped{background:var(--mapped-bg);color:var(--mapped-fg)}
+    .status.excluded{background:var(--excluded-bg);color:var(--excluded-fg)}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:12px 0}
+    .card{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--panel)}
+    .right{margin-left:auto}
+    .kpi{font-size:20px;margin-top:6px}
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:50}
+    .modal.open{display:flex}
+    .modal-card{width:min(900px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .hint{color:var(--muted);font-size:12px}
+    .footer{border-top:1px solid var(--line);padding:12px;display:flex;gap:10px;justify-content:flex-end;margin-top:14px;background:var(--panel)}
+    .tree ul{list-style:none;margin:0;padding-left:16px}
+    .tree li{margin:4px 0}
+    .mono{font-family:ui-monospace,"SFMono-Regular",Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:12px}
+    .small{font-size:12px;color:var(--muted)}
+    .th-sort{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+    .th-sort .dir{opacity:.7}
+    .theme-toggle{display:flex;align-items:center;gap:8px;margin-left:auto}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React + Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    // --- Sample Data (expanded) ---
+    const OPS = ["OTR", "Dedicated", "Brokerage", "Leasing"];
+    const SCOA = [
+      { id: "tractor_fixed", name: "Tractor Fixed" },
+      { id: "trailer_fixed", name: "Trailer Fixed" },
+      { id: "payroll_wages_drivers", name: "Driver Wages" },
+      { id: "payroll_taxes", name: "Payroll Taxes" },
+      { id: "shop_overhead", name: "Shop Overhead" },
+      { id: "insurance", name: "Insurance" },
+      { id: "brokerage_cogs", name: "Brokerage COGS" },
+      { id: "fuel", name: "Fuel" }
+    ];
+    const PRESETS = [
+      { id:"equipment_85_15", name:"Equipment 85/15 (Tractor/Trailer)", splits:[["tractor_fixed",0.85],["trailer_fixed",0.15]] },
+      { id:"workers_comp_95_5", name:"Workers Comp 95/5 (Drivers/Other)", splits:[["payroll_wages_drivers",0.95],["shop_overhead",0.05]] },
+    ];
+
+    // Polarity options
+    const POLARITY = ["debit","credit","absolute"];
+
+    const initialRows = [
+      // Averitt Leasing (mixed statuses)
+      { id:1, company:"Averitt Leasing", acctId:"5200-000", desc:"Equipment Lease Expense", activity:150000, status:"unmapped", target:"", type:"percentage", preset:"equipment_85_15", confidence:0.82, notes:"", polarity:"debit" },
+      { id:2, company:"Averitt Leasing", acctId:"5210-000", desc:"Trailer Lease Expense", activity:22500, status:"new", target:"trailer_fixed", type:"direct", preset:"", confidence:0.61, notes:"From vendor XYZ", polarity:"debit" },
+      { id:3, company:"Averitt Leasing", acctId:"5220-000", desc:"Insurance - Physical Damage", activity:87000, status:"mapped", target:"insurance", type:"direct", preset:"", confidence:0.9, notes:"Renewal 2025", polarity:"debit" },
+      // Averitt Logistics
+      { id:4, company:"Averitt Logistics", acctId:"6100-100", desc:"Driver Wages", activity:980000, status:"mapped", target:"payroll_wages_drivers", type:"dynamic", preset:"", confidence:0.93, notes:"Basis=driver_wages_group_sum", polarity:"debit" },
+      { id:5, company:"Averitt Logistics", acctId:"6110-000", desc:"Payroll Taxes", activity:188000, status:"unmapped", target:"", type:"dynamic", preset:"", confidence:0.74, notes:"", polarity:"debit" },
+      { id:6, company:"Averitt Logistics", acctId:"6990-900", desc:"Misc - Ignore", activity:50000, status:"excluded", target:"", type:"exclude", preset:"", confidence:1.0, notes:"Non-operating", polarity:"absolute" },
+      // Brokerage Co
+      { id:7, company:"Averitt Brokerage", acctId:"7000-100", desc:"Purchased Transportation", activity:435000, status:"mapped", target:"brokerage_cogs", type:"direct", preset:"", confidence:0.88, notes:"COGS passthrough", polarity:"debit" },
+      { id:8, company:"Averitt Brokerage", acctId:"7010-200", desc:"Brokerage Fees", activity:120000, status:"unmapped", target:"", type:"direct", preset:"", confidence:0.55, notes:"", polarity:"credit" },
+      // Fleet Ops
+      { id:9, company:"Averitt Fleet Ops", acctId:"5300-000", desc:"Fuel Expense", activity:1250000, status:"mapped", target:"fuel", type:"dynamic", preset:"", confidence:0.91, notes:"Basis=Miles", polarity:"debit" },
+      { id:10, company:"Averitt Fleet Ops", acctId:"5200-200", desc:"Equipment Lease Expense (Term B)", activity:127500, status:"unmapped", target:"", type:"percentage", preset:"equipment_85_15", confidence:0.79, notes:"Similar to 5200-000", polarity:"debit" },
+      // New items for coverage
+      { id:11, company:"Averitt Logistics", acctId:"6120-300", desc:"Worker's Compensation", activity:65000, status:"new", target:"shop_overhead", type:"percentage", preset:"workers_comp_95_5", confidence:0.64, notes:"Review preset", polarity:"debit" },
+      { id:12, company:"Averitt Leasing", acctId:"5400-000", desc:"Gain/Loss on Sale", activity:-35000, status:"unmapped", target:"", type:"direct", preset:"", confidence:0.4, notes:"Check polarity", polarity:"credit" }
+    ];
+
+    // --- Utility ---
+    const classNames = (...xs) => xs.filter(Boolean).join(" ");
+    const SORTS = {
+      company: {label: "Company", fn: (a,b)=> a.company.localeCompare(b.company)},
+      acctId: {label: "Account ID", fn: (a,b)=> a.acctId.localeCompare(b.acctId)},
+      desc: {label: "Description", fn: (a,b)=> a.desc.localeCompare(b.desc)},
+      activity: {label: "Activity", fn: (a,b)=> a.activity - b.activity},
+      status: {label: "Status", fn: (a,b)=> a.status.localeCompare(b.status)},
+      target: {label: "Target SCoA", fn: (a,b)=> (a.target||"").localeCompare(b.target||"")},
+      type: {label: "Type", fn: (a,b)=> a.type.localeCompare(b.type)},
+      confidence: {label: "Confidence", fn: (a,b)=> a.confidence - b.confidence},
+      polarity: {label: "Polarity", fn: (a,b)=> (a.polarity||"").localeCompare(b.polarity||"")},
+    };
+
+    // Theme helpers (default to light now)
+    function getStoredTheme(){ try{ return localStorage.getItem("theme") || "light"; }catch(e){ return "light"; } }
+    function setStoredTheme(t){ try{ localStorage.setItem("theme", t); }catch(e){} }
+
+    // --- Components ---
+    function TopBar({period, setPeriod, theme, setTheme}){
+      return (
+        <div className="topbar">
+          <span className="badge">Client: Demo Co</span>
+          <input className="input" type="month" value={period} onChange={e=>setPeriod(e.target.value)}/>
+          <span className="badge">Ops: OTR, Dedicated, Brokerage, Leasing</span>
+          <div className="theme-toggle">
+            <span className="small">Theme</span>
+            <select className="select" value={theme} onChange={(e)=>setTheme(e.target.value)} aria-label="Theme">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+      );
+    }
+
+    function Tabs({tab,setTab}){
+      return (
+        <div className="tabs">
+          {["Mapping","Distribution","Review"].map(t=>(
+            <div key={t} className={classNames("tab", tab===t && "active")} onClick={()=>setTab(t)} role="button" tabIndex={0}>{t}</div>
+          ))}
+        </div>
+      );
+    }
+
+    function Toolbar({q,setQ, filters,setFilters, onBatchMap, onBatchExclude, onBatchPreset}){
+      const toggle = (f)=> setFilters({...filters,[f]:!filters[f]});
+      return (
+        <div className="toolbar">
+          <input className="input" placeholder="Search (account:, desc:, scoa:, company:)" value={q} onChange={e=>setQ(e.target.value)}/>
+          <div className="pill"><input type="checkbox" checked={filters.new||false} onChange={()=>toggle("new")}/> New</div>
+          <div className="pill"><input type="checkbox" checked={filters.unmapped||false} onChange={()=>toggle("unmapped")}/> Unmapped</div>
+          <div className="pill"><input type="checkbox" checked={filters.mapped||false} onChange={()=>toggle("mapped")}/> Mapped</div>
+          <div className="pill"><input type="checkbox" checked={filters.excluded||false} onChange={()=>toggle("excluded")}/> Excluded</div>
+          <button className="button" onClick={onBatchMap}>Batch Map</button>
+          <button className="button" onClick={onBatchPreset}>Apply Preset</button>
+          <button className="button" onClick={onBatchExclude}>Batch Exclude</button>
+          <span className="hint">⌘/Ctrl-K to focus search</span>
+        </div>
+      );
+    }
+
+    function SortHeader({id,label,sort,setSort}){
+      const dir = sort.id===id ? sort.dir : null;
+      const arrow = dir==="asc" ? "▲" : dir==="desc" ? "▼" : "◇";
+      return (
+        <div className="th-sort" onClick={()=>{
+          if(sort.id!==id) setSort({id, dir:"asc"});
+          else setSort({id, dir: sort.dir==="asc" ? "desc" : "asc"});
+        }} title={`Sort by ${label}`}>
+          <span>{label}</span><span className="dir">{arrow}</span>
+        </div>
+      );
+    }
+
+    function MappingGrid({rows,setRows, selected,setSelected, sort,setSort}){
+      const allSelected = selected.size && selected.size===rows.length;
+      const toggleAll = ()=>{
+        if(allSelected) setSelected(new Set());
+        else setSelected(new Set(rows.map(r=>r.id)));
+      };
+      const setRow = (id, patch)=> setRows(rows.map(r=> r.id===id? {...r, ...patch} : r));
+      return (
+        <div className="grid">
+          <div className="grid-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{width:36}}><input type="checkbox" checked={!!allSelected} onChange={toggleAll} aria-label="Select all"/></th>
+                  <th><SortHeader id="company" label="Company" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="acctId" label="Account ID" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="desc" label="Description" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="activity" label="Activity" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="status" label="Status" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="target" label="Target SCoA" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="type" label="Type" sort={sort} setSort={setSort}/></th>
+                  <th><SortHeader id="polarity" label="Polarity" sort={sort} setSort={setSort}/></th>
+                  <th>Preset</th>
+                  <th><SortHeader id="confidence" label="Confidence" sort={sort} setSort={setSort}/></th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r=> (
+                  <tr key={r.id}>
+                    <td><input type="checkbox" checked={selected.has(r.id)} onChange={(e)=>{
+                      const s=new Set(selected); e.target.checked? s.add(r.id):s.delete(r.id); setSelected(s);
+                    }}/></td>
+                    <td>{r.company}</td>
+                    <td className="mono">{r.acctId}</td>
+                    <td>{r.desc}</td>
+                    <td className="mono">${r.activity.toLocaleString()}</td>
+                    <td><span className={classNames("status", r.status)}>{r.status}</span></td>
+                    <td>
+                      <select className="select" value={r.target} onChange={e=>setRow(r.id,{target:e.target.value, status:e.target.value? "mapped": r.status})}>
+                        <option value="">—</option>
+                        {SCOA.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select className="select" value={r.type} onChange={e=>setRow(r.id,{type:e.target.value})}>
+                        <option value="direct">Direct</option>
+                        <option value="percentage">Percentage</option>
+                        <option value="dynamic">Dynamic</option>
+                        <option value="exclude">Exclude</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select className="select" value={r.polarity} onChange={e=>setRow(r.id,{polarity:e.target.value})}>
+                        {POLARITY.map(p=><option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select className="select" value={r.preset} onChange={e=>setRow(r.id,{preset:e.target.value, type:"percentage"})}>
+                        <option value="">—</option>
+                        {PRESETS.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </td>
+                    <td className="mono">{Math.round(r.confidence*100)}%</td>
+                    <td><input className="input" value={r.notes} onChange={e=>setRow(r.id,{notes:e.target.value})}/></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    function DistributionPane(){
+      return (
+        <div className="cols">
+          <div className="card">
+            <h3>FM SCoA</h3>
+            <div className="tree">
+              <ul>
+                <li>Equipment
+                  <ul>
+                    <li>Tractor Fixed</li>
+                    <li>Trailer Fixed</li>
+                  </ul>
+                </li>
+                <li>Payroll
+                  <ul>
+                    <li>Driver Wages</li>
+                    <li>Payroll Taxes</li>
+                  </ul>
+                </li>
+                <li>Overhead
+                  <ul><li>Shop Overhead</li><li>Insurance</li></ul>
+                </li>
+              </ul>
+            </div>
+            <p className="small">Select an SCoA line to define allocations.</p>
+          </div>
+          <div className="card">
+            <h3>Allocation Editor</h3>
+            <div className="cols">
+              <div>
+                <label>Allocation Type</label>
+                <select className="select" style={{width:"100%"}}>
+                  <option>Direct</option>
+                  <option>Percentage</option>
+                  <option>Dynamic</option>
+                </select>
+              </div>
+              <div>
+                <label>Preset</label>
+                <select className="select" style={{width:"100%"}}>
+                  <option>—</option>
+                  {PRESETS.map(p=><option key={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{marginTop:10}}>
+              <label>Dynamic Basis</label>
+              <select className="select" style={{width:"100%"}}>
+                <option>Loads</option>
+                <option>Miles</option>
+                <option>Revenue</option>
+                <option>Tractor Count</option>
+                <option>Trailer Count</option>
+                <option>Driver Count</option>
+                <option>Shop Hours</option>
+              </select>
+            </div>
+            <div className="cards" style={{marginTop:10}}>
+              {["OTR","Dedicated","Brokerage","Leasing"].map(op => (
+                <div className="card" key={op}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <strong>{op}</strong><span className="mono">Weight: <input className="input" type="number" min="0" max="100" defaultValue="25" style={{width:72}}/>%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="footer">
+              <button className="button">Preview</button>
+              <button className="button primary">Save Allocation</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function ReviewPane(){
+      return (
+        <div>
+          <div className="cards">
+            <div className="card">
+              <div>Company Net</div>
+              <div className="kpi">$12,295,678</div>
+              <div className="small">Excludes $50,000 marked Exclusions</div>
+            </div>
+            <div className="card">
+              <div>Operations Total</div>
+              <div className="kpi">$12,295,678</div>
+              <div className="small">Reconciles with Company Net</div>
+            </div>
+            <div className="card">
+              <div>Warnings</div>
+              <ul className="small">
+                <li>2 new accounts require mapping</li>
+                <li>Driver Wages allocation basis missing survey inputs (2 terminals)</li>
+              </ul>
+            </div>
+          </div>
+          <div className="card">
+            <h3>Publish Log</h3>
+            <div className="mono small">2025-10-24 14:33 — @chenry published Sep 2025 (Δ mapped 12, excluded 1)</div>
+          </div>
+          <div className="footer">
+            <button className="button warn">Run Checks</button>
+            <button className="button primary">Publish</button>
+          </div>
+        </div>
+      );
+    }
+
+    function BatchMapModal({open,onClose, onApply}){
+      const [target,setTarget] = useState("");
+      const [type,setType] = useState("direct");
+      const [preset,setPreset] = useState("");
+      const [polarity,setPolarity] = useState("debit");
+      return (
+        <div className={open ? "modal open":"modal"}>
+          <div className="modal-card">
+            <h3>Batch Map</h3>
+            <div className="cols">
+              <div>
+                <label>Target SCoA</label>
+                <select className="select" style={{width:"100%"}} value={target} onChange={e=>setTarget(e.target.value)}>
+                  <option value="">—</option>
+                  {SCOA.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label>Mapping Type</label>
+                <select className="select" style={{width:"100%"}} value={type} onChange={e=>setType(e.target.value)}>
+                  <option value="direct">Direct</option>
+                  <option value="percentage">Percentage</option>
+                  <option value="dynamic">Dynamic</option>
+                  <option value="exclude">Exclude</option>
+                </select>
+              </div>
+              <div>
+                <label>Preset (optional)</label>
+                <select className="select" style={{width:"100%"}} value={preset} onChange={e=>setPreset(e.target.value)}>
+                  <option value="">—</option>
+                  {PRESETS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label>Polarity</label>
+                <select className="select" style={{width:"100%"}} value={polarity} onChange={e=>setPolarity(e.target.value)}>
+                  {["debit","credit","absolute"].map(p=><option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="footer">
+              <button className="button" onClick={onClose}>Cancel</button>
+              <button className="button primary" onClick={()=>onApply({target,type,preset,polarity})}>Apply</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PresetModal({open,onClose, onApply}){
+      const [preset,setPreset] = useState("equipment_85_15");
+      return (
+        <div className={open ? "modal open":"modal"}>
+          <div className="modal-card">
+            <h3>Apply Preset</h3>
+            <select className="select" style={{width:"100%"}} value={preset} onChange={e=>setPreset(e.target.value)}>
+              {PRESETS.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <div className="footer">
+              <button className="button" onClick={onClose}>Cancel</button>
+              <button className="button primary" onClick={()=>onApply(preset)}>Apply</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App(){
+      const [period,setPeriod] = useState("2025-09");
+      const [tab,setTab] = useState("Mapping");
+      const [rows,setRows] = useState(initialRows);
+      const [q,setQ] = useState("");
+      const [filters,setFilters] = useState({});
+      const [selected,setSelected] = useState(new Set());
+      const [batchOpen,setBatchOpen] = useState(false);
+      const [presetOpen,setPresetOpen] = useState(false);
+      const [sort,setSort] = useState({id:"activity", dir:"desc"});
+      const [theme,setTheme] = useState(getStoredTheme());
+
+      useEffect(()=>{
+        document.documentElement.setAttribute("data-theme", theme);
+        setStoredTheme(theme);
+      },[theme]);
+
+      // Keyboard shortcut for search
+      useEffect(()=>{
+        const h = (e)=>{
+          if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==="k"){
+            e.preventDefault();
+            const el = document.querySelector(".toolbar .input");
+            el && el.focus();
+          }
+        };
+        window.addEventListener("keydown", h);
+        return ()=> window.removeEventListener("keydown", h);
+      },[]);
+
+      const filtered = useMemo(()=>{
+        let r = rows.slice();
+        if(q){
+          const term = q.toLowerCase();
+          r = r.filter(x=> {
+            const t = `${x.company} ${x.acctId} ${x.desc} ${x.target} ${x.type}`.toLowerCase();
+            return t.includes(term);
+          });
+        }
+        if(filters.new) r = r.filter(r=> r.status==="new");
+        if(filters.unmapped) r = r.filter(r=> r.status==="unmapped");
+        if(filters.mapped) r = r.filter(r=> r.status==="mapped");
+        if(filters.excluded) r = r.filter(r=> r.status==="excluded");
+        const s = SORTS[sort.id] || SORTS.activity;
+        r = r.slice().sort(s.fn);
+        if(sort.dir==="desc") r.reverse();
+        return r;
+      }, [rows, q, filters, sort]);
+
+      const onBatchMap = ()=>{
+        if(!selected.size){ alert("Select at least one row."); return; }
+        setBatchOpen(true);
+      };
+      const applyBatchMap = ({target,type,preset,polarity})=>{
+        setRows(rows.map(r=> selected.has(r.id) ?
+          {...r, target: target||r.target, type: type||r.type, preset: preset||r.preset, polarity: polarity||r.polarity, status: (type==="exclude") ? "excluded" : (target||r.target) ? "mapped" : r.status} : r
+        ));
+        setSelected(new Set());
+        setBatchOpen(false);
+      };
+      const onBatchExclude = ()=>{
+        if(!selected.size){ alert("Select at least one row."); return; }
+        setRows(rows.map(r=> selected.has(r.id) ? {...r, type:"exclude", status:"excluded"} : r));
+        setSelected(new Set());
+      };
+      const onBatchPreset = ()=>{
+        if(!selected.size){ alert("Select at least one row."); return; }
+        setPresetOpen(true);
+      };
+      const applyPreset = (preset)=>{
+        setRows(rows.map(r=> selected.has(r.id) ? {...r, type:"percentage", preset, status:"mapped"} : r));
+        setSelected(new Set());
+        setPresetOpen(false);
+      };
+
+      return (
+        <div>
+          <TopBar period={period} setPeriod={setPeriod} theme={theme} setTheme={setTheme}/>
+          <Tabs tab={tab} setTab={setTab}/>
+          <div className="wrap">
+            {tab==="Mapping" && (
+              <>
+                <div className="cards">
+                  <div className="card"><div>Gross</div><div className="kpi">$12,345,678</div></div>
+                  <div className="card"><div>Excluded</div><div className="kpi">$50,000</div></div>
+                  <div className="card"><div>Net</div><div className="kpi">$12,295,678</div></div>
+                </div>
+                <Toolbar q={q} setQ={setQ} filters={filters} setFilters={setFilters}
+                  onBatchMap={onBatchMap} onBatchExclude={onBatchExclude} onBatchPreset={onBatchPreset}/>
+                <MappingGrid rows={filtered} setRows={setRows} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort}/>
+              </>
+            )}
+            {tab==="Distribution" && <DistributionPane/>}
+            {tab==="Review" && <ReviewPane/>}
+          </div>
+
+          <BatchMapModal open={batchOpen} onClose={()=>setBatchOpen(false)} onApply={applyBatchMap}/>
+          <PresetModal open={presetOpen} onClose={()=>setPresetOpen(false)} onApply={applyPreset}/>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
