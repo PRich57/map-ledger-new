@@ -295,6 +295,18 @@ export interface DynamicAllocationBasisMember {
   value: number;
 }
 
+export interface DynamicAllocationGroupMember {
+  accountId: string;
+  accountName: string;
+  basisValue: number;
+  targetAccountId: string;
+  targetName: string;
+}
+
+export interface DynamicAllocationGroup extends DynamicAllocationPreset {
+  members: DynamicAllocationGroupMember[];
+}
+
 export interface DynamicAllocationTargetAudit {
   targetId: string;
   targetName: string;

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import {
   AllocationResult,
   DynamicAllocationAuditRecord,
+  DynamicAllocationGroup,
+  DynamicAllocationGroupMember,
   DynamicAllocationPreset,
   DynamicAllocationPresetRow,
   DynamicAllocationValidationIssue,
@@ -30,6 +32,47 @@ const getTargetNameById = (targetId: string): string => {
   const option = STANDARD_CHART_OF_ACCOUNTS.find(item => item.id === targetId);
   return option?.label ?? targetId;
 };
+
+const resolveTargetAccountId = (value?: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const match = STANDARD_CHART_OF_ACCOUNTS.find(
+    option => option.id === normalized || option.value === normalized,
+  );
+  return match?.id ?? normalized;
+};
+
+const buildGroupMembers = (
+  preset: DynamicAllocationPreset,
+  basisAccounts: DynamicBasisAccount[],
+  periodId?: string | null,
+): DynamicAllocationGroupMember[] =>
+  preset.rows.map(row => {
+    const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
+    const basisValue = basisAccount ? getBasisValue(basisAccount, periodId) : 0;
+    return {
+      accountId: row.dynamicAccountId,
+      accountName: basisAccount?.name ?? row.dynamicAccountId,
+      basisValue,
+      targetAccountId: row.targetAccountId,
+      targetName: getTargetNameById(row.targetAccountId),
+    };
+  });
+
+const deriveGroups = (
+  presets: DynamicAllocationPreset[],
+  basisAccounts: DynamicBasisAccount[],
+  periodId?: string | null,
+): DynamicAllocationGroup[] =>
+  presets.map(preset => ({
+    ...preset,
+    members: buildGroupMembers(preset, basisAccounts, periodId),
+  }));
 
 const normalizeAccountId = (value?: string | null): string =>
   typeof value === 'string' ? value.trim() : '';
@@ -141,6 +184,7 @@ export type RatioAllocationHydrationPayload = {
   basisAccounts?: DynamicBasisAccount[];
   sourceAccounts?: DynamicSourceAccount[];
   presets?: DynamicAllocationPreset[];
+  groups?: DynamicAllocationGroup[];
   allocations?: RatioAllocation[];
   availablePeriods?: string[];
   selectedPeriod?: string | null;
@@ -150,6 +194,7 @@ export type RatioAllocationState = {
   allocations: RatioAllocation[];
   basisAccounts: DynamicBasisAccount[];
   presets: DynamicAllocationPreset[];
+  groups: DynamicAllocationGroup[];
   sourceAccounts: DynamicSourceAccount[];
   availablePeriods: string[];
   isProcessing: boolean;
@@ -196,12 +241,18 @@ export type RatioAllocationState = {
     datapointId: string,
     presetId?: string | null,
   ) => void;
+  createGroup: (payload: {
+    label: string;
+    memberAccountIds: string[];
+    targetId?: string | null;
+  }) => void;
 };
 
 export const useRatioAllocationStore = create<RatioAllocationState>((set, get) => ({
   allocations: [],
   basisAccounts: [],
   presets: [],
+  groups: [],
   sourceAccounts: [],
   availablePeriods: [],
   isProcessing: false,
@@ -213,7 +264,17 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
   hydrate: payload => {
     set(state => {
       const basisAccounts = payload.basisAccounts ?? state.basisAccounts;
-      const presets = (payload.presets ?? state.presets).map(preset => ({
+      const presetSource =
+        payload.presets ??
+        (payload.groups
+          ? payload.groups.map(group => ({
+              id: group.id,
+              name: group.name,
+              rows: group.rows,
+              notes: group.notes,
+            }))
+          : state.presets);
+      const presets = presetSource.map(preset => ({
         ...preset,
         name: preset.name.trim(),
         notes: typeof preset.notes === 'string' ? preset.notes : preset.notes,
@@ -226,11 +287,13 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = allocationsInput.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, basisAccounts, selectedPeriod),
       );
+      const groups = deriveGroups(presets, basisAccounts, selectedPeriod);
 
       return {
         allocations,
         basisAccounts,
         presets,
+        groups,
         sourceAccounts: payload.sourceAccounts ?? state.sourceAccounts,
         availablePeriods,
         selectedPeriod,
@@ -243,9 +306,11 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, state.presets, basisAccounts, state.selectedPeriod),
       );
+      const groups = deriveGroups(state.presets, basisAccounts, state.selectedPeriod);
       return {
         basisAccounts,
         presets: state.presets,
+        groups,
         allocations,
       };
     });
@@ -364,6 +429,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       allocations: state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, state.presets, state.basisAccounts, period),
       ),
+      groups: deriveGroups(state.presets, state.basisAccounts, period),
     }));
     get()
       .calculateAllocations(period)
@@ -667,7 +733,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
-      return { presets, allocations };
+      const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+      return { presets, groups, allocations };
     });
   },
 
@@ -687,7 +754,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
-      return { presets, allocations };
+      const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+      return { presets, groups, allocations };
     });
   },
 
@@ -720,7 +788,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
-      return { presets, allocations };
+      const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+      return { presets, groups, allocations };
     });
   },
 
@@ -766,7 +835,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
-      return { presets, allocations };
+      const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+      return { presets, groups, allocations };
     });
   },
 
@@ -785,7 +855,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
-      return { presets, allocations };
+      const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+      return { presets, groups, allocations };
     });
   },
 
@@ -888,5 +959,77 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         );
       }),
     }));
+  },
+  createGroup: ({ label, memberAccountIds, targetId }) => {
+    set(state => {
+      const name = label.trim();
+      if (!name) {
+        return state;
+      }
+
+      const uniqueMemberIds = Array.from(
+        new Set(memberAccountIds.filter(id => typeof id === 'string' && id.trim().length > 0)),
+      );
+      const resolvedTargetId = resolveTargetAccountId(targetId);
+
+      const presetRows = uniqueMemberIds
+        .map(memberId => {
+          const basisAccount = state.basisAccounts.find(account => account.id === memberId);
+          if (!basisAccount) {
+            return null;
+          }
+          const targetAccountId =
+            resolvedTargetId ??
+            resolveTargetAccountId(basisAccount.mappedTargetId) ??
+            basisAccount.mappedTargetId;
+          if (!targetAccountId) {
+            return null;
+          }
+          return {
+            dynamicAccountId: basisAccount.id,
+            targetAccountId,
+          };
+        })
+        .filter((row): row is DynamicAllocationPresetRow => Boolean(row));
+
+      const sanitizedRows = sanitizePresetRows(presetRows);
+
+      const preset: DynamicAllocationPreset = {
+        id: createId(),
+        name,
+        rows: sanitizedRows,
+      };
+
+      const presets = [...state.presets, preset];
+      let groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
+
+      if (sanitizedRows.length === 0 && uniqueMemberIds.length > 0) {
+        const fallbackMembers = uniqueMemberIds
+          .map(memberId => state.sourceAccounts.find(account => account.id === memberId))
+          .filter((account): account is DynamicSourceAccount => Boolean(account))
+          .map(account => {
+            const fallbackTargetId = resolvedTargetId ?? account.id;
+            return {
+              accountId: account.id,
+              accountName: account.name,
+              basisValue: Math.abs(account.value ?? 0),
+              targetAccountId: fallbackTargetId,
+              targetName: getTargetNameById(fallbackTargetId),
+            };
+          });
+
+        groups = groups.map(group =>
+          group.id === preset.id && fallbackMembers.length > 0
+            ? { ...group, members: fallbackMembers }
+            : group,
+        );
+      }
+
+      const allocations = state.allocations.map(allocation =>
+        synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
+      );
+
+      return { presets, groups, allocations };
+    });
   },
 }));
