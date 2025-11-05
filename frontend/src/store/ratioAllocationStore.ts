@@ -246,6 +246,8 @@ export type RatioAllocationState = {
     memberAccountIds: string[];
     targetId?: string | null;
   }) => void;
+  getActivePresetForSource: (sourceAccountId: string) => DynamicAllocationPreset | null;
+  setActivePresetForSource: (sourceAccountId: string, presetId: string | null) => void;
 };
 
 export const useRatioAllocationStore = create<RatioAllocationState>((set, get) => ({
@@ -1031,5 +1033,44 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
 
       return { presets, groups, allocations };
     });
+  },
+  getActivePresetForSource: (sourceAccountId: string) => {
+    const { allocations, presets } = get();
+    const allocation = allocations.find(alloc => alloc.sourceAccount.id === sourceAccountId);
+    if (!allocation || allocation.targetDatapoints.length === 0) {
+      return null;
+    }
+    // Get the first preset that has targets in this allocation
+    const presetId = allocation.targetDatapoints.find(t => t.groupId)?.groupId;
+    if (!presetId) {
+      return null;
+    }
+    return presets.find(p => p.id === presetId) ?? null;
+  },
+  setActivePresetForSource: (sourceAccountId: string, presetId: string | null) => {
+    const allocation = get().getOrCreateAllocation(sourceAccountId);
+
+    if (!presetId) {
+      // Clear all preset targets
+      get().updateAllocation(allocation.id, {
+        targetDatapoints: allocation.targetDatapoints.filter(t => !t.groupId),
+      });
+      return;
+    }
+
+    // Remove any existing preset targets and add the new preset
+    const nonPresetTargets = allocation.targetDatapoints.filter(t => !t.groupId);
+
+    // Toggle to remove old preset if any, then toggle to add new preset
+    const existingPresetId = allocation.targetDatapoints.find(t => t.groupId)?.groupId;
+    if (existingPresetId && existingPresetId !== presetId) {
+      get().toggleAllocationPresetTargets(allocation.id, existingPresetId);
+    }
+
+    // Add the new preset if not already added
+    const hasNewPreset = allocation.targetDatapoints.some(t => t.groupId === presetId);
+    if (!hasNewPreset) {
+      get().toggleAllocationPresetTargets(allocation.id, presetId);
+    }
   },
 }));

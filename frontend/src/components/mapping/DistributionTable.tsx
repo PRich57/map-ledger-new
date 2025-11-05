@@ -3,6 +3,7 @@ import { Search, Settings2, X } from 'lucide-react';
 import { PRESET_OPTIONS } from './presets';
 import RatioAllocationManager from './RatioAllocationManager';
 import { useDistributionStore } from '../../store/distributionStore';
+import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import type { DistributionOperationShare, DistributionRow, DistributionType, MappingStatus } from '../../types';
 
 interface DistributionTableProps {
@@ -86,6 +87,10 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [operationsDraft, setOperationsDraft] = useState<DistributionOperationShare[]>([]);
   const [activeDynamicAccountId, setActiveDynamicAccountId] = useState<string | null>(null);
+
+  const { getActivePresetForSource } = useRatioAllocationStore(state => ({
+    getActivePresetForSource: state.getActivePresetForSource,
+  }));
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = searchTerm.trim().toLowerCase();
@@ -271,6 +276,20 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                     <td className="px-4 py-3">
                       <div className="space-y-2">
                         <div className="text-slate-700 dark:text-slate-200">{formatOperations(row)}</div>
+                        {row.type === 'dynamic' && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            {(() => {
+                              const activePreset = getActivePresetForSource(row.accountId);
+                              return activePreset ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
+                                  Preset: {activePreset.name}
+                                </span>
+                              ) : (
+                                <span className="text-amber-600 dark:text-amber-400">No preset selected</span>
+                              );
+                            })()}
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleOpenOperations(row)}
@@ -425,7 +444,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                               </div>
                               {row.type === 'dynamic' && (
                                 <p className="text-xs text-slate-600 dark:text-slate-300">
-                                  Dynamic allocations distribute amounts according to operational metrics. Use the builder to configure ratio weights.
+                                  Dynamic allocations distribute amounts according to preset configurations. Use the builder to configure ratio weights.
                                 </p>
                               )}
                             </div>
@@ -451,7 +470,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                                 onClick={() => setActiveDynamicAccountId(row.accountId)}
                                 className="inline-flex items-center rounded-md border border-emerald-500 px-3 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:border-emerald-400 dark:text-emerald-300 dark:hover:bg-emerald-500/10 dark:focus-visible:ring-offset-slate-900"
                               >
-                                Open dynamic allocation builder
+                                Open preset builder
                               </button>
                             )}
                           </div>
@@ -480,16 +499,16 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Dynamic allocation builder</h3>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Preset builder</h3>
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Configure ratio-based distributions for account {activeDynamicAccountId}.
+                  Configure preset-based distributions for account {activeDynamicAccountId}.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveDynamicAccountId(null)}
                 className="rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100 dark:focus-visible:ring-offset-slate-900"
-                aria-label="Close dynamic allocation builder"
+                aria-label="Close preset builder"
               >
                 <X className="h-5 w-5" aria-hidden="true" />
               </button>

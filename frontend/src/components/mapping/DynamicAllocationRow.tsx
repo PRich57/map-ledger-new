@@ -48,6 +48,9 @@ const DynamicAllocationRow = ({
     results,
     validationErrors,
     toggleTargetExclusion,
+    presets,
+    getActivePresetForSource,
+    setActivePresetForSource,
   } = useRatioAllocationStore(state => ({
     allocations: state.allocations,
     groups: state.groups,
@@ -57,6 +60,9 @@ const DynamicAllocationRow = ({
     results: state.results,
     validationErrors: state.validationErrors,
     toggleTargetExclusion: state.toggleTargetExclusion,
+    presets: state.presets,
+    getActivePresetForSource: state.getActivePresetForSource,
+    setActivePresetForSource: state.setActivePresetForSource,
   }));
 
   const allocation = useMemo(
@@ -86,6 +92,7 @@ const DynamicAllocationRow = ({
         basisTotal: number;
         memberValues: ReturnType<typeof getGroupMembersWithValues>;
         isExclusion: boolean;
+        presetName?: string;
       }[];
     }
 
@@ -108,6 +115,7 @@ const DynamicAllocationRow = ({
         basisTotal,
         memberValues,
         isExclusion,
+        presetName: group?.name,
       };
     });
   }, [allocation, basisAccounts, groups, selectedPeriod]);
@@ -236,23 +244,43 @@ const DynamicAllocationRow = ({
         className="bg-slate-50 px-4 py-4 dark:bg-slate-800/40"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Dynamic allocation overview
+                Preset allocation overview
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Ratios are derived from operational datapoints that drive this account.
+                Ratios are derived from preset configurations that drive this account.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onOpenBuilder}
-              className="inline-flex items-center gap-2 rounded-md border border-emerald-500 px-3 py-1.5 text-xs font-medium text-emerald-600 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:border-emerald-400 dark:text-emerald-200 dark:hover:bg-emerald-500/10 dark:focus:ring-offset-slate-900"
-            >
-              <Calculator className="h-4 w-4" aria-hidden="true" />
-              Open dynamic allocation builder
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
+                <label htmlFor={`preset-select-${account.id}`} className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                  Active preset:
+                </label>
+                <select
+                  id={`preset-select-${account.id}`}
+                  value={getActivePresetForSource(account.id)?.id ?? ''}
+                  onChange={event => setActivePresetForSource(account.id, event.target.value || null)}
+                  className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="">No preset selected</option>
+                  {presets.map(preset => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenBuilder}
+                className="inline-flex items-center gap-2 rounded-md border border-emerald-500 px-3 py-1.5 text-xs font-medium text-emerald-600 shadow-sm transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:border-emerald-400 dark:text-emerald-200 dark:hover:bg-emerald-500/10 dark:focus:ring-offset-slate-900"
+              >
+                <Calculator className="h-4 w-4" aria-hidden="true" />
+                Open preset builder
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -275,26 +303,26 @@ const DynamicAllocationRow = ({
                 {basisFormatter.format(basisTotal)}
               </div>
               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {pluralize(targetSummaries.length, 'target')} · {pluralize(totalMemberCount, 'underlying datapoint')}
+                {pluralize(targetSummaries.length, 'target')} · {pluralize(totalMemberCount, 'preset account')}
               </div>
             </div>
           </div>
 
           {!allocation ? (
             <p className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-6 text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-300">
-              No dynamic ratios are configured yet. Launch the builder to choose basis datapoints and targets for this account.
+              No presets are configured yet. Launch the builder to choose presets and targets for this account.
             </p>
           ) : targetSummaries.length === 0 ? (
             <p className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-4 py-6 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-              Add datapoint groups in the builder to establish allocation ratios for this account.
+              Add presets in the builder to establish allocation ratios for this account.
             </p>
           ) : (
             <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Basis datapoints</h4>
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Preset accounts</h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Review how each datapoint contributes to the overall ratio.
+                    Review how each preset account contributes to the overall ratio.
                   </p>
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -333,7 +361,9 @@ const DynamicAllocationRow = ({
                       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <h5 className={titleClasses}>{summary.name}</h5>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">Metric: {summary.metricName}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {summary.presetName ? `Preset: ${summary.presetName}` : `Metric: ${summary.metricName}`}
+                          </p>
                           {isExclusion && (
                             <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">
                               <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -373,9 +403,9 @@ const DynamicAllocationRow = ({
                           </dd>
                         </div>
                         <div>
-                          <dt className="uppercase tracking-wide">Members</dt>
+                          <dt className="uppercase tracking-wide">Accounts</dt>
                           <dd className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-200">
-                            {pluralize(summary.memberValues.length, 'datapoint')}
+                            {pluralize(summary.memberValues.length, 'account')}
                           </dd>
                         </div>
                       </dl>
@@ -388,19 +418,33 @@ const DynamicAllocationRow = ({
                       </div>
                       {summary.memberValues.length > 0 && (
                         <ul className="divide-y divide-slate-200 overflow-hidden rounded-md border border-slate-200 bg-white text-xs text-slate-600 dark:divide-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300">
-                          {summary.memberValues.map(member => (
-                            <li
-                              key={member.accountId}
-                              className="flex items-center justify-between gap-3 px-3 py-2"
-                            >
-                              <span className="flex-1 truncate" title={member.accountName}>
-                                {member.accountName}
-                              </span>
-                              <span className={memberValueClasses}>
-                                {basisFormatter.format(member.value)}
-                              </span>
-                            </li>
-                          ))}
+                          {summary.memberValues.map((member, memberIdx) => {
+                            const group = summary.groupId ? groups.find(g => g.id === summary.groupId) : null;
+                            const groupMember = group?.members.find(gm => gm.accountId === member.accountId);
+                            return (
+                              <li
+                                key={member.accountId}
+                                className="flex flex-col gap-1 px-3 py-2"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="flex-1 truncate font-medium" title={member.accountName}>
+                                    {member.accountName}
+                                  </span>
+                                  <span className={memberValueClasses}>
+                                    {basisFormatter.format(member.value)}
+                                  </span>
+                                </div>
+                                {groupMember?.targetName && (
+                                  <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                    <span>→</span>
+                                    <span className="truncate" title={groupMember.targetName}>
+                                      Maps to: {groupMember.targetName}
+                                    </span>
+                                  </div>
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
                     </article>
@@ -478,7 +522,7 @@ const DynamicAllocationRow = ({
               </div>
             ) : (
               <p className="rounded-md border border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100">
-                Run dynamic allocation checks for {sourceAccountLabel}
+                Run preset allocation checks for {sourceAccountLabel}
                 {selectedPeriod ? ` in ${selectedPeriod}` : ''} to generate preview amounts.
               </p>
             )
