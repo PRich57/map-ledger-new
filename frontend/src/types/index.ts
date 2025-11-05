@@ -314,6 +314,7 @@ export interface DynamicAllocationTargetAudit {
   ratio: number;
   allocation: number;
   basisMembers: DynamicAllocationBasisMember[];
+  presetId?: string;
 }
 
 export interface DynamicAllocationAuditRecord {
