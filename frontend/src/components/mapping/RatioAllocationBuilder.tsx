@@ -414,7 +414,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                   ),
                                 );
                               }}
-                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                              className="w-full min-w-[12rem] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                             >
                               {dynamicOptions.length === 0 ? (
                                 <option value="">No basis accounts available</option>
@@ -445,7 +445,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                   ),
                                 );
                               }}
-                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                              className="w-full min-w-[12rem] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                             >
                               {targetOptions.length === 0 ? (
                                 <option value="">No targets available</option>
@@ -468,15 +468,15 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                           <td className="rounded-r-md border-y border-l border-r border-slate-200 bg-white px-3 py-3 align-top text-right text-sm dark:border-slate-700 dark:bg-slate-950">
                             <button
                               type="button"
+                              aria-label="Remove new preset row"
                               onClick={() =>
                                 setNewPresetRows(previous =>
                                   previous.filter((_, currentIndex) => currentIndex !== index),
                                 )
                               }
-                              className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-950"
                             >
-                              <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
-                              Remove
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
                             </button>
                           </td>
                         </tr>
@@ -666,11 +666,11 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                   <td className="px-4 py-3 text-sm">
                                     <button
                                       type="button"
+                                      aria-label="Remove preset row"
                                       onClick={() => removePresetRow(preset.id, index)}
-                                      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
                                     >
-                                      <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
-                                      Remove
+                                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                                     </button>
                                   </td>
                                 </tr>
