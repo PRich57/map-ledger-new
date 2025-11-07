@@ -1,6 +1,7 @@
-import { act } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
+import RatioAllocationBuilder from '../components/mapping/RatioAllocationBuilder';
 
 const resetStore = () => {
   useRatioAllocationStore.setState({
@@ -192,5 +193,153 @@ describe('ratioAllocationStore', () => {
 
     expect(refreshedFirst?.isExclusion).toBe(true);
     expect(refreshedSecond?.isExclusion).toBe(true);
+  });
+
+  it('rejects duplicate account selections across preset rows', () => {
+    const [first, second, third, fourth, fifth, sixth, seventh] = STANDARD_CHART_OF_ACCOUNTS;
+
+    act(() => {
+      useRatioAllocationStore.getState().createPreset({
+        name: 'No duplicates',
+        rows: [
+          { dynamicAccountId: first.id, targetAccountId: second.id },
+          { dynamicAccountId: third.id, targetAccountId: fourth.id },
+          { dynamicAccountId: first.id, targetAccountId: fifth.id },
+          { dynamicAccountId: sixth.id, targetAccountId: second.id },
+          { dynamicAccountId: second.id, targetAccountId: seventh.id },
+          { dynamicAccountId: seventh.id, targetAccountId: first.id },
+        ],
+      });
+    });
+
+    const createdPreset = useRatioAllocationStore.getState().presets[0];
+    expect(createdPreset.rows).toEqual([
+      { dynamicAccountId: first.id, targetAccountId: second.id },
+      { dynamicAccountId: third.id, targetAccountId: fourth.id },
+    ]);
+  });
+
+  it('excludes used account ids from preset availability helpers', () => {
+    const [first, second, third, fourth, fifth] = STANDARD_CHART_OF_ACCOUNTS;
+    const basisAccounts = [first, second, third, fourth, fifth].map((option, index) => ({
+      id: option.id,
+      name: `Basis ${index + 1}`,
+      description: `Basis ${index + 1}`,
+      value: (index + 1) * 100,
+      mappedTargetId: option.id,
+      valuesByPeriod: {},
+    }));
+    const preset = {
+      id: 'preset-availability',
+      name: 'Availability',
+      rows: [
+        { dynamicAccountId: first.id, targetAccountId: second.id },
+        { dynamicAccountId: third.id, targetAccountId: fourth.id },
+      ],
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        presets: [preset],
+      }));
+    });
+
+    const store = useRatioAllocationStore.getState();
+    const availableDynamics = store
+      .getPresetAvailableDynamicAccounts('preset-availability')
+      .map(account => account.id);
+    expect(availableDynamics).toEqual([fifth.id]);
+
+    const availableTargets = store
+      .getPresetAvailableTargetAccounts('preset-availability')
+      .map(option => option.id);
+    expect(availableTargets).not.toContain(first.id);
+    expect(availableTargets).not.toContain(second.id);
+    expect(availableTargets).not.toContain(third.id);
+    expect(availableTargets).not.toContain(fourth.id);
+
+    const editableDynamics = store
+      .getPresetAvailableDynamicAccounts('preset-availability', 0)
+      .map(account => account.id);
+    expect(editableDynamics).toEqual([first.id, second.id, fifth.id]);
+  });
+
+  it('hides already selected accounts in new preset builder rows', async () => {
+    const [first, second, third] = STANDARD_CHART_OF_ACCOUNTS;
+    const basisAccounts = [first, second, third].map((option, index) => ({
+      id: option.id,
+      name: `Basis ${index + 1}`,
+      description: `Basis ${index + 1}`,
+      value: (index + 1) * 100,
+      mappedTargetId: '',
+      valuesByPeriod: {},
+    }));
+    const sourceAccount = {
+      id: 'source-1',
+      name: 'Source Account',
+      number: '4000',
+      description: 'Source account',
+      value: 1000,
+      valuesByPeriod: {},
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        sourceAccounts: [sourceAccount],
+        allocations: [
+          {
+            id: 'allocation-1',
+            name: 'Allocation 1',
+            sourceAccount: {
+              id: sourceAccount.id,
+              number: sourceAccount.number,
+              description: sourceAccount.description,
+            },
+            targetDatapoints: [],
+            effectiveDate: new Date().toISOString(),
+            status: 'active' as const,
+          },
+        ],
+        presets: [],
+        availablePeriods: [],
+        selectedPeriod: null,
+      }));
+    });
+
+    render(<RatioAllocationBuilder initialSourceAccountId={sourceAccount.id} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create preset/i }));
+    });
+
+    const initialTargetSelects = await screen.findAllByLabelText(/target account/i);
+    await act(async () => {
+      fireEvent.change(initialTargetSelects[0], { target: { value: second.id } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /add row/i }));
+    });
+
+    await waitFor(() => expect(screen.getAllByLabelText(/basis datapoint/i)).toHaveLength(2));
+
+    const basisSelects = screen.getAllByLabelText(/basis datapoint/i);
+    const secondBasisSelect = basisSelects[1];
+    const basisOptions = Array.from(secondBasisSelect.querySelectorAll('option')).map(
+      option => option.value,
+    );
+    expect(basisOptions).toEqual([third.id]);
+
+    const targetSelects = screen.getAllByLabelText(/target account/i);
+    const secondTargetSelect = targetSelects[1];
+    const targetOptions = Array.from(secondTargetSelect.querySelectorAll('option')).map(
+      option => option.value,
+    );
+    expect(targetOptions).not.toContain(first.id);
+    expect(targetOptions).not.toContain(second.id);
   });
 });
