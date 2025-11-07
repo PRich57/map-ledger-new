@@ -1,4 +1,5 @@
 import type { Worksheet } from 'exceljs';
+import { extractDateFromText } from './extractDateFromText';
 
 export interface ParsedRow {
   [key: string]: string | number;
@@ -105,10 +106,14 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
     const headerExtensionRows = new Set<number>();
     const rows: ParsedRow[] = [];
 
+    // Extract date from sheet name (e.g., "Trial balance report (Aug'24)" -> "2024-08")
+    const sheetNameDate = extractDateFromText(sheet.name);
+
     const metadata: Record<string, string> = {
       entity: getCellValue(sheet, 'B1'),
       glMonth: getCellValue(sheet, 'B4'),
-      reportName: getCellValue(sheet, 'B2')
+      reportName: getCellValue(sheet, 'B2'),
+      sheetNameDate: sheetNameDate // Add extracted date from sheet name
     };
 
     sheet.eachRow((row, rowNumber) => {
