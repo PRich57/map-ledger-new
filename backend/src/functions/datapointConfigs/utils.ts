@@ -56,3 +56,17 @@ export const sanitizePayload = (
       ? (body.configuration as Record<string, unknown>)
       : null,
 });
+
+export const isNotFoundError = (error: unknown): boolean =>
+  error instanceof Error && /not\s+found/i.test(error.message);
+
+export const buildErrorResponse = (
+  message: string,
+  error: unknown
+): { message: string; details?: string } => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return { message, details: error.message };
+  }
+
+  return { message };
+};

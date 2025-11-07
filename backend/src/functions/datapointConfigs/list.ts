@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { listDatapointConfigurations } from '../../repositories/datapointConfigurationRepository';
 import { getFirstStringValue } from '../../utils/requestParsers';
+import { buildErrorResponse } from './utils';
 
 export default async function listDatapointConfigs(req: Request, res: Response) {
   try {
@@ -24,6 +25,10 @@ export default async function listDatapointConfigs(req: Request, res: Response) 
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to load datapoint configurations', error);
-    res.status(500).json({ message: 'Failed to load datapoint configurations' });
+    res
+      .status(500)
+      .json(
+        buildErrorResponse('Failed to load datapoint configurations', error)
+      );
   }
 }
