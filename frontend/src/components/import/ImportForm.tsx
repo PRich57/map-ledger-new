@@ -16,6 +16,7 @@ import {
 } from '../../utils/getClientTemplateMapping';
 import PreviewTable from './PreviewTable';
 import type { TrialBalanceRow } from '../../types';
+import { normalizeGlMonth, isValidNormalizedMonth } from '../../utils/extractDateFromText';
 
 const templateHeaders = [
   'GL ID',
@@ -26,97 +27,6 @@ const templateHeaders = [
   'User Defined 2',
   'User Defined 3',
 ];
-
-const monthNameMap: Record<string, string> = {
-  jan: '01',
-  january: '01',
-  feb: '02',
-  february: '02',
-  mar: '03',
-  march: '03',
-  apr: '04',
-  april: '04',
-  may: '05',
-  jun: '06',
-  june: '06',
-  jul: '07',
-  july: '07',
-  aug: '08',
-  august: '08',
-  sep: '09',
-  sept: '09',
-  september: '09',
-  oct: '10',
-  october: '10',
-  nov: '11',
-  november: '11',
-  dec: '12',
-  december: '12',
-};
-
-const normalizeGlMonth = (value: string): string => {
-  if (!value) return '';
-
-  const trimmed = value.trim();
-
-  const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
-  if (isoMatch) {
-    const [, year, rawMonth] = isoMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
-  }
-
-  const monthYearMatch = trimmed.match(/^(\d{1,2})[-/](\d{4})$/);
-  if (monthYearMatch) {
-    const [, rawMonth, year] = monthYearMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
-  }
-
-  const usMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (usMatch) {
-    const [, rawMonth, , year] = usMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
-  }
-
-  const compactMatch = trimmed.match(/^(\d{4})(\d{2})$/);
-  if (compactMatch) {
-    const [, year, rawMonth] = compactMatch;
-    return `${year}-${rawMonth}`;
-  }
-
-  const textMatch = trimmed.match(/^([A-Za-z]{3,9})[\s-](\d{2,4})$/);
-  if (textMatch) {
-    const [, monthName, yearPart] = textMatch;
-    const normalizedMonthName = monthName.toLowerCase();
-    const month = monthNameMap[normalizedMonthName];
-    if (month) {
-      const numericYear = parseInt(yearPart, 10);
-      if (!Number.isNaN(numericYear)) {
-        const year =
-          yearPart.length === 2
-            ? (numericYear < 50 ? 2000 + numericYear : 1900 + numericYear)
-            : numericYear;
-        return `${year}-${month}`;
-      }
-    }
-  }
-
-  const compactNamedMatch = trimmed.match(/^(\d{4})\s*M(\d{2})$/i);
-  if (compactNamedMatch) {
-    const [, year, rawMonth] = compactNamedMatch;
-    return `${year}-${rawMonth}`;
-  }
-
-  const parsed = new Date(trimmed);
-  if (!Number.isNaN(parsed.getTime())) {
-    const year = parsed.getFullYear();
-    const month = (parsed.getMonth() + 1).toString().padStart(2, '0');
-    return `${year}-${month}`;
-  }
-
-  return '';
-};
-
-const isValidNormalizedMonth = (value: string): boolean => /^\d{4}-\d{2}$/.test(value);
 
 const extractRowGlMonth = (row: ParsedRow | TrialBalanceRow): string => {
   const normalizeCandidate = (value: unknown): string => {
@@ -326,9 +236,13 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
     // Map all sheets (we'll filter by selectedSheets later)
     const mappedSheets = uploads.map((sheet) => {
+      // Try to get GL month from metadata (cell B4)
       const normalizedSheetMonth = normalizeGlMonth(
         sheet.metadata.glMonth || ''
       );
+
+      // Try to get GL month from sheet name (e.g., "Trial balance report (Aug'24)")
+      const sheetNameMonth = sheet.metadata.sheetNameDate || '';
 
       return sheet.rows
         .map((row) => {
@@ -364,9 +278,9 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               ? entityValue.toString().trim()
               : '';
 
-          // Extract GL month from row data or use sheet metadata
+          // Extract GL month with priority: row data > cell B4 > sheet name
           const detectedRowMonth = extractRowGlMonth(row);
-          const effectiveMonth = detectedRowMonth || normalizedSheetMonth;
+          const effectiveMonth = detectedRowMonth || normalizedSheetMonth || sheetNameMonth;
 
           return {
             accountId,
