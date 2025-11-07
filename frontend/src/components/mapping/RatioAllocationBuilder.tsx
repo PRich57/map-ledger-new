@@ -56,7 +56,9 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     (excludeIndex?: number) => {
       const usedIds = new Set(
         newPresetRows
-          .map((row, index) => (index === excludeIndex ? null : row.dynamicAccountId))
+          .flatMap((row, index) =>
+            index === excludeIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+          )
           .filter((value): value is string => Boolean(value)),
       );
       return basisAccounts
@@ -70,7 +72,9 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     (excludeIndex?: number) => {
       const usedIds = new Set(
         newPresetRows
-          .map((row, index) => (index === excludeIndex ? null : row.targetAccountId))
+          .flatMap((row, index) =>
+            index === excludeIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+          )
           .filter((value): value is string => Boolean(value)),
       );
       return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedIds.has(option.id))

@@ -154,8 +154,7 @@ const synchronizeAllocationTargets = (
 const sanitizePresetRows = (
   rows: DynamicAllocationPresetRow[],
 ): DynamicAllocationPresetRow[] => {
-  const seenDynamics = new Set<string>();
-  const seenTargets = new Set<string>();
+  const usedIds = new Set<string>();
   const sanitized: DynamicAllocationPresetRow[] = [];
 
   rows.forEach(row => {
@@ -164,11 +163,11 @@ const sanitizePresetRows = (
     if (!dynamicAccountId || !targetAccountId) {
       return;
     }
-    if (seenDynamics.has(dynamicAccountId) || seenTargets.has(targetAccountId)) {
+    if (usedIds.has(dynamicAccountId) || usedIds.has(targetAccountId)) {
       return;
     }
-    seenDynamics.add(dynamicAccountId);
-    seenTargets.add(targetAccountId);
+    usedIds.add(dynamicAccountId);
+    usedIds.add(targetAccountId);
     sanitized.push({ dynamicAccountId, targetAccountId });
   });
 
@@ -919,11 +918,12 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         if (!sanitizedRow) {
           return preset;
         }
-        const usedDynamics = new Set(preset.rows.map(item => item.dynamicAccountId));
-        const usedTargets = new Set(preset.rows.map(item => item.targetAccountId));
+        const usedIds = new Set(
+          preset.rows.flatMap(item => [item.dynamicAccountId, item.targetAccountId]),
+        );
         if (
-          usedDynamics.has(sanitizedRow.dynamicAccountId) ||
-          usedTargets.has(sanitizedRow.targetAccountId)
+          usedIds.has(sanitizedRow.dynamicAccountId) ||
+          usedIds.has(sanitizedRow.targetAccountId)
         ) {
           return preset;
         }
@@ -966,16 +966,15 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         if (!nextRow.dynamicAccountId || !nextRow.targetAccountId) {
           return preset;
         }
-        const duplicateDynamic = preset.rows.some(
-          (rowItem, index) => index !== rowIndex && rowItem.dynamicAccountId === nextRow.dynamicAccountId,
-        );
-        if (duplicateDynamic) {
-          return preset;
-        }
-        const duplicateTarget = preset.rows.some(
-          (rowItem, index) => index !== rowIndex && rowItem.targetAccountId === nextRow.targetAccountId,
-        );
-        if (duplicateTarget) {
+        const usedIds = new Set<string>();
+        preset.rows.forEach((rowItem, index) => {
+          if (index === rowIndex) {
+            return;
+          }
+          usedIds.add(rowItem.dynamicAccountId);
+          usedIds.add(rowItem.targetAccountId);
+        });
+        if (usedIds.has(nextRow.dynamicAccountId) || usedIds.has(nextRow.targetAccountId)) {
           return preset;
         }
         const nextRows = [...preset.rows];
@@ -1016,22 +1015,26 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     if (!preset) {
       return basisAccounts;
     }
-    const usedDynamics = new Set(
+    const usedIds = new Set(
       preset.rows
-        .map((row, index) => (index === excludeRowIndex ? null : row.dynamicAccountId))
+        .flatMap((row, index) =>
+          index === excludeRowIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+        )
         .filter((value): value is string => Boolean(value)),
     );
-    return basisAccounts.filter(account => !usedDynamics.has(account.id));
+    return basisAccounts.filter(account => !usedIds.has(account.id));
   },
 
   getPresetAvailableTargetAccounts: (presetId, excludeRowIndex) => {
     const preset = get().presets.find(item => item.id === presetId);
-    const usedTargets = new Set(
+    const usedIds = new Set(
       (preset?.rows ?? [])
-        .map((row, index) => (index === excludeRowIndex ? null : row.targetAccountId))
+        .flatMap((row, index) =>
+          index === excludeRowIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+        )
         .filter((value): value is string => Boolean(value)),
     );
-    return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedTargets.has(option.id))
+    return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedIds.has(option.id))
       .map(option => ({
         id: option.id,
         label: option.label,
