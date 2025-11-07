@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../../data/standardChartOfAccounts';
@@ -43,6 +43,11 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
   const [newPresetRows, setNewPresetRows] = useState<DynamicAllocationPresetRow[]>([]);
+
+  const newPresetBasisHeaderId = useId();
+  const newPresetTargetHeaderId = useId();
+  const newPresetAmountHeaderId = useId();
+  const newPresetActionsHeaderId = useId();
 
   const targetLabelById = useMemo(() => {
     const map = new Map<string, string>();
@@ -364,96 +369,121 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                   />
                 </label>
               </div>
-              <div className="mt-4 space-y-3">
-                {newPresetRows.map((row, index) => {
-                  const dynamicOptions = computeNewPresetDynamicOptions(index);
-                  const targetOptions = computeNewPresetTargetOptions(index);
-                  return (
-                    <div
-                      key={`new-preset-row-${index}`}
-                      className="grid gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950 md:grid-cols-12 md:items-center"
-                    >
-                      <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300 md:col-span-4">
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-2">
+                  <thead className="bg-slate-100 dark:bg-slate-800/40">
+                    <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                      <th id={newPresetBasisHeaderId} scope="col" className="px-3 py-2">
                         Basis datapoint
-                        <select
-                          value={row.dynamicAccountId}
-                          onChange={event => {
-                            const value = event.target.value;
-                            setNewPresetRows(previous =>
-                              previous.map((current, currentIndex) =>
-                                currentIndex === index
-                                  ? { ...current, dynamicAccountId: value }
-                                  : current,
-                              ),
-                            );
-                          }}
-                          className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                        >
-                          {dynamicOptions.length === 0 ? (
-                            <option value="">No basis accounts available</option>
-                          ) : (
-                            dynamicOptions.map(option => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300 md:col-span-4">
+                      </th>
+                      <th id={newPresetTargetHeaderId} scope="col" className="px-3 py-2">
                         Target account
-                        <select
-                          value={row.targetAccountId}
-                          onChange={event => {
-                            const value = event.target.value;
-                            setNewPresetRows(previous =>
-                              previous.map((current, currentIndex) =>
-                                currentIndex === index
-                                  ? { ...current, targetAccountId: value }
-                                  : current,
-                              ),
-                            );
-                          }}
-                          className="mt-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                        >
-                          {targetOptions.length === 0 ? (
-                            <option value="">No targets available</option>
-                          ) : (
-                            targetOptions.map(option => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </label>
-                      <div className="md:col-span-3">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-                          Basis amount
-                        </span>
-                        <div className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-200">
-                          {row.dynamicAccountId
-                            ? formatCurrency(resolveBasisValue(row.dynamicAccountId))
-                            : formatCurrency(0)}
-                        </div>
-                      </div>
-                      <div className="md:col-span-1 md:flex md:justify-end">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setNewPresetRows(previous =>
-                              previous.filter((_, currentIndex) => currentIndex !== index),
-                            )
-                          }
-                          className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                      </th>
+                      <th id={newPresetAmountHeaderId} scope="col" className="px-3 py-2">
+                        Basis amount
+                      </th>
+                      <th id={newPresetActionsHeaderId} scope="col" className="px-3 py-2 text-right">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {newPresetRows.map((row, index) => {
+                      const dynamicOptions = computeNewPresetDynamicOptions(index);
+                      const targetOptions = computeNewPresetTargetOptions(index);
+                      const basisSelectId = `new-preset-row-${index}-basis`;
+                      const targetSelectId = `new-preset-row-${index}-target`;
+
+                      return (
+                        <tr key={`new-preset-row-${index}`} className="rounded-md shadow-sm">
+                          <td className="rounded-l-md border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
+                            <label htmlFor={basisSelectId} className="sr-only">
+                              Basis datapoint
+                            </label>
+                            <select
+                              id={basisSelectId}
+                              aria-labelledby={newPresetBasisHeaderId}
+                              value={row.dynamicAccountId}
+                              onChange={event => {
+                                const value = event.target.value;
+                                setNewPresetRows(previous =>
+                                  previous.map((current, currentIndex) =>
+                                    currentIndex === index
+                                      ? { ...current, dynamicAccountId: value }
+                                      : current,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                            >
+                              {dynamicOptions.length === 0 ? (
+                                <option value="">No basis accounts available</option>
+                              ) : (
+                                dynamicOptions.map(option => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </td>
+                          <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
+                            <label htmlFor={targetSelectId} className="sr-only">
+                              Target account
+                            </label>
+                            <select
+                              id={targetSelectId}
+                              aria-labelledby={newPresetTargetHeaderId}
+                              value={row.targetAccountId}
+                              onChange={event => {
+                                const value = event.target.value;
+                                setNewPresetRows(previous =>
+                                  previous.map((current, currentIndex) =>
+                                    currentIndex === index
+                                      ? { ...current, targetAccountId: value }
+                                      : current,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                            >
+                              {targetOptions.length === 0 ? (
+                                <option value="">No targets available</option>
+                              ) : (
+                                targetOptions.map(option => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </td>
+                          <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
+                            <div aria-labelledby={newPresetAmountHeaderId} className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                              {row.dynamicAccountId
+                                ? formatCurrency(resolveBasisValue(row.dynamicAccountId))
+                                : formatCurrency(0)}
+                            </div>
+                          </td>
+                          <td className="rounded-r-md border-y border-l border-r border-slate-200 bg-white px-3 py-3 align-top text-right text-sm dark:border-slate-700 dark:bg-slate-950">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewPresetRows(previous =>
+                                  previous.filter((_, currentIndex) => currentIndex !== index),
+                                )
+                              }
+                              className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <button
