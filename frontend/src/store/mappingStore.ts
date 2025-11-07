@@ -460,6 +460,7 @@ interface MappingState {
   activeCompanyIds: string[];
   activePeriod: string | null;
   setSearchTerm: (term: string) => void;
+  setActivePeriod: (period: string | null) => void;
   toggleStatusFilter: (status: MappingStatus) => void;
   clearStatusFilters: () => void;
   updateTarget: (id: string, coaId: string) => void;
@@ -478,6 +479,18 @@ interface MappingState {
   applyBatchMapping: (
     ids: string[],
     updates: {
+      target?: string | null;
+      mappingType?: MappingType;
+      presetId?: string | null;
+      polarity?: MappingPolarity;
+      status?: MappingStatus;
+    }
+  ) => void;
+  applyMappingToMonths: (
+    companyId: string,
+    accountId: string,
+    months: string[] | 'all',
+    mapping: {
       target?: string | null;
       mappingType?: MappingType;
       presetId?: string | null;
@@ -508,6 +521,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   activeCompanyIds: [],
   activePeriod: null,
   setSearchTerm: term => set({ searchTerm: term }),
+  setActivePeriod: period => set({ activePeriod: period }),
   toggleStatusFilter: status =>
     set(state => {
       const exists = state.activeStatuses.includes(status);
@@ -519,28 +533,63 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   clearStatusFilters: () => set({ activeStatuses: [] }),
   updateTarget: (id, coaId) =>
     set(state => {
-      const accounts = state.accounts.map(account =>
-        account.id === id
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      // If viewing all periods, apply to all months of this account
+      // If viewing specific period, only apply to this row
+      const shouldApplyToAll = state.activePeriod === null;
+
+      const accounts = state.accounts.map(account => {
+        const isSameAccount = account.companyId === targetAccount.companyId &&
+                              account.accountId === targetAccount.accountId;
+        const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+        return shouldUpdate
           ? applyDerivedStatus({ ...account, manualCOAId: coaId || undefined })
-          : account,
-      );
+          : account;
+      });
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     }),
   updatePreset: (id, presetId) =>
     set(state => {
-      const accounts = state.accounts.map(account =>
-        account.id === id
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+
+      const accounts = state.accounts.map(account => {
+        const isSameAccount = account.companyId === targetAccount.companyId &&
+                              account.accountId === targetAccount.accountId;
+        const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+        return shouldUpdate
           ? applyDerivedStatus({ ...account, presetId: presetId || undefined })
-          : account,
-      );
+          : account;
+      });
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     }),
   updateStatus: (id, status) =>
     set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+
       const accounts = state.accounts.map(account => {
-        if (account.id !== id) {
+        const isSameAccount = account.companyId === targetAccount.companyId &&
+                              account.accountId === targetAccount.accountId;
+        const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+        if (!shouldUpdate) {
           return account;
         }
 
@@ -566,8 +615,19 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }),
   updateMappingType: (id, mappingType) =>
     set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+
       const accounts = state.accounts.map(account => {
-        if (account.id !== id) {
+        const isSameAccount = account.companyId === targetAccount.companyId &&
+                              account.accountId === targetAccount.accountId;
+        const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+        if (!shouldUpdate) {
           return account;
         }
 
@@ -595,17 +655,43 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       return { accounts };
     }),
   updatePolarity: (id, polarity) =>
-    set(state => ({
-      accounts: state.accounts.map(account =>
-        account.id === id ? { ...account, polarity } : account
-      ),
-    })),
+    set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+
+      return {
+        accounts: state.accounts.map(account => {
+          const isSameAccount = account.companyId === targetAccount.companyId &&
+                                account.accountId === targetAccount.accountId;
+          const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+          return shouldUpdate ? { ...account, polarity } : account;
+        }),
+      };
+    }),
   updateNotes: (id, notes) =>
-    set(state => ({
-      accounts: state.accounts.map(account =>
-        account.id === id ? { ...account, notes: notes || undefined } : account
-      ),
-    })),
+    set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+
+      return {
+        accounts: state.accounts.map(account => {
+          const isSameAccount = account.companyId === targetAccount.companyId &&
+                                account.accountId === targetAccount.accountId;
+          const shouldUpdate = shouldApplyToAll ? isSameAccount : account.id === id;
+
+          return shouldUpdate ? { ...account, notes: notes || undefined } : account;
+        }),
+      };
+    }),
   addSplitDefinition: id =>
     set(state => {
       const accounts = state.accounts.map(account => {
@@ -713,6 +799,85 @@ export const useMappingStore = create<MappingState>((set, get) => ({
             next.mappingType = 'direct';
           }
         } else if (updates.mappingType && updates.mappingType !== 'exclude' && next.status === 'Excluded') {
+          next.status = 'Unmapped';
+        }
+        if (next.mappingType !== 'percentage' && next.mappingType !== 'dynamic') {
+          next.splitDefinitions = [];
+          next.dynamicExclusionAmount = undefined;
+        }
+        if (next.mappingType !== 'dynamic') {
+          next.dynamicExclusionAmount = undefined;
+        }
+        return applyDerivedStatus(next);
+      });
+      updateDynamicBasisAccounts(accounts);
+      return { accounts };
+    }),
+  applyMappingToMonths: (companyId, accountId, months, mapping) =>
+    set(state => {
+      const targetIds = state.accounts
+        .filter(account => {
+          const matchesAccount = account.companyId === companyId && account.accountId === accountId;
+          if (!matchesAccount) return false;
+
+          if (months === 'all') return true;
+
+          return account.glMonth && months.includes(account.glMonth);
+        })
+        .map(account => account.id);
+
+      const accounts = state.accounts.map(account => {
+        if (!targetIds.includes(account.id)) {
+          return account;
+        }
+
+        const next: GLAccountMappingRow = { ...account };
+
+        if ('target' in mapping) {
+          next.manualCOAId = mapping.target || undefined;
+        }
+        if (mapping.mappingType) {
+          next.mappingType = mapping.mappingType;
+          if (mapping.mappingType === 'exclude') {
+            next.splitDefinitions = [];
+            next.status = 'Excluded';
+            next.manualCOAId = undefined;
+            next.presetId = undefined;
+            next.dynamicExclusionAmount = undefined;
+          } else if (mapping.mappingType === 'percentage') {
+            next.splitDefinitions = ensureMinimumPercentageSplits(
+              next.splitDefinitions,
+            );
+          } else if (next.status === 'Excluded') {
+            next.status = 'Unmapped';
+          }
+        }
+        if ('presetId' in mapping) {
+          next.presetId = mapping.presetId || undefined;
+          if (mapping.presetId && !mapping.mappingType) {
+            if (next.mappingType === 'exclude') {
+              next.mappingType = 'percentage';
+            }
+            if (next.status === 'Excluded') {
+              next.status = 'Unmapped';
+            }
+          }
+        }
+        if (mapping.polarity) {
+          next.polarity = mapping.polarity;
+        }
+        if (mapping.status) {
+          next.status = mapping.status;
+          if (mapping.status === 'Excluded') {
+            next.mappingType = 'exclude';
+            next.manualCOAId = undefined;
+            next.presetId = undefined;
+            next.splitDefinitions = [];
+            next.dynamicExclusionAmount = undefined;
+          } else if (next.mappingType === 'exclude') {
+            next.mappingType = 'direct';
+          }
+        } else if (mapping.mappingType && mapping.mappingType !== 'exclude' && next.status === 'Excluded') {
           next.status = 'Unmapped';
         }
         if (next.mappingType !== 'percentage' && next.mappingType !== 'dynamic') {
@@ -906,6 +1071,49 @@ export const selectSummaryMetrics = (state: MappingState): SummarySelector => {
 export const selectActiveStatuses = (state: MappingState): MappingStatus[] => state.activeStatuses;
 
 export const selectSearchTerm = (state: MappingState): string => state.searchTerm;
+
+export const selectActivePeriod = (state: MappingState): string | null => state.activePeriod;
+
+export const selectAvailablePeriods = (state: MappingState): string[] => {
+  const periodSet = new Set<string>();
+  state.accounts.forEach(account => {
+    if (account.glMonth) {
+      periodSet.add(account.glMonth);
+    }
+  });
+  return Array.from(periodSet).sort();
+};
+
+export const selectFilteredAccounts = (state: MappingState): GLAccountMappingRow[] => {
+  if (!state.activePeriod) {
+    return state.accounts;
+  }
+  return state.accounts.filter(account => account.glMonth === state.activePeriod);
+};
+
+export const selectAccountsByPeriod = (state: MappingState): Map<string, GLAccountMappingRow[]> => {
+  const byPeriod = new Map<string, GLAccountMappingRow[]>();
+  state.accounts.forEach(account => {
+    const period = account.glMonth || 'unknown';
+    const existing = byPeriod.get(period) || [];
+    byPeriod.set(period, [...existing, account]);
+  });
+  return byPeriod;
+};
+
+export const selectAccountHasMultiplePeriods = (
+  state: MappingState,
+  companyId: string,
+  accountId: string
+): boolean => {
+  const periods = new Set<string>();
+  state.accounts.forEach(account => {
+    if (account.companyId === companyId && account.accountId === accountId && account.glMonth) {
+      periods.add(account.glMonth);
+    }
+  });
+  return periods.size > 1;
+};
 
 export const calculateSplitPercentage = (
   account: GLAccountMappingRow,

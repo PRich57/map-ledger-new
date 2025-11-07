@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { CalendarDays, Building2 } from 'lucide-react';
 import { useClientStore } from '../../store/clientStore';
-import { useMappingStore } from '../../store/mappingStore';
-import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import { useMappingStore, selectAvailablePeriods, selectActivePeriod } from '../../store/mappingStore';
 
 interface MappingHeaderProps {
   clientId?: string;
@@ -14,11 +13,9 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   const operations = useMappingStore(state =>
     state.accounts.map(account => account.operation)
   );
-  const { availablePeriods, selectedPeriod, setSelectedPeriod } = useRatioAllocationStore(state => ({
-    availablePeriods: state.availablePeriods,
-    selectedPeriod: state.selectedPeriod,
-    setSelectedPeriod: state.setSelectedPeriod,
-  }));
+  const availablePeriods = useMappingStore(selectAvailablePeriods);
+  const activePeriod = useMappingStore(selectActivePeriod);
+  const setActivePeriod = useMappingStore(state => state.setActivePeriod);
 
   const activeClient = useMemo(() => {
     if (clients.length === 0) {
@@ -73,23 +70,25 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
             <span>Reporting period</span>
             <select
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-100"
-              value={selectedPeriod ?? ''}
+              value={activePeriod ?? 'all'}
               onChange={event => {
                 const next = event.target.value;
-                if (next) {
-                  setSelectedPeriod(next);
-                }
+                setActivePeriod(next === 'all' ? null : next);
               }}
               disabled={!hasAvailablePeriods}
             >
-              <option value="" disabled>
-                {hasAvailablePeriods ? 'Select period' : 'No periods available'}
-              </option>
-              {availablePeriods.map(period => (
-                <option key={period} value={period}>
-                  {period}
-                </option>
-              ))}
+              {hasAvailablePeriods ? (
+                <>
+                  <option value="all">All Periods</option>
+                  {availablePeriods.map(period => (
+                    <option key={period} value={period}>
+                      {period}
+                    </option>
+                  ))}
+                </>
+              ) : (
+                <option value="all">No periods available</option>
+              )}
             </select>
           </label>
         </div>
