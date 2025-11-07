@@ -342,4 +342,200 @@ describe('ratioAllocationStore', () => {
     expect(targetOptions).not.toContain(first.id);
     expect(targetOptions).not.toContain(second.id);
   });
+
+  it('normalizes allocation result percentages that would otherwise total 99.99%', async () => {
+    const [targetA, targetB, targetC] = STANDARD_CHART_OF_ACCOUNTS;
+    const targetOptions = [targetA, targetB, targetC];
+    const basisAccounts = [
+      {
+        id: 'basis-1',
+        name: 'Basis 1',
+        description: 'Basis 1',
+        value: 1,
+        mappedTargetId: targetA.id,
+        valuesByPeriod: { '2024-01': 1 },
+      },
+      {
+        id: 'basis-2',
+        name: 'Basis 2',
+        description: 'Basis 2',
+        value: 1,
+        mappedTargetId: targetB.id,
+        valuesByPeriod: { '2024-01': 1 },
+      },
+      {
+        id: 'basis-3',
+        name: 'Basis 3',
+        description: 'Basis 3',
+        value: 1,
+        mappedTargetId: targetC.id,
+        valuesByPeriod: { '2024-01': 1 },
+      },
+    ];
+    const sourceAccount = {
+      id: 'source-1',
+      name: 'Source 1',
+      number: '5000',
+      description: 'Source account',
+      value: 300,
+      valuesByPeriod: { '2024-01': 300 },
+    };
+    const allocation = {
+      id: 'allocation-even',
+      name: 'Even allocation',
+      sourceAccount: {
+        id: sourceAccount.id,
+        number: sourceAccount.number,
+        description: sourceAccount.description,
+      },
+      targetDatapoints: basisAccounts.map((basis, index) => ({
+        datapointId: targetOptions[index].id,
+        name: targetOptions[index].label,
+        ratioMetric: {
+          id: basis.id,
+          name: basis.name,
+          value: basis.valuesByPeriod['2024-01'],
+        },
+        isExclusion: false,
+      })),
+      effectiveDate: new Date().toISOString(),
+      status: 'active' as const,
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        sourceAccounts: [sourceAccount],
+        allocations: [allocation],
+        presets: [],
+        availablePeriods: ['2024-01'],
+        selectedPeriod: '2024-01',
+      }));
+    });
+
+    await act(async () => {
+      await useRatioAllocationStore.getState().calculateAllocations('2024-01');
+    });
+
+    const results = useRatioAllocationStore.getState().results;
+    expect(results).toHaveLength(1);
+    const scaledTotal = results[0].allocations.reduce(
+      (sum, target) => sum + Math.round(target.percentage * 100),
+      0,
+    );
+    expect(scaledTotal).toBe(10000);
+    expect(results[0].allocations.some(target => target.percentage.toFixed(2) === '33.34')).toBe(
+      true,
+    );
+
+    const auditRecords = useRatioAllocationStore
+      .getState()
+      .auditLog.filter(record => record.allocationId === allocation.id && record.periodId === '2024-01');
+    expect(auditRecords.length).toBeGreaterThan(0);
+    auditRecords.forEach(record => {
+      const auditScaledTotal = record.targets.reduce(
+        (sum, target) => sum + Math.round(target.percentage * 100),
+        0,
+      );
+      expect(auditScaledTotal).toBe(10000);
+    });
+  });
+
+  it('normalizes allocation result percentages that would otherwise total 100.01%', async () => {
+    const [targetA, targetB, targetC] = STANDARD_CHART_OF_ACCOUNTS;
+    const targetOptions = [targetA, targetB, targetC];
+    const basisAccounts = [
+      {
+        id: 'basis-1',
+        name: 'Basis 1',
+        description: 'Basis 1',
+        value: 16665,
+        mappedTargetId: targetA.id,
+        valuesByPeriod: { '2024-01': 16665 },
+      },
+      {
+        id: 'basis-2',
+        name: 'Basis 2',
+        description: 'Basis 2',
+        value: 16665,
+        mappedTargetId: targetB.id,
+        valuesByPeriod: { '2024-01': 16665 },
+      },
+      {
+        id: 'basis-3',
+        name: 'Basis 3',
+        description: 'Basis 3',
+        value: 66670,
+        mappedTargetId: targetC.id,
+        valuesByPeriod: { '2024-01': 66670 },
+      },
+    ];
+    const sourceAccount = {
+      id: 'source-2',
+      name: 'Source 2',
+      number: '6000',
+      description: 'Source account',
+      value: 1200,
+      valuesByPeriod: { '2024-01': 1200 },
+    };
+    const allocation = {
+      id: 'allocation-weighted',
+      name: 'Weighted allocation',
+      sourceAccount: {
+        id: sourceAccount.id,
+        number: sourceAccount.number,
+        description: sourceAccount.description,
+      },
+      targetDatapoints: basisAccounts.map((basis, index) => ({
+        datapointId: targetOptions[index].id,
+        name: targetOptions[index].label,
+        ratioMetric: {
+          id: basis.id,
+          name: basis.name,
+          value: basis.valuesByPeriod['2024-01'],
+        },
+        isExclusion: false,
+      })),
+      effectiveDate: new Date().toISOString(),
+      status: 'active' as const,
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        sourceAccounts: [sourceAccount],
+        allocations: [allocation],
+        presets: [],
+        availablePeriods: ['2024-01'],
+        selectedPeriod: '2024-01',
+      }));
+    });
+
+    await act(async () => {
+      await useRatioAllocationStore.getState().calculateAllocations('2024-01');
+    });
+
+    const results = useRatioAllocationStore.getState().results;
+    expect(results).toHaveLength(1);
+    const scaledTotal = results[0].allocations.reduce(
+      (sum, target) => sum + Math.round(target.percentage * 100),
+      0,
+    );
+    expect(scaledTotal).toBe(10000);
+    expect(results[0].allocations.every(target => Number.isFinite(target.percentage))).toBe(true);
+
+    const auditRecords = useRatioAllocationStore
+      .getState()
+      .auditLog.filter(record => record.allocationId === allocation.id && record.periodId === '2024-01');
+    expect(auditRecords.length).toBeGreaterThan(0);
+    auditRecords.forEach(record => {
+      const auditScaledTotal = record.targets.reduce(
+        (sum, target) => sum + Math.round(target.percentage * 100),
+        0,
+      );
+      expect(auditScaledTotal).toBe(10000);
+    });
+  });
 });

@@ -30,6 +30,7 @@ export interface AllocateDynamicWithPresetsResult {
     value: number;
     basisValue: number;
     ratio: number;
+    percentage: number;
     presetId?: string;
   }>;
   adjustmentIndex: number | null;
@@ -44,11 +45,48 @@ export interface AllocateDynamicWithPresetsResult {
       basisValue: number;
       allocation: number;
       ratio: number;
+      percentage: number;
     }>;
   }>;
 }
 
 const roundToCents = (value: number): number => Math.round(value * 100) / 100;
+
+const roundToPercent = (value: number): number => Math.round(value * 100) / 100;
+
+const clampFinite = (value: number): number => (Number.isFinite(value) ? value : 0);
+
+export const normalizePercentages = (ratios: number[]): number[] => {
+  if (ratios.length === 0) {
+    return [];
+  }
+
+  const sanitized = ratios.map(value => Math.max(0, clampFinite(value)));
+  const total = sanitized.reduce((sum, value) => sum + value, 0);
+
+  if (total <= 0) {
+    return sanitized.map(() => 0);
+  }
+
+  const normalizedRatios = sanitized.map(value => value / total);
+  const rawPercentages = normalizedRatios.map(value => value * 100);
+  const roundedPercentages = rawPercentages.map(value => roundToPercent(value));
+  const roundedTotal = roundedPercentages.reduce((sum, value) => sum + value, 0);
+  const difference = roundToPercent(100 - roundedTotal);
+
+  if (difference === 0) {
+    return roundedPercentages;
+  }
+
+  const adjustmentIndex = getLargestAllocationIndex(rawPercentages);
+  if (adjustmentIndex >= 0) {
+    roundedPercentages[adjustmentIndex] = roundToPercent(
+      roundedPercentages[adjustmentIndex] + difference,
+    );
+  }
+
+  return roundedPercentages;
+};
 
 export const getBasisValue = (
   account: DynamicBasisAccount,
@@ -209,6 +247,7 @@ export const allocateDynamicWithPresets = (
         basisValue: row.basisValue,
         allocation: roundToCents(rawAllocation),
         ratio: rowRatio,
+        percentage: rowRatio * 100,
       };
     });
 
@@ -229,6 +268,25 @@ export const allocateDynamicWithPresets = (
       }
     }
 
+    const presetAllocatedTotal = presetRowAllocations.reduce(
+      (sum, item) => sum + item.allocation,
+      0,
+    );
+    const presetPercentages = normalizePercentages(
+      presetRowAllocations.map(item =>
+        presetAllocatedTotal > 0 ? item.allocation / presetAllocatedTotal : 0,
+      ),
+    );
+    presetRowAllocations.forEach((item, index) => {
+      const normalizedPercentage = presetPercentages[index] ?? 0;
+      // eslint-disable-next-line no-param-reassign
+      presetRowAllocations[index] = {
+        ...item,
+        ratio: normalizedPercentage / 100,
+        percentage: normalizedPercentage,
+      };
+    });
+
     presetAllocations.push({
       presetId,
       presetName: presetInfo.name,
@@ -244,6 +302,7 @@ export const allocateDynamicWithPresets = (
         value: rowAlloc.allocation,
         basisValue: rowAlloc.basisValue,
         ratio: rowAlloc.ratio,
+        percentage: rowAlloc.percentage,
         presetId,
       });
     });
@@ -258,6 +317,7 @@ export const allocateDynamicWithPresets = (
       value: allocation,
       basisValue: item.basisValue,
       ratio,
+      percentage: ratio * 100,
     });
   });
 
@@ -274,6 +334,20 @@ export const allocateDynamicWithPresets = (
       );
     }
   }
+
+  const adjustedTotalAllocated = allAllocations.reduce(
+    (sum, item) => sum + item.value,
+    0,
+  );
+  const normalizedPercentages = normalizePercentages(
+    allAllocations.map(item =>
+      adjustedTotalAllocated > 0 ? item.value / adjustedTotalAllocated : 0,
+    ),
+  );
+  normalizedPercentages.forEach((percentage, index) => {
+    allAllocations[index].ratio = percentage / 100;
+    allAllocations[index].percentage = percentage;
+  });
 
   return {
     allocations: allAllocations,
