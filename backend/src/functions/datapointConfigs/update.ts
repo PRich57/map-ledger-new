@@ -3,7 +3,7 @@ import {
   DatapointConfigurationUpdate,
   updateDatapointConfiguration,
 } from '../../repositories/datapointConfigurationRepository';
-import { sanitizePayload } from './utils';
+import { buildErrorResponse, isNotFoundError, sanitizePayload } from './utils';
 
 const buildUpdatePayload = (
   body: Record<string, unknown>,
@@ -52,10 +52,17 @@ export default async function updateDatapointConfigs(
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to update datapoint configuration', error);
-    if (error instanceof Error && error.message.includes('not found')) {
+    if (isNotFoundError(error)) {
       res.status(404).json({ message: 'Datapoint configuration not found' });
       return;
     }
-    res.status(500).json({ message: 'Failed to update datapoint configuration' });
+    res
+      .status(500)
+      .json(
+        buildErrorResponse(
+          'Failed to update datapoint configuration',
+          error
+        )
+      );
   }
 }

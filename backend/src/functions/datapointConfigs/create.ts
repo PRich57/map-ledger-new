@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { createDatapointConfiguration } from '../../repositories/datapointConfigurationRepository';
-import { sanitizePayload } from './utils';
+import { buildErrorResponse, sanitizePayload } from './utils';
 
 export default async function createDatapointConfigs(
   req: Request,
@@ -28,6 +28,13 @@ export default async function createDatapointConfigs(
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to create datapoint configuration', error);
-    res.status(500).json({ message: 'Failed to create datapoint configuration' });
+    res
+      .status(500)
+      .json(
+        buildErrorResponse(
+          'Failed to create datapoint configuration',
+          error
+        )
+      );
   }
 }
