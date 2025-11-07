@@ -14,7 +14,8 @@
     "src/**/*.ts",
     "health/**/*.ts",
     "aiGenerate/**/*.ts",
-    "userClients/**/*.ts"
+    "userClients/**/*.ts",
+    "tests/**/*.ts"
   ],
   "exclude": [
     "dist",
