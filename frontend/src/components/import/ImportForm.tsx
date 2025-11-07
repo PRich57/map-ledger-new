@@ -8,9 +8,7 @@ import {
   ParsedUpload,
 } from '../../utils/parseTrialBalanceWorkbook';
 import parseCurrencyValue from '../../utils/parseCurrencyValue';
-import scrollPageToTop from '../../utils/scroll';
 import ColumnMatcher from './ColumnMatcher';
-import ExcludeAccounts from './ExcludeAccounts';
 import {
   getClientTemplateMapping,
   ClientTemplateConfig,
@@ -153,23 +151,17 @@ const extractRowGlMonth = (row: TrialBalanceRow): string => {
   return normalizeCandidate(row.glMonth);
 };
 
-const filterRowsByGlMonth = (rows: TrialBalanceRow[], month: string): TrialBalanceRow[] => {
-  const normalizedMonth = normalizeGlMonth(month);
+const extractGlMonthsFromRows = (rows: TrialBalanceRow[]): string[] => {
+  const monthsSet = new Set<string>();
 
-  return rows
-    .map((row) => {
-      const detectedRowMonth = extractRowGlMonth(row);
-      const effectiveMonth = detectedRowMonth || normalizedMonth;
+  rows.forEach((row) => {
+    const detectedMonth = extractRowGlMonth(row);
+    if (detectedMonth && isValidNormalizedMonth(detectedMonth)) {
+      monthsSet.add(detectedMonth);
+    }
+  });
 
-      return {
-        ...row,
-        glMonth: effectiveMonth,
-      };
-    })
-    .filter((row) => {
-      if (!normalizedMonth) return true;
-      return extractRowGlMonth(row) === normalizedMonth;
-    });
+  return Array.from(monthsSet).sort();
 };
 
 interface ImportFormProps {
@@ -178,7 +170,7 @@ interface ImportFormProps {
     clientId: string,
     companyIds: string[],
     headerMap: Record<string, string | null>,
-    glMonth: string,
+    glMonths: string[],
     fileName: string,
     file: File
   ) => void | Promise<void>;
@@ -193,38 +185,44 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const [clientId, setClientId] = useState('');
   const [mappedRowsBySheet, setMappedRowsBySheet] = useState<TrialBalanceRow[][]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [glMonth, setGlMonth] = useState('');
   const [uploads, setUploads] = useState<ParsedUpload[]>([]);
-  const [selectedSheet, setSelectedSheet] = useState<number>(0);
+  const [selectedSheets, setSelectedSheets] = useState<number[]>([]);
   const [headerMap, setHeaderMap] = useState<Record<
     string,
     string | null
   > | null>(null);
-  const [includedRows, setIncludedRows] = useState<TrialBalanceRow[] | null>(null);
-  const [, setAvailableCompanies] = useState<string[]>([]);
+  const [combinedRows, setCombinedRows] = useState<TrialBalanceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const previewSampleRows = useMemo(() => {
-    if (uploads.length === 0) return [] as Record<string, unknown>[];
-    const sheetRows = uploads[selectedSheet]?.rows ?? [];
+    if (uploads.length === 0 || selectedSheets.length === 0) return [] as Record<string, unknown>[];
+    const sheetRows = uploads[selectedSheets[0]]?.rows ?? [];
     return sheetRows.slice(0, 20);
-  }, [uploads, selectedSheet]);
+  }, [uploads, selectedSheets]);
 
   const previewSampleCount = previewSampleRows.length;
 
   const previewSummaryMessage = useMemo(() => {
-    if (uploads.length === 0) return null;
-    const totalRows = uploads[selectedSheet]?.rows.length ?? 0;
-    if (totalRows === 0) {
-      return 'No rows detected in this sheet. Check that the header row and data are present.';
-    }
+    if (uploads.length === 0 || selectedSheets.length === 0) return null;
 
-    if (totalRows > previewSampleCount) {
-      return `Showing the first ${previewSampleCount.toLocaleString()} of ${totalRows.toLocaleString()} rows to help match your headers.`;
-    }
+    if (selectedSheets.length === 1) {
+      const totalRows = uploads[selectedSheets[0]]?.rows.length ?? 0;
+      if (totalRows === 0) {
+        return 'No rows detected in this sheet. Check that the header row and data are present.';
+      }
 
-    return `Showing all ${totalRows.toLocaleString()} rows from the uploaded sheet.`;
-  }, [uploads, selectedSheet, previewSampleCount]);
+      if (totalRows > previewSampleCount) {
+        return `Showing the first ${previewSampleCount.toLocaleString()} of ${totalRows.toLocaleString()} rows to help match your headers.`;
+      }
+
+      return `Showing all ${totalRows.toLocaleString()} rows from the uploaded sheet.`;
+    } else {
+      const totalRows = selectedSheets.reduce((sum, idx) => {
+        return sum + (uploads[idx]?.rows.length ?? 0);
+      }, 0);
+      return `Previewing first sheet. ${selectedSheets.length} sheets selected with ${totalRows.toLocaleString()} total rows.`;
+    }
+  }, [uploads, selectedSheets, previewSampleCount]);
 
   const clientOptions = useMemo(() => {
     const all = companies.flatMap((company) => company.clients);
@@ -264,27 +262,11 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [clientId, companyOptions]);
 
   useEffect(() => {
-    if (uploads.length > 0) {
-      const metadataMonth = uploads[selectedSheet]?.metadata?.glMonth ?? '';
-      setGlMonth(normalizeGlMonth(metadataMonth));
+    if (uploads.length > 0 && selectedSheets.length === 0) {
+      // Auto-select first sheet when file is uploaded
+      setSelectedSheets([0]);
     }
-  }, [uploads, selectedSheet]);
-
-  useEffect(() => {
-    if (!headerMap) {
-      setIncludedRows(null);
-      setAvailableCompanies([]);
-      return;
-    }
-
-    const baseRows = mappedRowsBySheet[selectedSheet] ?? [];
-    const filtered = filterRowsByGlMonth(baseRows, glMonth);
-    setIncludedRows(filtered);
-    const unique = Array.from(
-      new Set(filtered.map((r) => r.entity).filter(Boolean))
-    );
-    setAvailableCompanies(unique);
-  }, [glMonth, mappedRowsBySheet, selectedSheet, headerMap]);
+  }, [uploads, selectedSheets.length]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -302,7 +284,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       if (!clientId || companyIds.length === 0) {
         setError('Please select a client and company before uploading.');
         setSelectedFile(null);
-        setSelectedSheet(0);
+        setSelectedSheets([]);
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
@@ -316,22 +298,19 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         throw new Error('No valid data found in any sheet.');
 
       setUploads(parsed);
-      setSelectedSheet(0);
+      setSelectedSheets([]);  // Will be auto-set by useEffect
       setSelectedFile(file);
       setHeaderMap(null);
-      setIncludedRows(null);
-      setAvailableCompanies([]);
+      setCombinedRows([]);
       setMappedRowsBySheet([]);
-      setGlMonth(normalizeGlMonth(parsed[0]?.metadata?.glMonth || ''));
       setError(null);
     } catch (err) {
       setError((err as Error).message);
       setUploads([]);
-      setSelectedSheet(0);
+      setSelectedSheets([]);
       setSelectedFile(null);
       setHeaderMap(null);
-      setIncludedRows(null);
-      setAvailableCompanies([]);
+      setCombinedRows([]);
       setMappedRowsBySheet([]);
     }
   };
@@ -347,6 +326,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       {} as Record<string, string>
     );
 
+    // Map all sheets (we'll filter by selectedSheets later)
     const mappedSheets = uploads.map((sheet) => {
       const normalizedSheetMonth = normalizeGlMonth(
         sheet.metadata.glMonth || ''
@@ -386,12 +366,16 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               ? entityValue.toString().trim()
               : '';
 
+          // Extract GL month from row data or use sheet metadata
+          const detectedRowMonth = extractRowGlMonth(row);
+          const effectiveMonth = detectedRowMonth || normalizedSheetMonth;
+
           return {
             accountId,
             description,
             netChange: parseCurrencyValue(netChangeValue),
             entity,
-            glMonth: normalizedSheetMonth,
+            glMonth: effectiveMonth,
             ...row,
           };
         })
@@ -399,6 +383,13 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     });
 
     setMappedRowsBySheet(mappedSheets);
+
+    // Combine selected sheets into one dataset
+    const combined = selectedSheets.flatMap((sheetIdx) => {
+      return mappedSheets[sheetIdx] ?? [];
+    });
+
+    setCombinedRows(combined);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -407,22 +398,23 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       selectedFile &&
       clientId &&
       companyIds.length > 0 &&
-      includedRows &&
-      headerMap &&
-      glMonth
+      combinedRows.length > 0 &&
+      headerMap
     ) {
+      const glMonths = extractGlMonthsFromRows(combinedRows);
+
       await onImport(
-        includedRows,
+        combinedRows,
         clientId,
         companyIds,
         headerMap,
-        glMonth,
+        glMonths,
         selectedFile.name,
         selectedFile
       );
     } else {
       setError(
-        'Please complete all steps including column matching, GL Month, and account review.'
+        'Please complete all steps including column matching and sheet selection.'
       );
     }
   };
@@ -492,12 +484,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               onClick={() => {
                 setSelectedFile(null);
                 setUploads([]);
-                setSelectedSheet(0);
+                setSelectedSheets([]);
                 setHeaderMap(null);
-                setIncludedRows(null);
-                setAvailableCompanies([]);
+                setCombinedRows([]);
                 setMappedRowsBySheet([]);
-                setGlMonth('');
                 setClientId(singleClientId ?? '');
                 setCompanyIds([]);
               }}
@@ -536,26 +526,24 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       </div>
 
       {uploads.length > 1 && (
-        <Select
+        <MultiSelect
           label="Sheet Selection"
-          value={selectedSheet.toString()}
-          onChange={(e) => {
-            setSelectedSheet(Number(e.target.value));
+          options={uploads.map((u, idx) => ({
+            value: idx.toString(),
+            label: u.sheetName,
+          }))}
+          value={selectedSheets.map(idx => idx.toString())}
+          onChange={(values) => {
+            setSelectedSheets(values.map(v => parseInt(v, 10)));
           }}
-        >
-          {uploads.map((u, idx) => (
-            <option key={u.sheetName} value={idx}>
-              {u.sheetName}
-            </option>
-          ))}
-        </Select>
+        />
       )}
 
-      {uploads.length > 0 && !headerMap && (
+      {uploads.length > 0 && selectedSheets.length > 0 && !headerMap && (
         <div className="space-y-6">
           <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <ColumnMatcher
-              sourceHeaders={uploads[selectedSheet].headers}
+              sourceHeaders={uploads[selectedSheets[0]].headers}
               destinationHeaders={templateHeaders}
               onComplete={handleColumnMatch}
             />
@@ -564,8 +552,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               <PreviewTable
                 className="mt-0"
                 rows={previewSampleRows}
-                sheetName={uploads[selectedSheet]?.sheetName}
-                columnOrder={uploads[selectedSheet]?.headers ?? []}
+                sheetName={uploads[selectedSheets[0]]?.sheetName}
+                columnOrder={uploads[selectedSheets[0]]?.headers ?? []}
                 emptyStateMessage="Your upload data will appear here once we detect rows in the selected sheet."
               />
               {previewSummaryMessage && (
@@ -578,49 +566,27 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         </div>
       )}
 
-      {headerMap && (
+      {headerMap && combinedRows.length > 0 && (
         <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="gl-month"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
-              GL Month
-            </label>
-            <input
-              type="month"
-              id="gl-month"
-              name="gl-month"
-              value={glMonth}
-              onChange={(e) => setGlMonth(e.target.value)}
-              required
-              className="block w-40 border rounded-md px-3 py-2 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            />
+          <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-sm font-medium text-gray-900 mb-2">Import Summary</h3>
+            <div className="text-sm text-gray-700 space-y-1">
+              <p><strong>Total Rows:</strong> {combinedRows.length.toLocaleString()}</p>
+              <p><strong>Sheets:</strong> {selectedSheets.map(idx => uploads[idx]?.sheetName).join(', ')}</p>
+              <p><strong>GL Months Detected:</strong> {extractGlMonthsFromRows(combinedRows).join(', ') || 'None detected'}</p>
+            </div>
           </div>
           <PreviewTable
-            rows={includedRows ?? []}
-            sheetName={uploads[selectedSheet]?.sheetName}
-            columnOrder={uploads[selectedSheet]?.headers ?? []}
+            rows={combinedRows.slice(0, 20)}
+            sheetName="Combined Data"
+            columnOrder={uploads[selectedSheets[0]]?.headers ?? []}
           />
-          {includedRows && (
-            <ExcludeAccounts
-              rows={includedRows}
-              onConfirm={(included) => {
-                setIncludedRows(included);
-                const uniqueIncluded = Array.from(
-                  new Set(included.map((r) => r.entity).filter(Boolean))
-                );
-                setAvailableCompanies(uniqueIncluded);
-                scrollPageToTop();
-              }}
-            />
-          )}
         </div>
       )}
 
       {error && <div className="text-sm text-red-600">{error}</div>}
 
-      {includedRows && headerMap && (
+      {combinedRows.length > 0 && headerMap && (
         <div className="flex justify-between items-center">
           <button
             type="button"
@@ -639,8 +605,9 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               companyIds.length === 0 ||
               isImporting ||
               uploads.length === 0 ||
+              selectedSheets.length === 0 ||
               !headerMap ||
-              !glMonth
+              combinedRows.length === 0
             }
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
@@ -680,4 +647,4 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   );
 }
 
-export { filterRowsByGlMonth, normalizeGlMonth };
+export { normalizeGlMonth, extractGlMonthsFromRows };

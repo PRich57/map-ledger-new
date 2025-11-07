@@ -67,7 +67,7 @@ export default function Import() {
     clientId: string,
     _companyIds: string[],
     _headerMap: Record<string, string | null>,
-    glMonth: string,
+    glMonths: string[],
     fileName: string,
     file: File
   ) => {
@@ -91,6 +91,9 @@ export default function Import() {
       const fileData = await fileToBase64(file);
       const fileType = file.type || 'application/octet-stream';
 
+      // Use the first GL month for the import record, or a placeholder if none detected
+      const primaryPeriod = glMonths.length > 0 ? glMonths[0] : new Date().toISOString().slice(0, 7);
+
       addImport(user.id, {
         id: importId,
         clientId,
@@ -99,7 +102,7 @@ export default function Import() {
         fileType,
         fileData,
         previewRows,
-        period: glMonth,
+        period: primaryPeriod,
         timestamp: new Date().toISOString(),
         status: 'completed',
         rowCount: rows.length,
@@ -110,7 +113,7 @@ export default function Import() {
         uploadId: importId,
         clientId,
         companyIds: _companyIds,
-        period: glMonth,
+        period: primaryPeriod,
         rows,
       });
 
