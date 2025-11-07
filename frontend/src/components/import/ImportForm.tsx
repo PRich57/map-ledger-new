@@ -6,6 +6,7 @@ import { useOrganizationStore } from '../../store/organizationStore';
 import {
   parseTrialBalanceWorkbook,
   ParsedUpload,
+  ParsedRow,
 } from '../../utils/parseTrialBalanceWorkbook';
 import parseCurrencyValue from '../../utils/parseCurrencyValue';
 import ColumnMatcher from './ColumnMatcher';
@@ -117,7 +118,7 @@ const normalizeGlMonth = (value: string): string => {
 
 const isValidNormalizedMonth = (value: string): boolean => /^\d{4}-\d{2}$/.test(value);
 
-const extractRowGlMonth = (row: TrialBalanceRow): string => {
+const extractRowGlMonth = (row: ParsedRow | TrialBalanceRow): string => {
   const normalizeCandidate = (value: unknown): string => {
     if (typeof value !== 'string' && typeof value !== 'number') {
       return '';
@@ -148,7 +149,7 @@ const extractRowGlMonth = (row: TrialBalanceRow): string => {
     }
   }
 
-  return normalizeCandidate(row.glMonth);
+  return normalizeCandidate('glMonth' in row ? row.glMonth : undefined);
 };
 
 const extractGlMonthsFromRows = (rows: TrialBalanceRow[]): string[] => {
@@ -183,7 +184,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const isLoadingClients = useOrganizationStore((state) => state.isLoading);
   const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState('');
-  const [mappedRowsBySheet, setMappedRowsBySheet] = useState<TrialBalanceRow[][]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploads, setUploads] = useState<ParsedUpload[]>([]);
   const [selectedSheets, setSelectedSheets] = useState<number[]>([]);
@@ -302,7 +302,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setSelectedFile(file);
       setHeaderMap(null);
       setCombinedRows([]);
-      setMappedRowsBySheet([]);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -311,7 +310,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setSelectedFile(null);
       setHeaderMap(null);
       setCombinedRows([]);
-      setMappedRowsBySheet([]);
     }
   };
 
@@ -375,14 +373,12 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             description,
             netChange: parseCurrencyValue(netChangeValue),
             entity,
-            glMonth: effectiveMonth,
+            ...(effectiveMonth && { glMonth: effectiveMonth }),
             ...row,
-          };
+          } as TrialBalanceRow;
         })
         .filter((row): row is TrialBalanceRow => row !== null);
     });
-
-    setMappedRowsBySheet(mappedSheets);
 
     // Combine selected sheets into one dataset
     const combined = selectedSheets.flatMap((sheetIdx) => {
@@ -487,7 +483,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                 setSelectedSheets([]);
                 setHeaderMap(null);
                 setCombinedRows([]);
-                setMappedRowsBySheet([]);
                 setClientId(singleClientId ?? '');
                 setCompanyIds([]);
               }}
