@@ -92,6 +92,7 @@ export const buildMappingRowsFromImport = (
           balance: netChange,
         },
       ],
+      glMonth: row.glMonth, // Preserve GL month from import
     };
   });
 };

@@ -6,6 +6,7 @@ import SummaryCards from '../components/mapping/SummaryCards';
 import MappingTable from '../components/mapping/MappingTable';
 import DistributionTable from '../components/mapping/DistributionTable';
 import ReviewPane from '../components/mapping/ReviewPane';
+import MappingMonthHelper from '../components/mapping/MappingMonthHelper';
 import { useMappingStore } from '../store/mappingStore';
 import scrollPageToTop from '../utils/scroll';
 
@@ -48,6 +49,7 @@ export default function Mapping() {
     <div data-testid="mapping-page" className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <MappingHeader clientId={activeClientId ?? undefined} glUploadId={uploadId} />
       <SummaryCards />
+      {activeStep === 'mapping' && <MappingMonthHelper />}
       <StepTabs activeStep={activeStep} onStepChange={handleStepChange} />
       <section
         aria-label="Mapping workspace content"

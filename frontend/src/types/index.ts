@@ -429,6 +429,7 @@ export interface GLAccountMappingRow {
   splitDefinitions: MappingSplitDefinition[];
   companies: GLAccountCompanyBreakdown[];
   dynamicExclusionAmount?: number;
+  glMonth?: string; // GL month in YYYY-MM format
 }
 
 export interface GLUpload {

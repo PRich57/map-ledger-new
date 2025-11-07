@@ -20,7 +20,7 @@ import MappingToolbar from './MappingToolbar';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   getAccountExcludedAmount,
-  selectAccounts,
+  selectFilteredAccounts,
   selectActiveStatuses,
   selectSearchTerm,
   selectSplitValidationIssues,
@@ -151,7 +151,7 @@ export default function MappingTable() {
     () => buildTargetScoaOptions(datapoints),
     [datapoints]
   );
-  const accounts = useMappingStore(selectAccounts);
+  const accounts = useMappingStore(selectFilteredAccounts);
   const searchTerm = useMappingStore(selectSearchTerm);
   const activeStatuses = useMappingStore(selectActiveStatuses);
   const updateTarget = useMappingStore((state) => state.updateTarget);
