@@ -312,6 +312,7 @@ export interface DynamicAllocationTargetAudit {
   targetName: string;
   basisValue: number;
   ratio: number;
+  percentage: number;
   allocation: number;
   basisMembers: DynamicAllocationBasisMember[];
   presetId?: string;

@@ -739,7 +739,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
             targetName: matchingTarget?.name ?? getTargetNameById(item.targetAccountId),
             basisValue: item.basisValue,
             value: item.value,
-            percentage: item.ratio * 100,
+            percentage: item.percentage,
             ratio: item.ratio,
             isExclusion: matchingTarget?.isExclusion ?? false,
           };
@@ -778,6 +778,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
             targetName: getTargetNameById(item.targetAccountId),
             basisValue: item.basisValue,
             ratio: item.ratio,
+            percentage: item.percentage,
             allocation: item.value,
             presetId: item.presetId,
             basisMembers: presetRow
@@ -819,6 +820,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
                 targetName: getTargetNameById(row.targetAccountId),
                 basisValue: row.basisValue,
                 ratio: row.ratio,
+                percentage: row.percentage,
                 allocation: row.allocation,
                 basisMembers: presetRow
                   ? [

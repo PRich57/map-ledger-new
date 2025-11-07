@@ -9,6 +9,7 @@ import {
   getBasisValue,
   getGroupMembersWithValues,
   getGroupTotal,
+  normalizePercentages,
 } from '../../utils/dynamicAllocation';
 
 const formatCurrency = (value: number): string =>
@@ -287,6 +288,15 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     () => targetDetails.reduce((sum, detail) => sum + detail.basisValue, 0),
     [targetDetails],
   );
+
+  const previewPercentages = useMemo(() => {
+    if (targetDetails.length === 0 || basisTotal <= 0) {
+      return targetDetails.map(() => 0);
+    }
+    return normalizePercentages(
+      targetDetails.map(detail => detail.basisValue / basisTotal),
+    );
+  }, [basisTotal, targetDetails]);
 
   const allocationIssues = useMemo(() => {
     if (!selectedAllocation) {
@@ -786,7 +796,8 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                   </tr>
                 ) : (
                   targetDetails.map((detail, index) => {
-                    const ratio = basisTotal > 0 ? detail.basisValue / basisTotal : 0;
+                    const percentage = previewPercentages[index] ?? 0;
+                    const ratio = percentage / 100;
                     const allocatedValue = previewComputation.allocations[index] ?? 0;
                     const targetDatapoint = selectedAllocation?.targetDatapoints[index];
                     const isExcluded = detail.isExcluded;
@@ -831,7 +842,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                         >
                           {formatCurrency(detail.basisValue)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{(ratio * 100).toFixed(2)}%</td>
+                        <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{percentage.toFixed(2)}%</td>
                         <td className={`${
                           isExcluded ? 'px-4 py-3 text-sm font-semibold text-rose-700 dark:text-rose-300' : 'px-4 py-3 text-sm font-semibold text-blue-700 dark:text-blue-400'
                         }`}

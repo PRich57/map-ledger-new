@@ -1,4 +1,4 @@
-import { allocateDynamic } from '../utils/dynamicAllocation';
+import { allocateDynamic, normalizePercentages } from '../utils/dynamicAllocation';
 
 describe('allocateDynamic', () => {
   it('distributes amounts according to basis proportions', () => {
@@ -32,5 +32,26 @@ describe('allocateDynamic', () => {
 
   it('throws when basis total is zero', () => {
     expect(() => allocateDynamic(250, [0, 0])).toThrow('Basis total is zero; provide nonzero datapoints.');
+  });
+});
+
+describe('normalizePercentages', () => {
+  it('adjusts rounding so totals equal 100 when values round down to 99.99', () => {
+    const ratios = [1 / 3, 1 / 3, 1 / 3];
+    const percentages = normalizePercentages(ratios);
+
+    expect(percentages).toHaveLength(3);
+    const scaledTotal = percentages.reduce((sum, value) => sum + Math.round(value * 100), 0);
+    expect(scaledTotal).toBe(10000);
+    expect(percentages.some(value => value.toFixed(2) === '33.34')).toBe(true);
+  });
+
+  it('adjusts rounding when initial rounding would exceed 100%', () => {
+    const ratios = [16665 / 100000, 16665 / 100000, 66670 / 100000];
+    const percentages = normalizePercentages(ratios);
+
+    const scaledTotal = percentages.reduce((sum, value) => sum + Math.round(value * 100), 0);
+    expect(scaledTotal).toBe(10000);
+    expect(percentages.every(value => Number.isFinite(value))).toBe(true);
   });
 });
