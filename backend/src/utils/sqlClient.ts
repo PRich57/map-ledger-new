@@ -1,5 +1,33 @@
 import sql, { ConnectionPool, config as SqlConfig, IResult } from 'mssql';
 
+const logPrefix = '[sqlClient]';
+
+const shouldLog = process.env.NODE_ENV !== 'test';
+
+const logDebug = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.debug(logPrefix, ...args);
+};
+
+const logInfo = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info(logPrefix, ...args);
+};
+
+const logError = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error(logPrefix, ...args);
+};
+
 let connectionPromise: Promise<ConnectionPool> | null = null;
 
 const toBool = (v?: string) => (typeof v === 'string' ? v.toLowerCase() === 'true' : false);
@@ -18,6 +46,7 @@ const resolveSqlConfig = (): SqlConfig => {
   const trust = toBool(process.env.SQL_TRUST_CERT);
 
   if (cs) {
+    logInfo('Resolved SQL configuration from connection string');
     return {
       connectionString: cs,
       options: { encrypt, trustServerCertificate: trust, enableArithAbort: true },
@@ -29,6 +58,15 @@ const resolveSqlConfig = (): SqlConfig => {
   if (!server || !database || !user || !password) {
     throw new Error('Missing SQL env vars. Provide SQL_CONN_STR or (SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD).');
   }
+  logInfo('Resolved SQL configuration from discrete environment variables', {
+    server,
+    database,
+    hasUser: Boolean(user),
+    hasPassword: Boolean(password),
+    encrypt,
+    trustServerCertificate: trust,
+  });
+
   return {
     server, database, user, password,
     options: { encrypt, trustServerCertificate: trust, enableArithAbort: true },
@@ -39,10 +77,37 @@ const resolveSqlConfig = (): SqlConfig => {
 export const getSqlPool = async (): Promise<ConnectionPool> => {
   if (!connectionPromise) {
     const cfg = resolveSqlConfig();
-    connectionPromise = new sql.ConnectionPool(cfg).connect().then(pool => {
-      pool.on('error', err => { console.error('[sql] pool error', err); connectionPromise = null; });
-      return pool;
-    }).catch(e => { connectionPromise = null; throw e; });
+    const startTime = Date.now();
+    const connectionString = (cfg as { connectionString?: string }).connectionString;
+    const server = (cfg as { server?: string }).server;
+    const database = (cfg as { database?: string }).database;
+    logInfo('Establishing new SQL connection pool', {
+      hasConnectionString: Boolean(connectionString),
+      server,
+      database,
+      poolMax: cfg.pool?.max,
+      poolMin: cfg.pool?.min,
+      idleTimeoutMillis: cfg.pool?.idleTimeoutMillis,
+    });
+
+    connectionPromise = new sql.ConnectionPool(cfg)
+      .connect()
+      .then((pool) => {
+        const durationMs = Date.now() - startTime;
+        logInfo('SQL connection pool established', { durationMs });
+        pool.on('error', (err) => {
+          logError('SQL connection pool encountered an error', err);
+          connectionPromise = null;
+        });
+        return pool;
+      })
+      .catch((error) => {
+        connectionPromise = null;
+        logError('Failed to establish SQL connection pool', error);
+        throw error;
+      });
+  } else {
+    logDebug('Reusing existing SQL connection pool promise');
   }
   return connectionPromise;
 };
@@ -50,8 +115,41 @@ export const getSqlPool = async (): Promise<ConnectionPool> => {
 export const runQuery = async <TRecord = Record<string, unknown>>(query: string, parameters: Record<string, unknown> = {}): Promise<IResult<TRecord>> => {
   const pool = await getSqlPool();
   const request = pool.request();
-  for (const [name, value] of Object.entries(parameters)) request.input(name, value as any);
-  return request.query<TRecord>(query);
+  Object.entries(parameters).forEach(([name, value]) => {
+    request.input(name, value as any);
+  });
+
+  logInfo('Executing SQL query', {
+    query,
+    parameters,
+  });
+
+  const startTime = Date.now();
+  try {
+    const result = await request.query<TRecord>(query);
+    const durationMs = Date.now() - startTime;
+    logInfo('SQL query executed successfully', {
+      durationMs,
+      rowCount: result.recordset?.length ?? 0,
+    });
+    if (result.recordset && result.recordset.length > 0) {
+      logDebug('SQL query result sample', {
+        firstRow: result.recordset[0],
+      });
+    } else {
+      logDebug('SQL query returned no rows');
+    }
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - startTime;
+    logError('SQL query failed', {
+      durationMs,
+      query,
+      parameters,
+      error,
+    });
+    throw error;
+  }
 };
 
 export default { getSqlPool, runQuery };

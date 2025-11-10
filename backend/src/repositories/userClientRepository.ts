@@ -332,6 +332,7 @@ export const fetchUserClientAccess = async (
 
     logDebug('Executing user client access query', {
       placeholderCount: placeholders.length,
+      placeholderList,
       parameters,
     });
 
@@ -343,6 +344,11 @@ export const fetchUserClientAccess = async (
     logInfo('Successfully executed user client access query', {
       rowCount: recordset.length,
     });
+    if (recordset.length > 0) {
+      logDebug('User client access query results sample', {
+        firstRow: recordset[0],
+      });
+    }
 
     const clientAggregates = new Map<string, ClientAggregate>();
     let discoveredUserName: string | null = null;
@@ -495,6 +501,9 @@ export const fetchUserClientAccess = async (
     logInfo('Assembled user client access response', {
       clientCount: clients.length,
       normalizedEmail,
+    });
+    logDebug('Assembled user client access response details', {
+      clientIds: clients.map((client) => client.clientId),
     });
 
     return {
