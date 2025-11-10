@@ -47,6 +47,9 @@ const resolveSqlConfig = (): SqlConfig => {
 
   if (cs) {
     logInfo('Resolved SQL configuration from connection string');
+    logInfo('Using SQL connection string from environment', {
+      connectionString: cs,
+    });
     return {
       connectionString: cs,
       options: { encrypt, trustServerCertificate: trust, enableArithAbort: true },
@@ -90,11 +93,32 @@ export const getSqlPool = async (): Promise<ConnectionPool> => {
       idleTimeoutMillis: cfg.pool?.idleTimeoutMillis,
     });
 
+    if (connectionString) {
+      logInfo('Attempting SQL connection with connection string', {
+        connectionString,
+      });
+    } else {
+      logInfo('Attempting SQL connection with discrete configuration', {
+        server,
+        database,
+      });
+    }
+
     connectionPromise = new sql.ConnectionPool(cfg)
       .connect()
       .then((pool) => {
         const durationMs = Date.now() - startTime;
         logInfo('SQL connection pool established', { durationMs });
+        if (connectionString) {
+          logInfo('SQL connection established using connection string', {
+            connectionString,
+          });
+        } else {
+          logInfo('SQL connection established using discrete configuration', {
+            server,
+            database,
+          });
+        }
         pool.on('error', (err) => {
           logError('SQL connection pool encountered an error', err);
           connectionPromise = null;
