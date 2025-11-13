@@ -15,12 +15,8 @@ import {
 } from '../data/standardChartOfAccounts';
 import { buildMappingRowsFromImport } from '../utils/buildMappingRowsFromImport';
 import { slugify } from '../utils/slugify';
-import {
-  allocateDynamic,
-  getGroupTotal,
-  getSourceValue,
-} from '../utils/dynamicAllocation';
-import { resolveTargetBasisValue } from '../utils/dynamicExclusions';
+import { getSourceValue } from '../utils/dynamicAllocation';
+import { computeDynamicExclusionSummaries } from '../utils/dynamicExclusions';
 import { useRatioAllocationStore, type RatioAllocationHydrationPayload } from './ratioAllocationStore';
 
 const DRIVER_BENEFITS_TARGET = getStandardScoaOption(
@@ -1437,102 +1433,16 @@ useRatioAllocationStore.subscribe(
           ? results.filter(result => result.periodId === targetPeriod)
           : results;
 
-      const allocationBySource = new Map(
-        allocations.map(allocation => [allocation.sourceAccount.id, allocation]),
-      );
-
-      const exclusionTargetsByAllocation = new Map<string, Set<string>>();
-      allocations.forEach(allocation => {
-        const ids = allocation.targetDatapoints
-          .filter(target => target.isExclusion)
-          .map(target => target.datapointId);
-        if (ids.length > 0) {
-          exclusionTargetsByAllocation.set(allocation.id, new Set(ids));
-        }
+      const summaries = computeDynamicExclusionSummaries({
+        accounts: dynamicAccounts,
+        allocations,
+        basisAccounts,
+        groups,
+        selectedPeriod: targetPeriod,
+        results: relevantResults,
       });
 
-      const amountByAccount = new Map<string, number>();
-
-      relevantResults.forEach(result => {
-        const allocation = allocationBySource.get(result.sourceAccountId);
-        if (!allocation) {
-          return;
-        }
-
-        const exclusionTargets = exclusionTargetsByAllocation.get(allocation.id);
-        if (!exclusionTargets || exclusionTargets.size === 0) {
-          amountByAccount.set(result.sourceAccountId, 0);
-          return;
-        }
-
-        let total = 0;
-        result.allocations.forEach(target => {
-          if (exclusionTargets.has(target.targetId)) {
-            total += target.value;
-          }
-        });
-        if (result.adjustment && exclusionTargets.has(result.adjustment.targetId)) {
-          total += result.adjustment.amount;
-        }
-
-        amountByAccount.set(result.sourceAccountId, Math.max(0, Math.abs(total)));
-      });
-
-      const groupLookup = new Map(groups.map(group => [group.id, group]));
-      const basisLookup = new Map(basisAccounts.map(account => [account.id, account]));
-      const sourceAccountById = new Map(sourceAccounts.map(account => [account.id, account]));
-
-      dynamicAccounts.forEach(account => {
-        if (amountByAccount.has(account.id)) {
-          return;
-        }
-
-        const allocation = allocationBySource.get(account.id);
-        if (!allocation) {
-          return;
-        }
-
-        const hasExcludedTargets = allocation.targetDatapoints.some(target => target.isExclusion);
-        if (!hasExcludedTargets) {
-          amountByAccount.set(account.id, 0);
-          return;
-        }
-
-        const basisValues = allocation.targetDatapoints.map(target =>
-          resolveTargetBasisValue(target, basisLookup, groupLookup, targetPeriod),
-        );
-
-        const basisTotal = basisValues.reduce((sum, value) => sum + value, 0);
-        if (!(basisTotal > 0)) {
-          amountByAccount.set(account.id, 0);
-          return;
-        }
-
-        const sourceAccount = sourceAccountById.get(account.id);
-        const sourceAmount = sourceAccount
-          ? getSourceValue(sourceAccount, targetPeriod)
-          : account.netChange;
-        const allocationSource = Math.abs(sourceAmount);
-        if (!(allocationSource > 0)) {
-          amountByAccount.set(account.id, 0);
-          return;
-        }
-
-        try {
-          const computed = allocateDynamic(allocationSource, basisValues);
-          let excludedTotal = 0;
-          allocation.targetDatapoints.forEach((target, index) => {
-            if (target.isExclusion) {
-              const value = computed.allocations[index] ?? 0;
-              excludedTotal += Math.max(0, Math.abs(value));
-            }
-          });
-          amountByAccount.set(account.id, excludedTotal);
-        } catch (error) {
-          console.warn('Failed to derive fallback dynamic exclusion amount', error);
-          amountByAccount.set(account.id, 0);
-        }
-      });
+      const sourceAccountLookup = new Map(sourceAccounts.map(account => [account.id, account]));
 
       let changed = false;
       const nextAccounts = currentState.accounts.map(account => {
@@ -1544,17 +1454,8 @@ useRatioAllocationStore.subscribe(
           return account;
         }
 
-        const allocation = allocationBySource.get(account.id);
-        if (!allocation) {
-          if (account.dynamicExclusionAmount !== undefined) {
-            changed = true;
-            return { ...account, dynamicExclusionAmount: undefined };
-          }
-          return account;
-        }
-
-        const exclusionTargets = exclusionTargetsByAllocation.get(allocation.id);
-        if (!exclusionTargets || exclusionTargets.size === 0) {
+        const summary = summaries.get(account.id);
+        if (!summary) {
           if ((account.dynamicExclusionAmount ?? 0) === 0) {
             return account;
           }
@@ -1562,7 +1463,13 @@ useRatioAllocationStore.subscribe(
           return { ...account, dynamicExclusionAmount: 0 };
         }
 
-        const resolvedAmount = amountByAccount.get(account.id) ?? 0;
+        const ratio = summary.percentage;
+        const sourceAccount = sourceAccountLookup.get(account.id);
+        const sourceValue = sourceAccount
+          ? Math.abs(getSourceValue(sourceAccount, targetPeriod))
+          : Math.abs(account.netChange);
+        const resolvedAmount = sourceValue > 0 ? ratio * sourceValue : 0;
+
         if (Math.abs((account.dynamicExclusionAmount ?? 0) - resolvedAmount) < 0.0001) {
           return account;
         }

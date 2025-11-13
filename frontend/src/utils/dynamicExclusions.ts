@@ -6,7 +6,7 @@ import type {
   RatioAllocation,
   RatioAllocationTargetDatapoint,
 } from '../types';
-import { getBasisValue } from './dynamicAllocation';
+import { allocateDynamic, getBasisValue } from './dynamicAllocation';
 
 const normalizeId = (value?: string | null): string => {
   if (typeof value !== 'string') {
@@ -164,14 +164,30 @@ export const computeDynamicExclusionSummaries = ({
       );
       const basisTotal = basisValues.reduce((sum, value) => sum + value, 0);
       if (basisTotal > 0) {
-        let excludedBasis = 0;
-        allocation.targetDatapoints.forEach((target, index) => {
-          if (target.isExclusion) {
-            excludedBasis += basisValues[index] ?? 0;
+        const absoluteSource = Math.abs(account.netChange);
+        if (absoluteSource > 0) {
+          try {
+            const computation = allocateDynamic(absoluteSource, basisValues);
+            let excludedTotal = 0;
+            allocation.targetDatapoints.forEach((target, index) => {
+              if (!target.isExclusion) {
+                return;
+              }
+              const targetValue = computation.allocations[index] ?? 0;
+              excludedTotal += Math.max(0, Math.abs(targetValue));
+              if (
+                computation.adjustmentIndex === index &&
+                Math.abs(computation.adjustmentAmount) > 0
+              ) {
+                excludedTotal += Math.abs(computation.adjustmentAmount);
+              }
+            });
+            if (excludedTotal > 0) {
+              resolvedRatio = Math.min(1, excludedTotal / absoluteSource);
+            }
+          } catch (error) {
+            console.warn('Failed to derive exclusion ratio from preset basis', error);
           }
-        });
-        if (excludedBasis > 0) {
-          resolvedRatio = Math.min(1, excludedBasis / basisTotal);
         }
       }
     }
