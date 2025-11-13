@@ -159,6 +159,7 @@ export default function MappingTable() {
     [datapoints]
   );
   const accounts = useMappingStore(selectFilteredAccounts);
+  const activePeriod = useMappingStore((state) => state.activePeriod);
   const searchTerm = useMappingStore(selectSearchTerm);
   const activeStatuses = useMappingStore(selectActiveStatuses);
   const updateTarget = useMappingStore((state) => state.updateTarget);
@@ -381,6 +382,8 @@ export default function MappingTable() {
     return [...filteredAccounts].sort(safeCompare);
   }, [filteredAccounts, sortConfig, getDisplayStatus]);
 
+  const derivedSelectedPeriod = activePeriod ?? selectedPeriod ?? null;
+
   const dynamicExclusionSummaries = useMemo(
     () =>
       computeDynamicExclusionSummaries({
@@ -388,10 +391,10 @@ export default function MappingTable() {
         allocations,
         basisAccounts,
         groups,
-        selectedPeriod,
+        selectedPeriod: derivedSelectedPeriod,
         results,
       }),
-    [accounts, allocations, basisAccounts, groups, selectedPeriod, results]
+    [accounts, allocations, basisAccounts, derivedSelectedPeriod, groups, results]
   );
 
   useEffect(() => {
