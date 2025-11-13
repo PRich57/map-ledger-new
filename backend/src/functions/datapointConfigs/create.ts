@@ -1,22 +1,23 @@
-import { Request, Response } from 'express';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { json, readJson } from '../../http';
 import { createDatapointConfiguration } from '../../repositories/datapointConfigurationRepository';
 import { buildErrorResponse, sanitizePayload } from './utils';
 
-export default async function createDatapointConfigs(
-  req: Request,
-  res: Response
-) {
+export async function createDatapointConfigsHandler(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
   try {
-    if (!req.body || typeof req.body !== 'object') {
-      res.status(400).json({ message: 'Missing request body' });
-      return;
+    const body = await readJson<Record<string, unknown>>(request);
+
+    if (!body || typeof body !== 'object') {
+      return json({ message: 'Missing request body' }, 400);
     }
 
-    const payload = sanitizePayload(req.body as Record<string, unknown>);
+    const payload = sanitizePayload(body);
 
     if (!payload.userEmail || !payload.clientId || !payload.clientName) {
-      res.status(400).json({ message: 'userEmail, clientId, and clientName are required' });
-      return;
+      return json({ message: 'userEmail, clientId, and clientName are required' }, 400);
     }
 
     const created = await createDatapointConfiguration({
@@ -24,17 +25,21 @@ export default async function createDatapointConfigs(
       userEmail: payload.userEmail.toLowerCase(),
     });
 
-    res.status(201).json(created);
+    return json(created, 201);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to create datapoint configuration', error);
-    res
-      .status(500)
-      .json(
-        buildErrorResponse(
-          'Failed to create datapoint configuration',
-          error
-        )
-      );
+    context.error('Failed to create datapoint configuration', error);
+    return json(
+      buildErrorResponse('Failed to create datapoint configuration', error),
+      500
+    );
   }
 }
+
+app.http('createDatapointConfigs', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'datapoint-configs',
+  handler: createDatapointConfigsHandler,
+});
+
+export default createDatapointConfigsHandler;

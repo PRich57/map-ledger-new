@@ -1,5 +1,19 @@
-import { Request, Response } from 'express';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { json } from '../../http';
 
-export default async function glUpload(req: Request, res: Response) {
-  res.status(501).json({ message: 'gl/upload endpoint not implemented' });
+export async function glUploadHandler(
+  _request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  context.warn('glUpload endpoint not implemented');
+  return json({ message: 'gl/upload endpoint not implemented' }, 501);
 }
+
+app.http('glUpload', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'gl/upload',
+  handler: glUploadHandler
+});
+
+export default glUploadHandler;

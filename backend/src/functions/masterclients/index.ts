@@ -1,5 +1,19 @@
-import { Request, Response } from 'express';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { json } from '../../http';
 
-export default async function masterclients(req: Request, res: Response) {
-  res.status(501).json({ message: 'masterclients endpoint not implemented' });
+export async function masterclientsHandler(
+  _request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  context.warn('masterclients endpoint not implemented');
+  return json({ message: 'masterclients endpoint not implemented' }, 501);
 }
+
+app.http('masterclients', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'masterclients',
+  handler: masterclientsHandler
+});
+
+export default masterclientsHandler;

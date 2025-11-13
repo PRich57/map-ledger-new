@@ -1,22 +1,50 @@
 import { useMemo } from 'react';
 import {
+  getAccountExcludedAmount,
   selectAccounts,
   selectSummaryMetrics,
   useMappingStore,
 } from '../../store/mappingStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+import { computeDynamicExclusionSummaries, sumDynamicExclusionAmounts } from '../../utils/dynamicExclusions';
+import { formatCurrencyAmount } from '../../utils/currency';
 
 const SummaryCards = () => {
   const accounts = useMappingStore(selectAccounts);
-  const { totalAccounts, mappedAccounts, grossTotal, excludedTotal, netTotal } = useMappingStore(selectSummaryMetrics);
-  const { allocations, results, selectedPeriod } = useRatioAllocationStore(state => ({
+  const { totalAccounts, mappedAccounts, grossTotal, excludedTotal } = useMappingStore(selectSummaryMetrics);
+  const { allocations, results, selectedPeriod, basisAccounts, groups } = useRatioAllocationStore(state => ({
     allocations: state.allocations,
     results: state.results,
     selectedPeriod: state.selectedPeriod,
+    basisAccounts: state.basisAccounts,
+    groups: state.groups,
   }));
+
+  const dynamicExclusionSummaries = useMemo(
+    () =>
+      computeDynamicExclusionSummaries({
+        accounts,
+        allocations,
+        basisAccounts,
+        groups,
+        selectedPeriod,
+        results,
+      }),
+    [accounts, allocations, basisAccounts, groups, results, selectedPeriod],
+  );
+
+  const adjustedTotals = useMemo(() => {
+    const dynamicOverrideTotal = sumDynamicExclusionAmounts(dynamicExclusionSummaries);
+    const baselineDynamicExcluded = accounts
+      .filter(account => account.mappingType === 'dynamic')
+      .reduce((sum, account) => sum + getAccountExcludedAmount(account), 0);
+    const normalizedExcludedTotal = excludedTotal - baselineDynamicExcluded + dynamicOverrideTotal;
+    const normalizedNetTotal = grossTotal - normalizedExcludedTotal;
+    return {
+      excluded: normalizedExcludedTotal,
+      net: normalizedNetTotal,
+    };
+  }, [accounts, dynamicExclusionSummaries, excludedTotal, grossTotal]);
 
   const { pendingAllocations, executedRules, totalTargets } = useMemo(() => {
     const needsAllocation = accounts.filter(account => {
@@ -58,11 +86,11 @@ const SummaryCards = () => {
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <p className="text-sm text-gray-500 dark:text-gray-400">Total balance</p>
-        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrency(grossTotal)}</p>
+        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrencyAmount(grossTotal)}</p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Net after exclusions {formatCurrency(netTotal)}
+          Net after exclusions {formatCurrencyAmount(adjustedTotals.net)}
         </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">Excluded {formatCurrency(excludedTotal)}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">Excluded {formatCurrencyAmount(adjustedTotals.excluded)}</p>
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <p className="text-sm text-gray-500 dark:text-gray-400">Current period allocations</p>

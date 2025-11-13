@@ -363,6 +363,11 @@ export interface CompanyRef {
   clients: ClientRef[];
 }
 
+export interface CompanySummary {
+  id: string;
+  name: string;
+}
+
 export interface GLAccountCompanyBreakdown {
   id: string;
   company: string;
@@ -430,6 +435,7 @@ export interface GLAccountMappingRow {
   companies: GLAccountCompanyBreakdown[];
   dynamicExclusionAmount?: number;
   glMonth?: string; // GL month in YYYY-MM format
+  requiresCompanyAssignment?: boolean;
 }
 
 export interface GLUpload {

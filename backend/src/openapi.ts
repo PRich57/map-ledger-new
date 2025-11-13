@@ -20,6 +20,9 @@ const openApiSpec = {
     '/user-clients': {
       get: { summary: 'List clients available to the current user' }
     },
+    '/db-ping': {
+      get: { summary: 'Ping the SQL database and return connectivity diagnostics' }
+    },
     '/datapoint-configs': {
       get: { summary: 'List saved datapoint configurations' },
       post: { summary: 'Create a new datapoint configuration' },

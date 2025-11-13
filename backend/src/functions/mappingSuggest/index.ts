@@ -1,5 +1,19 @@
-import { Request, Response } from 'express';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { json } from '../../http';
 
-export default async function mappingSuggest(req: Request, res: Response) {
-  res.status(501).json({ message: 'mapping/suggest endpoint not implemented' });
+export async function mappingSuggestHandler(
+  _request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
+  context.warn('mapping/suggest endpoint not implemented');
+  return json({ message: 'mapping/suggest endpoint not implemented' }, 501);
 }
+
+app.http('mappingSuggest', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'mapping/suggest',
+  handler: mappingSuggestHandler
+});
+
+export default mappingSuggestHandler;

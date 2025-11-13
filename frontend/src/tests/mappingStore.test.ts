@@ -19,6 +19,8 @@ describe('mappingStore selectors', () => {
       accounts: createInitialMappingAccounts(),
       searchTerm: '',
       activeStatuses: [],
+      activeCompanies: [],
+      activeCompanyIds: [],
     });
     useRatioAllocationStore.setState({
       allocations: [],
@@ -295,6 +297,7 @@ describe('mappingStore selectors', () => {
           uploadId: 'import-1',
           clientId: 'cli-123',
           companyIds: ['ent-1'],
+          companies: [{ id: 'ent-1', name: 'Entity One' }],
           period: '2024-01',
           rows,
         });
@@ -312,6 +315,64 @@ describe('mappingStore selectors', () => {
     expect(state.activeUploadId).toBe('import-1');
     expect(state.activeClientId).toBe('cli-123');
     expect(state.activeCompanyIds).toEqual(['ent-1']);
+    expect(state.activeCompanies).toEqual([
+      { id: 'ent-1', name: 'Entity One' },
+    ]);
     expect(state.activePeriod).toBe('2024-01');
+  });
+
+  it('marks duplicate account-month entries for manual company assignment', () => {
+    const rows: TrialBalanceRow[] = [
+      {
+        accountId: '4000',
+        description: 'Revenue Item',
+        entity: '',
+        netChange: 1000,
+        glMonth: '2025-08',
+      },
+      {
+        accountId: '4000',
+        description: 'Revenue Item Duplicate',
+        entity: '',
+        netChange: 2000,
+        glMonth: '2025-08',
+      },
+    ];
+
+    act(() => {
+      useMappingStore.getState().loadImportedAccounts({
+        uploadId: 'import-dup',
+        clientId: 'cli-123',
+        companyIds: ['comp-1'],
+        companies: [{ id: 'comp-1', name: 'AMX Inc.' }],
+        period: '2025-08',
+        rows,
+      });
+    });
+
+    const state = useMappingStore.getState();
+    expect(state.accounts).toHaveLength(2);
+    state.accounts.forEach((account) => {
+      expect(account.requiresCompanyAssignment).toBe(true);
+    });
+
+    act(() => {
+      useMappingStore.getState().updateAccountCompany(state.accounts[0].id, {
+        companyName: 'AMX Inc.',
+        companyId: 'comp-1',
+      });
+      useMappingStore.getState().updateAccountCompany(state.accounts[1].id, {
+        companyName: 'AMX Canada',
+      });
+    });
+
+    const resolved = useMappingStore.getState().accounts;
+    expect(resolved.map((account) => account.companyName)).toEqual([
+      'AMX Inc.',
+      'AMX Canada',
+    ]);
+    resolved.forEach((account) => {
+      expect(account.requiresCompanyAssignment).toBe(false);
+    });
   });
 });

@@ -255,6 +255,11 @@ export const useOrganizationStore = create<OrganizationState>((set, get) => ({
     logInfo('Starting fetch for user clients', {
       normalizedEmail,
       apiBaseUrl: API_BASE_URL,
+      environment: {
+        mode: import.meta.env.MODE,
+        dev: import.meta.env.DEV,
+        prod: import.meta.env.PROD,
+      },
     });
     set({ isLoading: true, error: null });
 
@@ -262,21 +267,29 @@ export const useOrganizationStore = create<OrganizationState>((set, get) => ({
       const requestUrl = `${API_BASE_URL}/user-clients?email=${encodeURIComponent(
         normalizedEmail
       )}`;
+      const requestHeaders: Record<string, string> = {
+        Accept: 'application/json',
+        'X-User-Email': normalizedEmail,
+      };
       logInfo('Requesting user clients from API', {
         normalizedEmail,
         requestUrl,
+        headers: requestHeaders,
       });
 
+      const requestStartedAt = performance.now();
       const response = await fetch(requestUrl, {
-        headers: {
-          Accept: 'application/json',
-        },
+        headers: requestHeaders,
+        credentials: 'include',
       });
+
+      const responseTimeMs = performance.now() - requestStartedAt;
 
       logDebug('Received response from user-clients endpoint', {
         status: response.status,
         ok: response.ok,
         statusText: response.statusText,
+        responseTimeMs,
       });
 
       if (!response.ok) {
@@ -286,6 +299,15 @@ export const useOrganizationStore = create<OrganizationState>((set, get) => ({
         });
         throw new Error(`Failed to load clients (${response.status})`);
       }
+
+      const responseClone = response.clone();
+      const rawPayload = await responseClone
+        .text()
+        .catch(() => '<unavailable>');
+
+      logDebug('Raw payload from user-clients endpoint', {
+        rawPayload,
+      });
 
       const data = (await response.json()) as {
         clients?: UserClientAccess[];
@@ -322,14 +344,29 @@ export const useOrganizationStore = create<OrganizationState>((set, get) => ({
         isLoading: false,
         error: null,
       });
+      const latestState = get();
+      logInfo('Organization store state updated after successful fetch', {
+        companyIds: derivedCompanies.map((company) => company.id),
+        clientIds: accessList.map((client) => client.clientId),
+        configsTracked: Object.keys(latestState.configsByClient).length,
+      });
     } catch (error) {
-      logError('Failed to fetch user clients', error);
+      logError('Failed to fetch user clients', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        normalizedEmail,
+        apiBaseUrl: API_BASE_URL,
+      });
       set({
         companies: [],
         clientAccess: [],
         isLoading: false,
         currentEmail: null,
         error: error instanceof Error ? error.message : 'Failed to load clients',
+      });
+      logWarn('Organization store state reset after failed fetch', {
+        normalizedEmail,
       });
     }
   },

@@ -4,16 +4,19 @@ This package contains the Azure Functions that power the MapLedger API.
 
 ## Running locally
 
-Install dependencies and start the Functions host:
+Install dependencies, build the TypeScript project, and start the Functions host:
 
 ```bash
 cd backend
 npm install
-func start
+npm run start
 ```
 
-`func start` requires Azure Functions Core Tools v4. The Functions host will
-load environment variables from `local.settings.json` if present.
+The `start` script compiles the TypeScript sources to `dist/` and then launches
+`func start`. You can also run `npm run build` followed by `func start` if you
+prefer to manage compilation manually. Azure Functions Core Tools v4 is
+required. The Functions host will load environment variables from
+`local.settings.json` if present.
 
 ### Required environment variables
 

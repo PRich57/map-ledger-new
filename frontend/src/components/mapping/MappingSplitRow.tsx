@@ -30,65 +30,8 @@ const clampPercentage = (value: number): number => {
   return Math.max(0, Math.min(100, value));
 };
 
-const distributePercentageRemainder = (
-  total: number,
-  splits: { id: string; weight: number }[],
-): Record<string, number> => {
-  if (splits.length === 0) {
-    return {};
-  }
-
-  const safeTotal = Math.max(0, Math.min(100, Math.round(total)));
-  if (safeTotal === 0) {
-    return splits.reduce<Record<string, number>>((accumulator, split) => {
-      accumulator[split.id] = 0;
-      return accumulator;
-    }, {});
-  }
-
-  const weightSum = splits.reduce((sum, split) => sum + Math.max(split.weight, 0), 0);
-
-  if (weightSum === 0) {
-    const evenShare = Math.floor(safeTotal / splits.length);
-    let remainder = safeTotal - evenShare * splits.length;
-    return splits.reduce<Record<string, number>>((accumulator, split) => {
-      const extra = remainder > 0 ? 1 : 0;
-      if (remainder > 0) {
-        remainder -= 1;
-      }
-      accumulator[split.id] = evenShare + extra;
-      return accumulator;
-    }, {});
-  }
-
-  const rawAllocations = splits.map(split => {
-    const weight = Math.max(split.weight, 0);
-    const raw = (weight / weightSum) * safeTotal;
-    const base = Math.floor(raw);
-    return {
-      id: split.id,
-      value: base,
-      fraction: raw - base,
-    };
-  });
-
-  const totalAssigned = rawAllocations.reduce((sum, allocation) => sum + allocation.value, 0);
-  let remainder = safeTotal - totalAssigned;
-
-  const sortedByFraction = [...rawAllocations].sort((a, b) => b.fraction - a.fraction);
-  for (const allocation of sortedByFraction) {
-    if (remainder <= 0) {
-      break;
-    }
-    allocation.value += 1;
-    remainder -= 1;
-  }
-
-  return rawAllocations.reduce<Record<string, number>>((accumulator, allocation) => {
-    accumulator[allocation.id] = allocation.value;
-    return accumulator;
-  }, {});
-};
+const roundToTwoDecimals = (value: number): number =>
+  Math.round(value * 100) / 100;
 
 export default function MappingSplitRow({
   account,
@@ -113,41 +56,44 @@ export default function MappingSplitRow({
 
   const totals = useMemo(() => {
     const percentageTotalRaw = splitRows.reduce((sum, split) => sum + split.percentage, 0);
+    const normalizedTotal = roundToTwoDecimals(percentageTotalRaw);
     const amountTotal = splitRows.reduce((sum, split) => sum + split.amount, 0);
+    const completionDelta = Math.abs(percentageTotalRaw - 100);
 
     return {
-      percentageTotalLabel: `${Math.round(percentageTotalRaw)}%`,
+      percentageTotalLabel: `${normalizedTotal.toFixed(2)}%`,
       amountTotal,
-      remainingLabel: `${Math.max(0, 100 - Math.round(percentageTotalRaw))}%`,
-      isComplete: Math.round(percentageTotalRaw) === 100,
+      remainingLabel: `${Math.max(0, roundToTwoDecimals(100 - normalizedTotal)).toFixed(2)}%`,
+      isComplete: completionDelta <= 0.01,
     };
   }, [splitRows]);
 
   const handlePercentageChange = (splitId: string, value: string) => {
     const rawValue = Number(value);
-    const numericValue = clampPercentage(Math.round(rawValue));
+    const numericValue = clampPercentage(rawValue);
+    const normalizedValue = roundToTwoDecimals(numericValue);
 
-    const otherSplits = account.splitDefinitions.filter(split => split.id !== splitId);
-    const redistribution = distributePercentageRemainder(
-      Math.max(0, 100 - numericValue),
-      otherSplits.map(split => ({
-        id: split.id,
-        weight: calculateSplitPercentage(account, split),
-      })),
+    const activeSplits = account.splitDefinitions.filter(
+      split => !split.isExclusion,
     );
+    const targetIsActive = activeSplits.some(split => split.id === splitId);
+    const shouldRedistribute = targetIsActive && activeSplits.length === 2;
+    const partnerSplit = shouldRedistribute
+      ? activeSplits.find(split => split.id !== splitId)
+      : null;
 
     onUpdateSplit(splitId, {
       allocationType: 'percentage',
-      allocationValue: numericValue,
+      allocationValue: normalizedValue,
     });
 
-    otherSplits.forEach(split => {
-      const nextValue = redistribution[split.id] ?? 0;
-      onUpdateSplit(split.id, {
+    if (partnerSplit) {
+      const remaining = roundToTwoDecimals(Math.max(0, 100 - normalizedValue));
+      onUpdateSplit(partnerSplit.id, {
         allocationType: 'percentage',
-        allocationValue: clampPercentage(nextValue),
+        allocationValue: remaining,
       });
-    });
+    }
   };
 
   const handleTargetChange = (splitId: string, value: string) => {
@@ -260,10 +206,10 @@ export default function MappingSplitRow({
                           type="number"
                           min={0}
                           max={100}
-                          step={1}
+                          step={0.01}
                           value={Number.isFinite(split.percentage)
-                            ? Math.round(split.percentage)
-                            : 0}
+                            ? split.percentage.toFixed(2)
+                            : '0.00'}
                           onChange={event => handlePercentageChange(split.id, event.target.value)}
                           className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                         />

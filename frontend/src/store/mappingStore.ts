@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  CompanySummary,
   DynamicBasisAccount,
   GLAccountMappingRow,
   MappingPolarity,
@@ -13,11 +14,13 @@ import {
   getStandardScoaOption,
 } from '../data/standardChartOfAccounts';
 import { buildMappingRowsFromImport } from '../utils/buildMappingRowsFromImport';
+import { slugify } from '../utils/slugify';
 import {
   allocateDynamic,
   getGroupTotal,
   getSourceValue,
 } from '../utils/dynamicAllocation';
+import { resolveTargetBasisValue } from '../utils/dynamicExclusions';
 import { useRatioAllocationStore, type RatioAllocationHydrationPayload } from './ratioAllocationStore';
 
 const DRIVER_BENEFITS_TARGET = getStandardScoaOption(
@@ -437,6 +440,96 @@ const syncDynamicAllocationState = (
   useRatioAllocationStore.setState({ results: [], validationErrors: [], auditLog: [] });
 };
 
+const ensureCompanyBreakdown = (
+  account: GLAccountMappingRow,
+  companyId: string,
+  companyName: string,
+) => {
+  if (!account.companies || account.companies.length === 0) {
+    return [
+      {
+        id: companyId,
+        company: companyName,
+        balance: account.netChange,
+      },
+    ];
+  }
+
+  return account.companies.map((company, index) => {
+    if (index === 0) {
+      return {
+        ...company,
+        id: companyId,
+        company: companyName,
+      };
+    }
+    return { ...company };
+  });
+};
+
+const resolveCompanyConflicts = (
+  accounts: GLAccountMappingRow[],
+  selectedCompanies: CompanySummary[],
+): GLAccountMappingRow[] => {
+  const normalized = accounts.map(account => {
+    const trimmedName = account.companyName?.trim() ?? '';
+    const normalizedId =
+      trimmedName.length > 0
+        ? account.companyId && account.companyId.length > 0
+          ? account.companyId
+          : slugify(trimmedName) || `unassigned-${account.id}`
+        : `unassigned-${account.id}`;
+
+    return {
+      ...account,
+      companyId: normalizedId,
+      companyName: trimmedName,
+      companies: ensureCompanyBreakdown(account, normalizedId, trimmedName),
+      requiresCompanyAssignment: trimmedName.length === 0,
+    };
+  });
+
+  if (selectedCompanies.length !== 1) {
+    return normalized;
+  }
+
+  const groupedByAccountMonth = new Map<string, GLAccountMappingRow[]>();
+  normalized.forEach(account => {
+    const periodKey = account.glMonth ?? 'unspecified';
+    const groupKey = `${account.accountId}__${periodKey}`;
+    const group = groupedByAccountMonth.get(groupKey) ?? [];
+    group.push(account);
+    groupedByAccountMonth.set(groupKey, group);
+  });
+
+  groupedByAccountMonth.forEach(group => {
+    if (group.length <= 1) {
+      return;
+    }
+
+    const nameCounts = new Map<string, number>();
+    group.forEach(account => {
+      const key = account.companyName.length > 0 ? account.companyName.toLowerCase() : '__blank__';
+      nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+    });
+
+    group.forEach(account => {
+      const key = account.companyName.length > 0 ? account.companyName.toLowerCase() : '__blank__';
+      if ((nameCounts.get(key) ?? 0) > 1) {
+        const index = normalized.findIndex(candidate => candidate.id === account.id);
+        if (index !== -1) {
+          normalized[index] = {
+            ...normalized[index],
+            requiresCompanyAssignment: true,
+          };
+        }
+      }
+    });
+  });
+
+  return normalized;
+};
+
 const calculateGrossTotal = (accounts: GLAccountMappingRow[]): number =>
   accounts.reduce((sum, account) => sum + account.netChange, 0);
 
@@ -458,6 +551,7 @@ interface MappingState {
   activeUploadId: string | null;
   activeClientId: string | null;
   activeCompanyIds: string[];
+  activeCompanies: CompanySummary[];
   activePeriod: string | null;
   setSearchTerm: (term: string) => void;
   setActivePeriod: (period: string | null) => void;
@@ -501,10 +595,15 @@ interface MappingState {
   applyPresetToAccounts: (ids: string[], presetId: string | null) => void;
   bulkAccept: (ids: string[]) => void;
   finalizeMappings: (ids: string[]) => boolean;
+  updateAccountCompany: (
+    accountId: string,
+    payload: { companyName: string; companyId?: string | null }
+  ) => void;
   loadImportedAccounts: (payload: {
     uploadId: string;
     clientId?: string | null;
     companyIds?: string[];
+    companies?: CompanySummary[];
     period?: string | null;
     rows: TrialBalanceRow[];
   }) => void;
@@ -519,6 +618,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   activeUploadId: null,
   activeClientId: null,
   activeCompanyIds: [],
+  activeCompanies: [],
   activePeriod: null,
   setSearchTerm: term => set({ searchTerm: term }),
   setActivePeriod: period => set({ activePeriod: period }),
@@ -621,6 +721,10 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       }
 
       const shouldApplyToAll = state.activePeriod === null;
+      const templateSplits =
+        mappingType === 'percentage'
+          ? ensureMinimumPercentageSplits(targetAccount.splitDefinitions)
+          : [];
 
       const accounts = state.accounts.map(account => {
         const isSameAccount = account.companyId === targetAccount.companyId &&
@@ -633,7 +737,9 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
         const nextSplitDefinitions =
           mappingType === 'percentage'
-            ? ensureMinimumPercentageSplits(account.splitDefinitions)
+            ? shouldApplyToAll
+              ? templateSplits.map(split => ({ ...split }))
+              : ensureMinimumPercentageSplits(account.splitDefinitions)
             : [];
         const nextDynamicExclusion = mappingType === 'dynamic' ? account.dynamicExclusionAmount : undefined;
 
@@ -694,28 +800,70 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }),
   addSplitDefinition: id =>
     set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === id);
+      if (!targetAccount || targetAccount.mappingType !== 'percentage') {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+      const templateSplit = createBlankSplitDefinition();
+      const updatedTargetSplits = [...targetAccount.splitDefinitions, templateSplit];
+      const key = `${targetAccount.companyId}__${targetAccount.accountId}`;
+
       const accounts = state.accounts.map(account => {
-        if (account.id !== id) {
+        const matchesKey = `${account.companyId}__${account.accountId}` === key;
+        const shouldUpdate = shouldApplyToAll ? matchesKey : account.id === id;
+
+        if (!shouldUpdate || account.mappingType !== 'percentage') {
           return account;
         }
-        if (account.mappingType !== 'percentage') {
-          return account;
-        }
-        const nextSplit: MappingSplitDefinition = createBlankSplitDefinition();
+
+        const splitsToApply = shouldApplyToAll
+          ? updatedTargetSplits.map(split => ({ ...split }))
+          : [...account.splitDefinitions, { ...templateSplit }];
+
         return applyDerivedStatus({
           ...account,
-          splitDefinitions: [...account.splitDefinitions, nextSplit],
+          splitDefinitions: splitsToApply,
         });
       });
+
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     }),
   updateSplitDefinition: (accountId, splitId, updates) =>
     set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === accountId);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+      const updatedTargetSplits = targetAccount.splitDefinitions.map(split =>
+        split.id === splitId
+          ? {
+              ...split,
+              ...updates,
+            }
+          : split,
+      );
+      const key = `${targetAccount.companyId}__${targetAccount.accountId}`;
+
       const accounts = state.accounts.map(account => {
-        if (account.id !== accountId) {
+        const matchesKey = `${account.companyId}__${account.accountId}` === key;
+        const shouldUpdate = shouldApplyToAll ? matchesKey : account.id === accountId;
+
+        if (!shouldUpdate) {
           return account;
         }
+
+        if (shouldApplyToAll) {
+          return applyDerivedStatus({
+            ...account,
+            splitDefinitions: updatedTargetSplits.map(split => ({ ...split })),
+          });
+        }
+
         return applyDerivedStatus({
           ...account,
           splitDefinitions: account.splitDefinitions.map(split =>
@@ -728,20 +876,42 @@ export const useMappingStore = create<MappingState>((set, get) => ({
           ),
         });
       });
+
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     }),
   removeSplitDefinition: (accountId, splitId) =>
     set(state => {
+      const targetAccount = state.accounts.find(acc => acc.id === accountId);
+      if (!targetAccount) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+      const updatedTargetSplits = targetAccount.splitDefinitions.filter(split => split.id !== splitId);
+      const key = `${targetAccount.companyId}__${targetAccount.accountId}`;
+
       const accounts = state.accounts.map(account => {
-        if (account.id !== accountId) {
+        const matchesKey = `${account.companyId}__${account.accountId}` === key;
+        const shouldUpdate = shouldApplyToAll ? matchesKey : account.id === accountId;
+
+        if (!shouldUpdate) {
           return account;
         }
+
+        if (shouldApplyToAll) {
+          return applyDerivedStatus({
+            ...account,
+            splitDefinitions: updatedTargetSplits.map(split => ({ ...split })),
+          });
+        }
+
         return applyDerivedStatus({
           ...account,
           splitDefinitions: account.splitDefinitions.filter(split => split.id !== splitId),
         });
       });
+
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     }),
@@ -894,24 +1064,62 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }),
   applyPresetToAccounts: (ids, presetId) => {
     set(state => {
+      if (!ids.length) {
+        return state;
+      }
+
+      const shouldApplyToAll = state.activePeriod === null;
+      const keySet = shouldApplyToAll
+        ? new Set(
+            state.accounts
+              .filter(account => ids.includes(account.id))
+              .map(account => `${account.companyId}__${account.accountId}`),
+          )
+        : null;
+      const templateSplitsByKey = new Map<string, MappingSplitDefinition[]>();
+      if (shouldApplyToAll && presetId) {
+        state.accounts.forEach(account => {
+          if (!ids.includes(account.id)) {
+            return;
+          }
+          const key = `${account.companyId}__${account.accountId}`;
+          if (templateSplitsByKey.has(key)) {
+            return;
+          }
+          const splits = ensureMinimumPercentageSplits(account.splitDefinitions).map(split => ({ ...split }));
+          templateSplitsByKey.set(key, splits);
+        });
+      }
+
       const accounts = state.accounts.map(account => {
-        if (!ids.includes(account.id)) {
+        const matchesDirect = ids.includes(account.id);
+        const matchesKey = shouldApplyToAll
+          ? keySet?.has(`${account.companyId}__${account.accountId}`)
+          : false;
+
+        if (!matchesDirect && !matchesKey) {
           return account;
         }
+
         if (!presetId) {
           return applyDerivedStatus({ ...account, presetId: undefined });
         }
+
         const nextStatus: MappingStatus = account.status === 'Excluded' ? 'Unmapped' : account.status;
+        const key = `${account.companyId}__${account.accountId}`;
+        const baseSplits = shouldApplyToAll
+          ? templateSplitsByKey.get(key)?.map(split => ({ ...split })) ??
+            ensureMinimumPercentageSplits(account.splitDefinitions)
+          : ensureMinimumPercentageSplits(account.splitDefinitions);
         return applyDerivedStatus({
           ...account,
           mappingType: 'percentage',
-          splitDefinitions: ensureMinimumPercentageSplits(
-            account.splitDefinitions,
-          ),
+          splitDefinitions: baseSplits,
           presetId,
           status: nextStatus,
         });
       });
+
       updateDynamicBasisAccounts(accounts);
       return { accounts };
     });
@@ -958,25 +1166,87 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     console.log('Finalize mappings', payload);
     return true;
   },
-  loadImportedAccounts: ({ uploadId, clientId, companyIds, period, rows }) => {
+  updateAccountCompany: (accountId, payload) =>
+    set(state => {
+      const trimmedName = payload.companyName.trim();
+      const normalizedId =
+        trimmedName.length > 0
+          ? payload.companyId && payload.companyId.length > 0
+            ? payload.companyId
+            : slugify(trimmedName) || `unassigned-${accountId}`
+          : `unassigned-${accountId}`;
+
+      const accounts = state.accounts.map(account => {
+        if (account.id !== accountId) {
+          return account;
+        }
+
+        return {
+          ...account,
+          companyId: normalizedId,
+          companyName: trimmedName,
+          companies: ensureCompanyBreakdown(account, normalizedId, trimmedName),
+        };
+      });
+
+      const resolved = resolveCompanyConflicts(accounts, state.activeCompanies);
+      updateDynamicBasisAccounts(resolved);
+      return { accounts: resolved };
+    }),
+  loadImportedAccounts: ({
+    uploadId,
+    clientId,
+    companyIds,
+    companies,
+    period,
+    rows,
+  }) => {
     const normalizedClientId = clientId && clientId.trim().length > 0 ? clientId : null;
     const normalizedPeriod = period && period.trim().length > 0 ? period : null;
-    const accounts = buildMappingRowsFromImport(rows, {
+
+    const selectedCompanies = companies
+      ? Array.from(
+          new Map(
+            companies.map(company => [company.id, { id: company.id, name: company.name }]),
+          ).values(),
+        )
+      : [];
+
+    const accountsFromImport = buildMappingRowsFromImport(rows, {
       uploadId,
       clientId: normalizedClientId,
+      selectedCompanies,
     }).map(applyDerivedStatus);
 
+    const resolvedAccounts = resolveCompanyConflicts(accountsFromImport, selectedCompanies);
+
+    const periodSet = new Set<string>();
+    resolvedAccounts.forEach(account => {
+      if (account.glMonth) {
+        periodSet.add(account.glMonth);
+      }
+    });
+
+    const uniquePeriods = Array.from(periodSet);
+    const hasMultiplePeriods = uniquePeriods.length > 1;
+    const resolvedPeriod = hasMultiplePeriods
+      ? null
+      : normalizedPeriod ?? uniquePeriods[0] ?? null;
+
+    const resolvedCompanyIds = companyIds ?? selectedCompanies.map(company => company.id);
+
     set({
-      accounts,
+      accounts: resolvedAccounts,
       searchTerm: '',
       activeStatuses: [],
       activeUploadId: uploadId,
       activeClientId: normalizedClientId,
-      activeCompanyIds: companyIds ?? [],
-      activePeriod: normalizedPeriod,
+      activeCompanyIds: resolvedCompanyIds,
+      activeCompanies: selectedCompanies,
+      activePeriod: resolvedPeriod,
     });
 
-    syncDynamicAllocationState(accounts, rows, normalizedPeriod);
+    syncDynamicAllocationState(resolvedAccounts, rows, normalizedPeriod);
   },
 }));
 
@@ -1208,7 +1478,8 @@ useRatioAllocationStore.subscribe(
         amountByAccount.set(result.sourceAccountId, Math.max(0, Math.abs(total)));
       });
 
-      const groupById = new Map(groups.map(group => [group.id, group]));
+      const groupLookup = new Map(groups.map(group => [group.id, group]));
+      const basisLookup = new Map(basisAccounts.map(account => [account.id, account]));
       const sourceAccountById = new Map(sourceAccounts.map(account => [account.id, account]));
 
       dynamicAccounts.forEach(account => {
@@ -1227,16 +1498,9 @@ useRatioAllocationStore.subscribe(
           return;
         }
 
-        const basisValues = allocation.targetDatapoints.map(target => {
-          if (target.groupId) {
-            const group = groupById.get(target.groupId);
-            if (group) {
-              return getGroupTotal(group, basisAccounts, targetPeriod);
-            }
-            return 0;
-          }
-          return target.ratioMetric.value;
-        });
+        const basisValues = allocation.targetDatapoints.map(target =>
+          resolveTargetBasisValue(target, basisLookup, groupLookup, targetPeriod),
+        );
 
         const basisTotal = basisValues.reduce((sum, value) => sum + value, 0);
         if (!(basisTotal > 0)) {

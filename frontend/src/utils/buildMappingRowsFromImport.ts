@@ -1,8 +1,15 @@
-import type { GLAccountMappingRow, MappingPolarity, TrialBalanceRow } from '../types';
+import type {
+  CompanySummary,
+  GLAccountMappingRow,
+  MappingPolarity,
+  TrialBalanceRow,
+} from '../types';
+import { slugify } from './slugify';
 
 interface BuildMappingRowsFromImportOptions {
   uploadId: string;
   clientId?: string | null;
+  selectedCompanies?: CompanySummary[];
 }
 
 const determinePolarity = (value: number): MappingPolarity => {
@@ -15,22 +22,62 @@ const determinePolarity = (value: number): MappingPolarity => {
   return 'Absolute';
 };
 
+const matchSelectedCompany = (
+  entity: string | undefined,
+  selectedCompanies?: CompanySummary[],
+): CompanySummary | null => {
+  if (!entity || !selectedCompanies || selectedCompanies.length === 0) {
+    return null;
+  }
+
+  const trimmed = entity.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const normalized = trimmed.toLowerCase();
+  const slug = slugify(trimmed);
+
+  for (const company of selectedCompanies) {
+    const candidates = [company.id, company.name, slugify(company.name)];
+    if (
+      candidates.some((candidate) => {
+        const comparison = candidate.trim().toLowerCase();
+        return comparison === normalized || comparison === slug;
+      })
+    ) {
+      return company;
+    }
+  }
+
+  return null;
+};
+
 const normalizeEntity = (
   entity: string | undefined,
   fallbackId: string,
   fallbackName: string,
+  selectedCompanies?: CompanySummary[],
 ): { id: string; name: string } => {
+  const matchedCompany = matchSelectedCompany(entity, selectedCompanies);
+  if (matchedCompany) {
+    return { id: matchedCompany.id, name: matchedCompany.name };
+  }
+
   const trimmed = entity?.trim();
   if (trimmed && trimmed.length > 0) {
-    const normalizedId = trimmed
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+    const normalizedId = slugify(trimmed);
     return {
       id: normalizedId.length > 0 ? normalizedId : fallbackId,
       name: trimmed,
     };
   }
+
+  if (selectedCompanies && selectedCompanies.length === 1) {
+    const [singleCompany] = selectedCompanies;
+    return { id: singleCompany.id, name: singleCompany.name };
+  }
+
   return { id: fallbackId, name: fallbackName };
 };
 
@@ -60,7 +107,12 @@ export const buildMappingRowsFromImport = (
   return rows.map((row, index) => {
     const fallbackEntityId = `${options.uploadId}-entity-${index}`;
     const fallbackName = options.clientId ? `Client ${options.clientId}` : 'Imported Entity';
-    const normalized = normalizeEntity(row.entity, fallbackEntityId, fallbackName);
+    const normalized = normalizeEntity(
+      row.entity,
+      fallbackEntityId,
+      fallbackName,
+      options.selectedCompanies,
+    );
     const rawAccountId = (row.accountId ?? '').toString().trim();
     const accountId = rawAccountId.length > 0 ? rawAccountId : `account-${index + 1}`;
     const compositeKey = `${normalized.id}__${accountId}`;
@@ -93,6 +145,7 @@ export const buildMappingRowsFromImport = (
         },
       ],
       glMonth: row.glMonth, // Preserve GL month from import
+      requiresCompanyAssignment: false,
     };
   });
 };

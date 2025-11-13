@@ -12,15 +12,11 @@
   },
   "include": [
     "src/**/*.ts",
-    "health/**/*.ts",
-    "aiGenerate/**/*.ts",
-    "userClients/**/*.ts",
     "tests/**/*.ts"
   ],
   "exclude": [
     "dist",
     "node_modules",
-    "src/entities/**/*",
-    "src/functions/**/*"
+    "src/entities/**/*"
   ]
 }

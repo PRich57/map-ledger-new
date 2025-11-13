@@ -8,6 +8,7 @@ declare module 'mssql' {
   export interface ConnectionOptions {
     encrypt?: boolean;
     trustServerCertificate?: boolean;
+    enableArithAbort?: boolean;
   }
 
   export interface config {

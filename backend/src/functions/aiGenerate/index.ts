@@ -1,6 +1,6 @@
-import type { HttpRequest, InvocationContext } from '@azure/functions';
-import { json, readJson } from '../src/http';
-import { openai, defaultModel, useJsonMode } from '../src/utils/openai';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import { json, readJson } from '../../http';
+import { openai, defaultModel, useJsonMode } from '../../utils/openai';
 
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string };
 type Body = {
@@ -11,14 +11,16 @@ type Body = {
 };
 
 function mentionsJson(messages: Msg[]): boolean {
-  return messages.some(m => /json/i.test(m.content));
+  return messages.some(message => /json/i.test(message.content));
 }
 
-export default async function (req: HttpRequest, _ctx: InvocationContext) {
+export async function aiGenerateHandler(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
   try {
-    const body = (await readJson<Body>(req)) ?? {};
+    const body = (await readJson<Body>(request)) ?? {};
 
-    // Build messages array
     const messages: Msg[] =
       body.messages?.length
         ? body.messages
@@ -27,8 +29,6 @@ export default async function (req: HttpRequest, _ctx: InvocationContext) {
             { role: 'user', content: body.prompt || 'Say hello' }
           ].filter(Boolean) as Msg[];
 
-    // If JSON mode is enabled but the prompt doesn't mention "json",
-    // prepend a system instruction so OpenAI will accept response_format=json_object.
     let effectiveMessages = messages;
     if (useJsonMode && !mentionsJson(effectiveMessages)) {
       effectiveMessages = [
@@ -51,15 +51,22 @@ export default async function (req: HttpRequest, _ctx: InvocationContext) {
 
     const content = response.choices?.[0]?.message?.content ?? '';
 
-    // We keep `content` as a string. If you prefer, you can attempt JSON.parse here.
     return json({
       model: response.model,
       usage: response.usage,
       content
     });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[aiGenerate] error', err);
+  } catch (error) {
+    context.error('[aiGenerate] error', error);
     return json({ message: 'OpenAI request failed' }, 400);
   }
 }
+
+app.http('aiGenerate', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'ai/generate',
+  handler: aiGenerateHandler
+});
+
+export default aiGenerateHandler;

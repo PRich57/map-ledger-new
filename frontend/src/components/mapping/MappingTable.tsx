@@ -1,6 +1,7 @@
 import {
   ChangeEvent,
   Fragment,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -17,6 +18,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import MappingToolbar from './MappingToolbar';
+import MappingCompanyCell from './MappingCompanyCell';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   getAccountExcludedAmount,
@@ -42,6 +44,8 @@ import { PRESET_OPTIONS } from './presets';
 import { buildTargetScoaOptions } from '../../utils/targetScoaOptions';
 import RatioAllocationManager from './RatioAllocationManager';
 import { getGroupTotal } from '../../utils/dynamicAllocation';
+import { formatCurrencyAmount } from '../../utils/currency';
+import { computeDynamicExclusionSummaries } from '../../utils/dynamicExclusions';
 
 type SortKey =
   | 'companyName'
@@ -100,14 +104,7 @@ const MAPPING_TYPE_OPTIONS: { value: MappingType; label: string }[] = (
   Object.entries(MAPPING_TYPE_LABELS) as [MappingType, string][]
 ).map(([value, label]) => ({ value, label }));
 
-const netChangeFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-});
-
-const formatNetChange = (value: number) => netChangeFormatter.format(value);
+const formatNetChange = (value: number) => formatCurrencyAmount(value);
 
 const COLUMN_DEFINITIONS: { key: SortKey; label: string }[] = [
   { key: 'companyName', label: 'Company' },
@@ -128,6 +125,14 @@ const COLUMN_WIDTH_CLASSES: Partial<Record<SortKey, string>> = {
   exclusion: 'w-56',
 };
 
+const COLUMN_ALIGNMENT_CLASSES: Partial<Record<SortKey, string>> = {
+  exclusion: 'text-center',
+};
+
+const HEADER_BUTTON_ALIGNMENT: Partial<Record<SortKey, string>> = {
+  exclusion: 'justify-center',
+};
+
 const POLARITY_OPTIONS: MappingPolarity[] = ['Debit', 'Credit', 'Absolute'];
 
 export default function MappingTable() {
@@ -137,6 +142,7 @@ export default function MappingTable() {
     selectedPeriod,
     basisAccounts,
     groups,
+    results,
   } = useRatioAllocationStore(
     (state) => ({
       allocations: state.allocations,
@@ -144,6 +150,7 @@ export default function MappingTable() {
       selectedPeriod: state.selectedPeriod,
       basisAccounts: state.basisAccounts,
       groups: state.groups,
+      results: state.results,
     })
   );
   const datapoints = useTemplateStore((state) => state.datapoints);
@@ -172,6 +179,11 @@ export default function MappingTable() {
   const { selectedIds, toggleSelection, setSelection, clearSelection } =
     useMappingSelectionStore();
   const splitValidationIssues = useMappingStore(selectSplitValidationIssues);
+  const allAccounts = useMappingStore((state) => state.accounts);
+  const activeCompanies = useMappingStore((state) => state.activeCompanies);
+  const updateAccountCompany = useMappingStore(
+    (state) => state.updateAccountCompany,
+  );
   const [sortConfig, setSortConfig] = useState<{
     key: SortKey;
     direction: SortDirection;
@@ -188,6 +200,40 @@ export default function MappingTable() {
   const splitIssueIds = useMemo(
     () => new Set(splitValidationIssues.map((issue) => issue.accountId)),
     [splitValidationIssues]
+  );
+
+  const compositeConflictIds = useMemo(() => {
+    const grouped = new Map<string, string[]>();
+    allAccounts.forEach((account) => {
+      const monthKey = account.glMonth ?? 'unspecified';
+      const companyKey = account.companyName?.trim().toLowerCase() ?? '';
+      const key = `${companyKey || '__blank__'}__${account.accountId}__${monthKey}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.push(account.id);
+      } else {
+        grouped.set(key, [account.id]);
+      }
+    });
+
+    const conflicts = new Set<string>();
+    grouped.forEach((ids) => {
+      if (ids.length > 1) {
+        ids.forEach((id) => conflicts.add(id));
+      }
+    });
+
+    return conflicts;
+  }, [allAccounts]);
+
+  const handleCompanyCommit = useCallback(
+    (accountId: string, companyName: string, matchedCompanyId?: string | null) => {
+      updateAccountCompany(accountId, {
+        companyName,
+        companyId: matchedCompanyId ?? undefined,
+      });
+    },
+    [updateAccountCompany],
   );
 
   const dynamicIssueIds = useMemo(() => {
@@ -335,6 +381,19 @@ export default function MappingTable() {
     return [...filteredAccounts].sort(safeCompare);
   }, [filteredAccounts, sortConfig, getDisplayStatus]);
 
+  const dynamicExclusionSummaries = useMemo(
+    () =>
+      computeDynamicExclusionSummaries({
+        accounts,
+        allocations,
+        basisAccounts,
+        groups,
+        selectedPeriod,
+        results,
+      }),
+    [accounts, allocations, basisAccounts, groups, selectedPeriod, results]
+  );
+
   useEffect(() => {
     if (!selectAllRef.current) return;
     const allIds = sortedAccounts.map((account) => account.id);
@@ -420,12 +479,12 @@ export default function MappingTable() {
                   key={column.key}
                   scope="col"
                   aria-sort={getAriaSort(column.key)}
-                  className={`whitespace-nowrap px-3 py-3 ${COLUMN_WIDTH_CLASSES[column.key] ?? ''}`}
+                  className={`whitespace-nowrap px-3 py-3 ${COLUMN_WIDTH_CLASSES[column.key] ?? ''} ${COLUMN_ALIGNMENT_CLASSES[column.key] ?? ''}`}
                 >
                   <button
                     type="button"
                     onClick={() => handleSort(column.key)}
-                    className="flex items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
+                    className={`flex items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900 ${HEADER_BUTTON_ALIGNMENT[column.key] ?? ''}`}
                   >
                     {column.label}
                     <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
@@ -435,7 +494,7 @@ export default function MappingTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
-            {sortedAccounts.map((account) => {
+            {sortedAccounts.map((account, index) => {
               const isSelected = selectedIds.has(account.id);
               const targetScoa =
                 account.manualCOAId ?? account.suggestedCOAId ?? '';
@@ -454,12 +513,28 @@ export default function MappingTable() {
               const statusLabel = STATUS_LABELS[displayStatus];
               const StatusIcon = STATUS_ICONS[displayStatus];
               const isExpanded = expandedRows.has(account.id);
-              const excludedAmount = getAccountExcludedAmount(account);
+              const dynamicExclusion =
+                account.mappingType === 'dynamic'
+                  ? dynamicExclusionSummaries.get(account.id)
+                  : undefined;
+              const computedExcludedAmount = getAccountExcludedAmount(account);
+              const excludedAmount =
+                account.mappingType === 'dynamic' && dynamicExclusion
+                  ? dynamicExclusion.amount
+                  : computedExcludedAmount;
+              const excludedRatio =
+                account.mappingType === 'dynamic'
+                  ? dynamicExclusion?.percentage
+                  : undefined;
               const adjustedActivity = account.netChange - excludedAmount;
               const showOriginalActivity = Math.abs(excludedAmount) > 0.005;
+              const hasDynamicExclusionOverride =
+                account.mappingType === 'dynamic' && Boolean(dynamicExclusion);
+
+              const rowKey = `${account.id}-${account.companyId}-${account.glMonth ?? 'no-period'}-${index}`;
 
               return (
-                <Fragment key={account.id}>
+                <Fragment key={rowKey}>
                   <tr
                     className={
                       isSelected ? 'bg-blue-50 dark:bg-slate-800/50' : undefined
@@ -496,10 +571,18 @@ export default function MappingTable() {
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
                     </td>
-                    <td className="max-w-[220px] px-3 py-4">
-                      <div className="font-medium text-slate-900 dark:text-slate-100">
-                        {account.companyName}
-                      </div>
+                    <td className="max-w-[220px] px-3 py-4 align-top">
+                      <MappingCompanyCell
+                        account={account}
+                        options={activeCompanies}
+                        requiresManualAssignment={
+                          Boolean(account.requiresCompanyAssignment) ||
+                          (activeCompanies.length <= 1 &&
+                            compositeConflictIds.has(account.id))
+                        }
+                        hasCompositeConflict={compositeConflictIds.has(account.id)}
+                        onCommit={handleCompanyCommit}
+                      />
                     </td>
                     <td className="whitespace-nowrap px-3 py-4 text-slate-700 dark:text-slate-200">
                       {account.accountId}
@@ -515,14 +598,22 @@ export default function MappingTable() {
                       </div>
                       {showOriginalActivity && (
                         <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Original {formatNetChange(account.netChange)}
+                          Original: {formatNetChange(account.netChange)}
                         </div>
                       )}
                     </td>
                     <td
                       className={`px-3 py-4 align-middle ${COLUMN_WIDTH_CLASSES.exclusion ?? ''}`}
                     >
-                      <MappingExclusionCell account={account} />
+                      <MappingExclusionCell
+                        account={account}
+                        excludedAmountOverride={
+                          hasDynamicExclusionOverride ? excludedAmount : undefined
+                        }
+                        excludedRatioOverride={
+                          hasDynamicExclusionOverride ? excludedRatio : undefined
+                        }
+                      />
                     </td>
                     <td className="px-3 py-4">
                       <label

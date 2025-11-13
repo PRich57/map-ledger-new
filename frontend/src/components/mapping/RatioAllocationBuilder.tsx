@@ -8,7 +8,6 @@ import {
   allocateDynamic,
   getBasisValue,
   getGroupMembersWithValues,
-  getGroupTotal,
   normalizePercentages,
 } from '../../utils/dynamicAllocation';
 
@@ -137,8 +136,8 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
       if (dynamicOptions.length > 0 && targetOptions.length > 0) {
         setNewPresetRows([
           {
-            dynamicAccountId: dynamicOptions[0].value,
-            targetAccountId: targetOptions[0].value,
+            dynamicAccountId: '',
+            targetAccountId: '',
           },
         ]);
       }
@@ -220,8 +219,8 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     setNewPresetRows(previous => [
       ...previous,
       {
-        dynamicAccountId: dynamicOptions[0].value,
-        targetAccountId: targetOptions[0].value,
+        dynamicAccountId: '',
+        targetAccountId: '',
       },
     ]);
   }, [computeNewPresetDynamicOptions, computeNewPresetTargetOptions]);
@@ -231,8 +230,8 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     const trimmedName = newPresetName.trim();
     const sanitizedRows = newPresetRows
       .map(row => ({
-        dynamicAccountId: row.dynamicAccountId.trim(),
-        targetAccountId: row.targetAccountId.trim(),
+        dynamicAccountId: (row.dynamicAccountId ?? '').trim(),
+        targetAccountId: (row.targetAccountId ?? '').trim(),
       }))
       .filter(row => row.dynamicAccountId && row.targetAccountId);
     if (!trimmedName || sanitizedRows.length === 0 || sanitizedRows.length !== newPresetRows.length) {
@@ -259,7 +258,19 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
       const isExcluded = excludedTargetIds.has(target.datapointId);
       if (target.groupId) {
         const preset = presets.find(item => item.id === target.groupId);
-        const basisValue = preset ? getGroupTotal(preset, basisAccounts, selectedPeriod) : 0;
+        let basisValue =
+          typeof target.ratioMetric.value === 'number' && Number.isFinite(target.ratioMetric.value)
+            ? target.ratioMetric.value
+            : 0;
+        if (preset) {
+          const matchingRow = preset.rows.find(row => row.targetAccountId === target.datapointId);
+          if (matchingRow) {
+            const basisAccount = basisAccounts.find(account => account.id === matchingRow.dynamicAccountId);
+            if (basisAccount) {
+              basisValue = getBasisValue(basisAccount, selectedPeriod);
+            }
+          }
+        }
         return {
           targetId: target.datapointId,
           name: target.name,
@@ -425,16 +436,18 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                 );
                               }}
                               className="w-full min-w-[12rem] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                              disabled={dynamicOptions.length === 0}
                             >
-                              {dynamicOptions.length === 0 ? (
-                                <option value="">No basis accounts available</option>
-                              ) : (
-                                dynamicOptions.map(option => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))
-                              )}
+                              <option value="">
+                                {dynamicOptions.length === 0
+                                  ? 'No basis datapoints available'
+                                  : 'Select basis datapoint'}
+                              </option>
+                              {dynamicOptions.map(option => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
                             </select>
                           </td>
                           <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
@@ -456,16 +469,18 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                 );
                               }}
                               className="w-full min-w-[12rem] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                              disabled={targetOptions.length === 0}
                             >
-                              {targetOptions.length === 0 ? (
-                                <option value="">No targets available</option>
-                              ) : (
-                                targetOptions.map(option => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))
-                              )}
+                              <option value="">
+                                {targetOptions.length === 0
+                                  ? 'No target accounts available'
+                                  : 'Select target account'}
+                              </option>
+                              {targetOptions.map(option => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
                             </select>
                           </td>
                           <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
@@ -830,7 +845,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                 if (!selectedAllocation || !datapointId) {
                                   return;
                                 }
-                                toggleTargetExclusion(selectedAllocation.id, datapointId, presetId ?? undefined);
+                                toggleTargetExclusion(selectedAllocation.id, datapointId);
                               }}
                             />
                             Exclude

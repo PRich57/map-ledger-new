@@ -1,8 +1,9 @@
-import { Request, Response } from 'express';
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import {
   DatapointConfigurationUpdate,
   updateDatapointConfiguration,
 } from '../../repositories/datapointConfigurationRepository';
+import { json, readJson } from '../../http';
 import { buildErrorResponse, isNotFoundError, sanitizePayload } from './utils';
 
 const buildUpdatePayload = (
@@ -18,29 +19,28 @@ const buildUpdatePayload = (
   ...sanitizePayload(body),
 });
 
-export default async function updateDatapointConfigs(
-  req: Request,
-  res: Response
-) {
+export async function updateDatapointConfigsHandler(
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> {
   try {
-    if (!req.body || typeof req.body !== 'object') {
-      res.status(400).json({ message: 'Missing request body' });
-      return;
+    const body = await readJson<Record<string, unknown>>(request);
+
+    if (!body || typeof body !== 'object') {
+      return json({ message: 'Missing request body' }, 400);
     }
 
     const payload = buildUpdatePayload(
-      req.body as Record<string, unknown>,
-      typeof req.params.id === 'string' ? req.params.id : undefined
+      body,
+      (request.params as Record<string, string | undefined> | undefined)?.id
     );
 
     if (!payload.id) {
-      res.status(400).json({ message: 'id is required for updates' });
-      return;
+      return json({ message: 'id is required for updates' }, 400);
     }
 
     if (!payload.userEmail || !payload.clientId || !payload.clientName) {
-      res.status(400).json({ message: 'userEmail, clientId, and clientName are required' });
-      return;
+      return json({ message: 'userEmail, clientId, and clientName are required' }, 400);
     }
 
     const updated = await updateDatapointConfiguration({
@@ -48,21 +48,24 @@ export default async function updateDatapointConfigs(
       userEmail: payload.userEmail.toLowerCase(),
     });
 
-    res.json(updated);
+    return json(updated);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to update datapoint configuration', error);
+    context.error('Failed to update datapoint configuration', error);
     if (isNotFoundError(error)) {
-      res.status(404).json({ message: 'Datapoint configuration not found' });
-      return;
+      return json({ message: 'Datapoint configuration not found' }, 404);
     }
-    res
-      .status(500)
-      .json(
-        buildErrorResponse(
-          'Failed to update datapoint configuration',
-          error
-        )
-      );
+    return json(
+      buildErrorResponse('Failed to update datapoint configuration', error),
+      500
+    );
   }
 }
+
+app.http('updateDatapointConfigs', {
+  methods: ['PUT'],
+  authLevel: 'anonymous',
+  route: 'datapoint-configs/{id?}',
+  handler: updateDatapointConfigsHandler,
+});
+
+export default updateDatapointConfigsHandler;

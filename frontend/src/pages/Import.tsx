@@ -8,7 +8,7 @@ import ImportHistory from '../components/import/ImportHistory';
 import ImportForm from '../components/import/ImportForm';
 import TemplateGuide from '../components/import/TemplateGuide';
 import { fileToBase64 } from '../utils/file';
-import { ImportPreviewRow, TrialBalanceRow } from '../types';
+import type { CompanySummary, ImportPreviewRow, TrialBalanceRow } from '../types';
 import { useMappingStore } from '../store/mappingStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import scrollPageToTop from '../utils/scroll';
@@ -50,6 +50,14 @@ export default function Import() {
 
   const singleClient = clientSummaries.length === 1 ? clientSummaries[0] : null;
 
+  const companyNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    companies.forEach((company) => {
+      map.set(company.id, company.name);
+    });
+    return map;
+  }, [companies]);
+
   const handleDeleteImport = (importId: string) => {
     if (!userId) {
       return;
@@ -79,6 +87,15 @@ export default function Import() {
       if (!user) {
         throw new Error('You must be signed in to upload files.');
       }
+
+      const selectedCompanies: CompanySummary[] = Array.from(
+        new Map(
+          _companyIds.map((companyId) => {
+            const companyName = companyNameById.get(companyId) ?? companyId;
+            return [companyId, { id: companyId, name: companyName }];
+          }),
+        ).values(),
+      );
 
       const importId = crypto.randomUUID();
       const previewRows: ImportPreviewRow[] = rows.slice(0, 10).map((row) => ({
@@ -113,6 +130,7 @@ export default function Import() {
         uploadId: importId,
         clientId,
         companyIds: _companyIds,
+        companies: selectedCompanies,
         period: primaryPeriod,
         rows,
       });
