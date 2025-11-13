@@ -392,6 +392,192 @@ describe('ratioAllocationStore', () => {
     expect(targetOptions).not.toContain(second.id);
   });
 
+  it('prevents reusing a canonical target when creating a preset', async () => {
+    const [targetAlpha, targetBeta, targetGamma] = STANDARD_CHART_OF_ACCOUNTS;
+    const basisAccounts = [
+      {
+        id: 'basis-alpha',
+        name: 'Basis Alpha',
+        description: 'Basis Alpha',
+        value: 100,
+        mappedTargetId: targetAlpha.id,
+        valuesByPeriod: {},
+      },
+      {
+        id: 'basis-beta',
+        name: 'Basis Beta',
+        description: 'Basis Beta',
+        value: 200,
+        mappedTargetId: targetBeta.id,
+        valuesByPeriod: {},
+      },
+      {
+        id: 'basis-gamma',
+        name: 'Basis Gamma',
+        description: 'Basis Gamma',
+        value: 300,
+        mappedTargetId: targetGamma.id,
+        valuesByPeriod: {},
+      },
+    ];
+    const sourceAccount = {
+      id: 'source-2',
+      name: 'Source 2',
+      number: '4100',
+      description: 'Source 2',
+      value: 1000,
+      valuesByPeriod: {},
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        sourceAccounts: [sourceAccount],
+        allocations: [
+          {
+            id: 'allocation-2',
+            name: 'Allocation 2',
+            sourceAccount: {
+              id: sourceAccount.id,
+              number: sourceAccount.number,
+              description: sourceAccount.description,
+            },
+            targetDatapoints: [],
+            effectiveDate: new Date().toISOString(),
+            status: 'active' as const,
+          },
+        ],
+        presets: [],
+        availablePeriods: [],
+        selectedPeriod: null,
+      }));
+    });
+
+    render(<RatioAllocationBuilder initialSourceAccountId={sourceAccount.id} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /create preset/i }));
+    });
+
+    const initialBasisSelect = await screen.findByLabelText(/basis datapoint/i);
+    await act(async () => {
+      fireEvent.change(initialBasisSelect, { target: { value: 'basis-beta' } });
+    });
+
+    const initialTargetSelect = screen.getByLabelText(/target account/i);
+    await act(async () => {
+      fireEvent.change(initialTargetSelect, { target: { value: targetAlpha.id } });
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /add row/i }));
+    });
+
+    await waitFor(() => expect(screen.getAllByLabelText(/basis datapoint/i)).toHaveLength(2));
+
+    const basisSelects = screen.getAllByLabelText(/basis datapoint/i);
+    const secondBasisOptions = Array.from(basisSelects[1].querySelectorAll('option')).map(
+      option => option.value,
+    );
+    expect(secondBasisOptions).toContain('basis-gamma');
+    expect(secondBasisOptions).not.toContain('basis-alpha');
+    expect(secondBasisOptions).not.toContain('basis-beta');
+
+    const targetSelects = screen.getAllByLabelText(/target account/i);
+    const secondTargetOptions = Array.from(targetSelects[1].querySelectorAll('option')).map(
+      option => option.value,
+    );
+    expect(secondTargetOptions).toContain(targetGamma.id);
+    expect(secondTargetOptions).not.toContain(targetAlpha.id);
+    expect(secondTargetOptions).not.toContain(targetBeta.id);
+  });
+
+  it('prevents reusing a canonical target when editing a preset', async () => {
+    const [targetAlpha, targetBeta, targetGamma] = STANDARD_CHART_OF_ACCOUNTS;
+    const basisAccounts = [
+      {
+        id: 'basis-alpha',
+        name: 'Basis Alpha',
+        description: 'Basis Alpha',
+        value: 100,
+        mappedTargetId: targetAlpha.id,
+        valuesByPeriod: {},
+      },
+      {
+        id: 'basis-beta',
+        name: 'Basis Beta',
+        description: 'Basis Beta',
+        value: 200,
+        mappedTargetId: targetBeta.id,
+        valuesByPeriod: {},
+      },
+      {
+        id: 'basis-gamma',
+        name: 'Basis Gamma',
+        description: 'Basis Gamma',
+        value: 300,
+        mappedTargetId: targetGamma.id,
+        valuesByPeriod: {},
+      },
+    ];
+    const sourceAccount = {
+      id: 'source-3',
+      name: 'Source 3',
+      number: '4200',
+      description: 'Source 3',
+      value: 900,
+      valuesByPeriod: {},
+    };
+    const preset = {
+      id: 'preset-canonical',
+      name: 'Canonical preset',
+      rows: [{ dynamicAccountId: 'basis-alpha', targetAccountId: targetGamma.id }],
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts,
+        sourceAccounts: [sourceAccount],
+        allocations: [
+          {
+            id: 'allocation-3',
+            name: 'Allocation 3',
+            sourceAccount: {
+              id: sourceAccount.id,
+              number: sourceAccount.number,
+              description: sourceAccount.description,
+            },
+            targetDatapoints: [],
+            effectiveDate: new Date().toISOString(),
+            status: 'active' as const,
+          },
+        ],
+        presets: [preset],
+        availablePeriods: [],
+        selectedPeriod: null,
+      }));
+    });
+
+    render(<RatioAllocationBuilder initialSourceAccountId={sourceAccount.id} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('Add row'));
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText(/preset target account/i)).toHaveLength(2),
+    );
+
+    const presetTargetSelects = screen.getAllByLabelText(/preset target account/i);
+    const newRowTargetOptions = Array.from(
+      presetTargetSelects[presetTargetSelects.length - 1].querySelectorAll('option'),
+    ).map(option => option.value);
+    expect(newRowTargetOptions).toContain(targetBeta.id);
+    expect(newRowTargetOptions).not.toContain(targetAlpha.id);
+  });
+
   it('normalizes allocation result percentages that would otherwise total 99.99%', async () => {
     const [targetA, targetB, targetC] = STANDARD_CHART_OF_ACCOUNTS;
     const targetOptions = [targetA, targetB, targetC];

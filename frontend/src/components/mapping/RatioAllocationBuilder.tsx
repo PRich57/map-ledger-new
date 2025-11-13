@@ -2,7 +2,11 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'rea
 import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../../data/standardChartOfAccounts';
-import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import {
+  resolvePresetRowCanonicalTargetIds,
+  resolveTargetAccountId,
+  useRatioAllocationStore,
+} from '../../store/ratioAllocationStore';
 import type { DynamicAllocationPresetRow } from '../../types';
 import {
   allocateDynamic,
@@ -59,15 +63,26 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
 
   const computeNewPresetDynamicOptions = useCallback(
     (excludeIndex?: number) => {
-      const usedIds = new Set(
+      const usedDynamicIds = new Set(
+        newPresetRows
+          .map((row, index) => (index === excludeIndex ? null : row.dynamicAccountId))
+          .filter((value): value is string => Boolean(value)),
+      );
+      const usedCanonicalIds = new Set(
         newPresetRows
           .flatMap((row, index) =>
-            index === excludeIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+            index === excludeIndex ? [] : resolvePresetRowCanonicalTargetIds(row, basisAccounts),
           )
           .filter((value): value is string => Boolean(value)),
       );
       return basisAccounts
-        .filter(account => !usedIds.has(account.id))
+        .filter(account => {
+          if (usedDynamicIds.has(account.id)) {
+            return false;
+          }
+          const canonicalId = resolveTargetAccountId(account.mappedTargetId);
+          return !canonicalId || !usedCanonicalIds.has(canonicalId);
+        })
         .map(account => ({ value: account.id, label: account.name }));
     },
     [basisAccounts, newPresetRows],
@@ -75,18 +90,18 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
 
   const computeNewPresetTargetOptions = useCallback(
     (excludeIndex?: number) => {
-      const usedIds = new Set(
+      const usedCanonicalIds = new Set(
         newPresetRows
           .flatMap((row, index) =>
-            index === excludeIndex ? [] : [row.dynamicAccountId, row.targetAccountId],
+            index === excludeIndex ? [] : resolvePresetRowCanonicalTargetIds(row, basisAccounts),
           )
           .filter((value): value is string => Boolean(value)),
       );
-      return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedIds.has(option.id))
+      return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedCanonicalIds.has(option.id))
         .map(option => ({ value: option.id, label: option.label }))
         .sort((a, b) => a.label.localeCompare(b.label));
     },
-    [newPresetRows],
+    [basisAccounts, newPresetRows],
   );
 
   const allocationIdForInitialSource = useMemo(() => {
@@ -658,6 +673,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                         })
                                       }
                                       className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                                      aria-label="Preset basis datapoint"
                                     >
                                       {dynamicOptions.length === 0 ? (
                                         <option value="">No basis accounts available</option>
@@ -679,6 +695,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                                         })
                                       }
                                       className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                                      aria-label="Preset target account"
                                     >
                                       {targetOptions.length === 0 ? (
                                         <option value="">No targets available</option>
