@@ -73,11 +73,15 @@ export default function MappingSplitRow({
     const numericValue = clampPercentage(rawValue);
     const normalizedValue = roundToTwoDecimals(numericValue);
 
+    const totalSplitCount = account.splitDefinitions.length;
     const activeSplits = account.splitDefinitions.filter(
       split => !split.isExclusion,
     );
     const targetIsActive = activeSplits.some(split => split.id === splitId);
-    const shouldRedistribute = targetIsActive && activeSplits.length === 2;
+    const shouldRedistribute =
+      targetIsActive &&
+      activeSplits.length === 2 &&
+      totalSplitCount <= 2;
     const partnerSplit = shouldRedistribute
       ? activeSplits.find(split => split.id !== splitId)
       : null;
