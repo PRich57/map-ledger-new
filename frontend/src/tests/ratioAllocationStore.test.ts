@@ -91,6 +91,55 @@ describe('ratioAllocationStore', () => {
     expect(updatedAllocation.targetDatapoints).toHaveLength(0);
   });
 
+  it('applies new presets to the selected allocation when requested', () => {
+    const basisAccount = {
+      id: 'basis-auto',
+      name: 'Basis auto',
+      description: 'Basis auto',
+      value: 500,
+      mappedTargetId: 'ops-target',
+      valuesByPeriod: { '2024-01': 500 },
+    };
+    const targetOption = STANDARD_CHART_OF_ACCOUNTS[1];
+    const allocation = {
+      id: 'allocation-auto',
+      name: 'Allocation auto',
+      sourceAccount: {
+        id: '5000',
+        number: '5000',
+        description: 'Auto source',
+      },
+      targetDatapoints: [],
+      effectiveDate: new Date().toISOString(),
+      status: 'active' as const,
+    };
+
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        basisAccounts: [basisAccount],
+        allocations: [allocation],
+        selectedPeriod: '2024-01',
+      }));
+    });
+
+    act(() => {
+      useRatioAllocationStore.getState().createPreset({
+        name: 'Auto applied',
+        rows: [{ dynamicAccountId: basisAccount.id, targetAccountId: targetOption.id }],
+        applyToAllocationId: allocation.id,
+      });
+    });
+
+    const { allocations: updatedAllocations, presets } = useRatioAllocationStore.getState();
+    expect(presets).toHaveLength(1);
+    expect(updatedAllocations[0].targetDatapoints).toHaveLength(1);
+    expect(updatedAllocations[0].targetDatapoints[0]).toMatchObject({
+      datapointId: targetOption.id,
+      groupId: presets[0].id,
+    });
+  });
+
   it('toggles exclusions independently when datapoints share a target id', () => {
     const basisAccounts = [
       {

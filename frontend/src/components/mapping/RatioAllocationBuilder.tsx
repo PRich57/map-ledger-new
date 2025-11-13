@@ -237,7 +237,11 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     if (!trimmedName || sanitizedRows.length === 0 || sanitizedRows.length !== newPresetRows.length) {
       return;
     }
-    createPreset({ name: trimmedName, rows: sanitizedRows });
+    createPreset({
+      name: trimmedName,
+      rows: sanitizedRows,
+      applyToAllocationId: selectedAllocation?.id,
+    });
     setIsCreatingPreset(false);
     setNewPresetName('');
     setNewPresetRows([]);

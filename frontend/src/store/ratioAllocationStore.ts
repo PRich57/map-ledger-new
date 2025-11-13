@@ -216,7 +216,8 @@ export type RatioAllocationState = {
     name: string;
     rows: DynamicAllocationPresetRow[];
     notes?: string;
-  }) => void;
+    applyToAllocationId?: string | null;
+  }) => string;
   updatePreset: (
     presetId: string,
     updates: Partial<Omit<DynamicAllocationPreset, 'id' | 'rows'>>,
@@ -871,7 +872,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     }
   },
 
-  createPreset: ({ name, rows, notes }) => {
+  createPreset: ({ name, rows, notes, applyToAllocationId }) => {
+    let newPresetId = '';
     set(state => {
       const sanitizedRows = sanitizePresetRows(rows);
       const preset: DynamicAllocationPreset = {
@@ -880,6 +882,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         rows: sanitizedRows,
         notes,
       };
+      newPresetId = preset.id;
       const presets = [...state.presets, preset];
       const allocations = state.allocations.map(allocation =>
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
@@ -887,6 +890,12 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
       return { presets, groups, allocations };
     });
+
+    if (applyToAllocationId && newPresetId) {
+      get().toggleAllocationPresetTargets(applyToAllocationId, newPresetId);
+    }
+
+    return newPresetId;
   },
 
   updatePreset: (presetId, updates) => {
