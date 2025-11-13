@@ -3,6 +3,7 @@ import MappingTable from '../components/mapping/MappingTable';
 import { createInitialMappingAccounts, useMappingStore } from '../store/mappingStore';
 import { COA_SEED_DATAPOINTS } from '../data/coaSeeds';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
+import type { MappingSplitDefinition, TargetScoaOption } from '../types';
 
 const resetMappingStore = () => {
   useMappingStore.setState({
@@ -10,6 +11,44 @@ const resetMappingStore = () => {
     searchTerm: '',
     activeStatuses: [],
   });
+};
+
+const buildPercentageSplit = (
+  index: number,
+  target: TargetScoaOption,
+  allocationValue: number,
+): MappingSplitDefinition => ({
+  id: `test-split-${index}`,
+  targetId: target.id,
+  targetName: target.label,
+  allocationType: 'percentage',
+  allocationValue,
+});
+
+const seedPayrollTaxesWithThreeSplits = () => {
+  const [targetOne, targetTwo, targetThree] = STANDARD_CHART_OF_ACCOUNTS;
+
+  if (!targetOne || !targetTwo || !targetThree) {
+    throw new Error('Standard chart of accounts must include at least three entries.');
+  }
+
+  useMappingStore.setState(state => ({
+    accounts: state.accounts.map(account => {
+      if (account.accountName !== 'Payroll Taxes') {
+        return account;
+      }
+
+      return {
+        ...account,
+        mappingType: 'percentage',
+        splitDefinitions: [
+          buildPercentageSplit(1, targetOne, 50),
+          buildPercentageSplit(2, targetTwo, 30),
+          buildPercentageSplit(3, targetThree, 20),
+        ],
+      };
+    }),
+  }));
 };
 
 describe('MappingTable', () => {
@@ -100,6 +139,35 @@ describe('MappingTable', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open dynamic allocation builder/ })).toBeInTheDocument();
+  });
+
+  test('does not redistribute percentages when excluding one of three splits', () => {
+    seedPayrollTaxesWithThreeSplits();
+    render(<MappingTable />);
+
+    const toggleButton = screen.getByLabelText('Show split details for Payroll Taxes');
+    fireEvent.click(toggleButton);
+
+    const percentageInputs = screen.getAllByLabelText('Enter percentage allocation');
+    expect(percentageInputs).toHaveLength(3);
+    const [regionAInput, , regionCInput] = percentageInputs;
+
+    const excludeCheckboxes = screen.getAllByLabelText('Exclude');
+    expect(excludeCheckboxes).toHaveLength(3);
+    fireEvent.click(excludeCheckboxes[1]);
+
+    fireEvent.change(regionCInput, { target: { value: '75' } });
+
+    expect(regionAInput).toHaveDisplayValue('50.00');
+
+    const payrollAccount = useMappingStore
+      .getState()
+      .accounts.find(account => account.accountName === 'Payroll Taxes');
+    const regionASplit = payrollAccount?.splitDefinitions.find(split => split.id === 'test-split-1');
+    const regionCSplit = payrollAccount?.splitDefinitions.find(split => split.id === 'test-split-3');
+
+    expect(regionASplit?.allocationValue).toBe(50);
+    expect(regionCSplit?.allocationValue).toBe(75);
   });
 });
 
