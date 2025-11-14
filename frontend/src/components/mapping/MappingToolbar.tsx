@@ -1,7 +1,6 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import {
-  selectAccounts,
   selectActiveStatuses,
   selectSearchTerm,
   useMappingStore,
@@ -51,7 +50,6 @@ export default function MappingToolbar() {
   const finalizeMappings = useMappingStore(state => state.finalizeMappings);
   const applyBatchMapping = useMappingStore(state => state.applyBatchMapping);
   const applyPresetToAccounts = useMappingStore(state => state.applyPresetToAccounts);
-  const accounts = useMappingStore(selectAccounts);
   const { selectedIds, clearSelection } = useMappingSelectionStore();
   const datapoints = useTemplateStore(state => state.datapoints);
   const coaOptions = useMemo(() => buildTargetScoaOptions(datapoints), [datapoints]);

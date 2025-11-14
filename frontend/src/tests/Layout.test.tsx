@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render } from './testUtils';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Layout from '../components/Layout';
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Datapoint } from '../../types';
 import { Plus, X, Calculator } from 'lucide-react';
 
@@ -48,6 +48,14 @@ export default function FormulaBuilder({ datapoints, value, onChange }: FormulaB
       return false;
     }
   };
+
+  useEffect(() => {
+    if (value) {
+      validateFormula(value);
+    } else {
+      setError('');
+    }
+  }, [value]);
 
   return (
     <div className="space-y-4">

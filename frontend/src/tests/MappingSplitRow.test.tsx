@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from './testUtils';
 import MappingSplitRow from '../components/mapping/MappingSplitRow';
 import type { GLAccountMappingRow, TargetScoaOption } from '../types';
 

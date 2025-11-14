@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from './testUtils';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
 import RatioAllocationBuilder from '../components/mapping/RatioAllocationBuilder';

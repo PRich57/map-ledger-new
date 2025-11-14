@@ -14,7 +14,6 @@ import {
 } from '../types';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
 import {
-  allocateDynamic,
   allocateDynamicWithPresets,
   getBasisValue,
   GroupMemberValue,
@@ -196,13 +195,6 @@ const sanitizePresetRows = (
   });
 
   return sanitized;
-};
-
-type ResolvedTargetDetail = {
-  target: RatioAllocationTargetDatapoint;
-  basisValue: number;
-  members: GroupMemberValue[];
-  error?: string;
 };
 
 export type RatioAllocationHydrationPayload = {
@@ -579,7 +571,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
           }
         });
 
-        presetTargetsMap.forEach((targets, presetId) => {
+        presetTargetsMap.forEach((_, presetId) => {
           const preset = presets.find(item => item.id === presetId);
           if (!preset) {
             targetErrors.push({
@@ -1091,12 +1083,16 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         return true;
       }
       const canonicalUsers = canonicalUsage.get(canonicalTargetId);
-      if (!canonicalUsers || canonicalUsers.size === 0) {
-        return true;
-      }
-      return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
-    });
-  },
+        if (!canonicalUsers || canonicalUsers.size === 0) {
+          return true;
+        }
+        return (
+          dropdownKey !== null &&
+          canonicalUsers.size === 1 &&
+          canonicalUsers.has(dropdownKey)
+        );
+      });
+    },
 
   getPresetAvailableTargetAccounts: (presetId, rowIndex) => {
     const { basisAccounts, presets } = get();
@@ -1129,11 +1125,15 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
 
     return STANDARD_CHART_OF_ACCOUNTS.filter(option => {
       const canonicalUsers = canonicalUsage.get(option.id);
-      if (!canonicalUsers || canonicalUsers.size === 0) {
-        return true;
-      }
-      return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
-    })
+        if (!canonicalUsers || canonicalUsers.size === 0) {
+          return true;
+        }
+        return (
+          dropdownKey !== null &&
+          canonicalUsers.size === 1 &&
+          canonicalUsers.has(dropdownKey)
+        );
+      })
       .map(option => ({
         id: option.id,
         label: option.label,
@@ -1307,9 +1307,6 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       });
       return;
     }
-
-    // Remove any existing preset targets and add the new preset
-    const nonPresetTargets = allocation.targetDatapoints.filter(t => !t.groupId);
 
     // Toggle to remove old preset if any, then toggle to add new preset
     const existingPresetId = allocation.targetDatapoints.find(t => t.groupId)?.groupId;

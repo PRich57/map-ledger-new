@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen } from './testUtils';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Mapping from '../pages/Mapping';
 import { useClientStore } from '../store/clientStore';

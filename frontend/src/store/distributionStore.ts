@@ -111,7 +111,7 @@ const clampOperationsForType = (
   return operations.map(operation => ({ id: operation.id, name: operation.name, allocation: operation.allocation }));
 };
 
-export const useDistributionStore = create<DistributionState>((set, get) => ({
+export const useDistributionStore = create<DistributionState>((set, _get) => ({
   rows: [],
   operationsCatalog,
   searchTerm: '',

@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 
-import { act } from '@testing-library/react';
+import { act } from 'react-dom/test-utils';
 import {
   createInitialMappingAccounts,
   selectStatusCounts,

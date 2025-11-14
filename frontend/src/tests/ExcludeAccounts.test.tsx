@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen } from './testUtils';
+import userEvent from './userEvent';
 import ExcludeAccounts from '../components/import/ExcludeAccounts';
 import type { TrialBalanceRow } from '../types';
 

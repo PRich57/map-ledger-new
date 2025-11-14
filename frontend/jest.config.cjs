@@ -12,5 +12,6 @@ module.exports = {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
     '\\.(svg)$': '<rootDir>/src/tests/__mocks__/fileMock.ts'
   },
+  setupFilesAfterEnv: ['<rootDir>/src/tests/setupTests.ts'],
   testMatch: ['<rootDir>/src/**/?(*.)+(spec|test).[tj]s?(x)']
 };

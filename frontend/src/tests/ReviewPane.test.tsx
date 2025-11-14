@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from './testUtils';
 import ReviewPane from '../components/mapping/ReviewPane';
 import { useMappingStore } from '../store/mappingStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';

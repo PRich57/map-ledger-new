@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from './testUtils';
 import MappingTable from '../components/mapping/MappingTable';
 import { createInitialMappingAccounts, useMappingStore } from '../store/mappingStore';
 import { COA_SEED_DATAPOINTS } from '../data/coaSeeds';
@@ -228,10 +228,10 @@ describe('MappingTable', () => {
     render(<MappingTable />);
 
     const targetSelect = screen.getByLabelText('Select target SCoA for Linehaul Revenue');
-    const optionLabels = within(targetSelect)
-      .getAllByRole('option')
-      .map(option => option.textContent?.trim())
-      .filter((label): label is string => Boolean(label));
+      const optionLabels = within(targetSelect)
+        .getAllByRole('option')
+        .map((option: HTMLOptionElement) => option.textContent?.trim() ?? null)
+        .filter((label): label is string => Boolean(label));
 
     const expectedLabels = new Set<string>([
       ...Object.values(COA_SEED_DATAPOINTS)

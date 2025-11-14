@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen } from './testUtils';
 import ImportForm, {
   filterRowsByGlMonth,
 } from '../components/import/ImportForm';

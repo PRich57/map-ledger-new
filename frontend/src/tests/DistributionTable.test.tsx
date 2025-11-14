@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from './testUtils';
 import DistributionTable from '../components/mapping/DistributionTable';
 import { useDistributionStore } from '../store/distributionStore';
 
