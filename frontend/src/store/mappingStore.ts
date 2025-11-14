@@ -7,6 +7,7 @@ import type {
   MappingSplitDefinition,
   MappingStatus,
   MappingType,
+  StandardScoaSummary,
   TrialBalanceRow,
 } from '../types';
 import {
@@ -202,12 +203,6 @@ const getSplitAmount = (
   split: MappingSplitDefinition,
 ): number => Math.abs(getSplitSignedAmount(account, split));
 
-type BasisAccumulator = {
-  id: string;
-  label: string;
-  value: number;
-};
-
 const findStandardScoaOption = (targetId?: string | null) => {
   if (!targetId) {
     return null;
@@ -223,10 +218,28 @@ const findStandardScoaOption = (targetId?: string | null) => {
   );
 };
 
-const buildBasisAccountsFromMappings = (
+interface TargetAccumulatorEntry {
+  id: string;
+  label: string;
+  value: number;
+}
+
+const accumulateStandardTargetValues = (
   accounts: GLAccountMappingRow[],
-): DynamicBasisAccount[] => {
-  const accumulator = new Map<string, BasisAccumulator>();
+): Map<string, TargetAccumulatorEntry> => {
+  const accumulator = new Map<string, TargetAccumulatorEntry>();
+
+  const addValue = (targetId: string, label: string, amount: number) => {
+    if (amount <= 0) {
+      return;
+    }
+    const existing = accumulator.get(targetId);
+    if (existing) {
+      existing.value += amount;
+    } else {
+      accumulator.set(targetId, { id: targetId, label, value: amount });
+    }
+  };
 
   accounts.forEach(account => {
     if (account.mappingType === 'direct') {
@@ -241,15 +254,7 @@ const buildBasisAccountsFromMappings = (
       const targetId = option?.id ?? normalizedTarget;
       const label = option?.label ?? normalizedTarget;
       const amount = Math.abs(account.netChange);
-      if (amount <= 0) {
-        return;
-      }
-      const existing = accumulator.get(targetId);
-      if (existing) {
-        existing.value += amount;
-      } else {
-        accumulator.set(targetId, { id: targetId, label, value: amount });
-      }
+      addValue(targetId, label, amount);
       return;
     }
 
@@ -267,16 +272,18 @@ const buildBasisAccountsFromMappings = (
         const label = option?.label ?? split.targetName ?? normalizedTarget;
         const amount = getSplitAmount(account, split);
         const value = amount > 0 ? amount : 0;
-        const existing = accumulator.get(targetId);
-        if (existing) {
-          existing.value += value;
-        } else {
-          accumulator.set(targetId, { id: targetId, label, value });
-        }
+        addValue(targetId, label, value);
       });
-      return;
     }
   });
+
+  return accumulator;
+};
+
+const buildBasisAccountsFromMappings = (
+  accounts: GLAccountMappingRow[],
+): DynamicBasisAccount[] => {
+  const accumulator = accumulateStandardTargetValues(accounts);
 
   return Array.from(accumulator.values())
     .map(({ id, label, value }) => ({
@@ -287,6 +294,18 @@ const buildBasisAccountsFromMappings = (
       mappedTargetId: id,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+};
+
+export const buildStandardScoaSummaries = (
+  accounts: GLAccountMappingRow[],
+): StandardScoaSummary[] => {
+  const accumulator = accumulateStandardTargetValues(accounts);
+  return STANDARD_CHART_OF_ACCOUNTS.map(option => ({
+    id: option.id,
+    value: option.value,
+    label: option.label,
+    mappedAmount: accumulator.get(option.id)?.value ?? 0,
+  }));
 };
 
 const updateDynamicBasisAccounts = (accounts: GLAccountMappingRow[]) => {
@@ -1356,6 +1375,10 @@ export const selectFilteredAccounts = (state: MappingState): GLAccountMappingRow
   }
   return state.accounts.filter(account => account.glMonth === state.activePeriod);
 };
+
+export const selectStandardScoaSummaries = (
+  state: MappingState,
+): StandardScoaSummary[] => buildStandardScoaSummaries(state.accounts);
 
 export const selectAccountsByPeriod = (state: MappingState): Map<string, GLAccountMappingRow[]> => {
   const byPeriod = new Map<string, GLAccountMappingRow[]>();
