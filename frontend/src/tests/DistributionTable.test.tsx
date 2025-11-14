@@ -80,7 +80,7 @@ describe('DistributionTable', () => {
     const driverRow = driverCell.closest('tr');
     expect(driverRow).not.toBeNull();
 
-    const toggleButton = within(driverRow as HTMLTableRowElement).getByRole('button');
+    const toggleButton = within(driverRow as HTMLTableRowElement).getByLabelText(/operations for/i);
     fireEvent.click(toggleButton);
 
     const intermodalToggle = await screen.findByLabelText(/ops-int/i);
@@ -104,7 +104,7 @@ describe('DistributionTable', () => {
     const fuelRow = fuelCell.closest('tr');
     expect(fuelRow).not.toBeNull();
 
-    const toggleButton = within(fuelRow as HTMLTableRowElement).getByRole('button');
+    const toggleButton = within(fuelRow as HTMLTableRowElement).getByLabelText(/operations for/i);
     fireEvent.click(toggleButton);
 
     const builderButton = await screen.findByText('Open dynamic allocation builder');
