@@ -5,7 +5,6 @@ import type {
   DistributionType,
   StandardScoaSummary,
 } from '../types';
-import { getStandardScoaOption } from '../data/standardChartOfAccounts';
 
 export interface DistributionOperationCatalogItem {
   id: string;
@@ -28,64 +27,6 @@ interface DistributionState {
   updateRowNotes: (id: string, notes: string) => void;
   setOperationsCatalog: (operations: DistributionOperationCatalogItem[]) => void;
 }
-
-const operationsCatalog: DistributionOperationCatalogItem[] = [
-  { id: 'ops-log', name: 'Logistics' },
-  { id: 'ops-otr', name: 'Over-the-Road' },
-  { id: 'ops-ded', name: 'Dedicated' },
-  { id: 'ops-ltl', name: 'Less-than-Truckload' },
-  { id: 'ops-int', name: 'Intermodal' },
-];
-
-const FREIGHT_REVENUE_TARGET = getStandardScoaOption('FREIGHT REVENUE LINEHAUL - COMPANY FLEET');
-const DRIVER_BENEFITS_TARGET = getStandardScoaOption(
-  'DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET',
-);
-const NON_DRIVER_WAGES_TARGET = getStandardScoaOption('NON DRIVER WAGES & BENEFITS - TOTAL ASSET OPERATIONS');
-const FUEL_EXPENSE_TARGET = getStandardScoaOption('FUEL EXPENSE - COMPANY FLEET');
-const TRACTOR_MAINTENANCE_TARGET = getStandardScoaOption('MAINTENANCE EXPENSE - TRACTOR - COMPANY FLEET');
-
-const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
-  [FREIGHT_REVENUE_TARGET.id]: {
-    type: 'direct',
-    operations: [{ id: 'ops-log', name: 'Logistics' }],
-    presetId: 'preset-1',
-    notes: 'Approved during March close.',
-  },
-  [DRIVER_BENEFITS_TARGET.id]: {
-    type: 'percentage',
-    operations: [
-      { id: 'ops-ded', name: 'Dedicated', allocation: 60 },
-      { id: 'ops-log', name: 'Logistics', allocation: 40 },
-    ],
-    presetId: 'preset-2',
-    notes: 'Split based on headcount.',
-  },
-  [NON_DRIVER_WAGES_TARGET.id]: {
-    type: 'percentage',
-    operations: [
-      { id: 'ops-ded', name: 'Dedicated', allocation: 55 },
-      { id: 'ops-log', name: 'Logistics', allocation: 45 },
-    ],
-    presetId: 'preset-2',
-    notes: 'Pending confirmation of allocation weights.',
-  },
-  [FUEL_EXPENSE_TARGET.id]: {
-    type: 'dynamic',
-    operations: [
-      { id: 'ops-log', name: 'Logistics' },
-      { id: 'ops-otr', name: 'Over-the-Road' },
-    ],
-    presetId: 'preset-1',
-    notes: 'Allocate fuel based on miles driven.',
-  },
-  [TRACTOR_MAINTENANCE_TARGET.id]: {
-    type: 'direct',
-    operations: [{ id: 'ops-ded', name: 'Dedicated' }],
-    presetId: null,
-    notes: 'Charged entirely to dedicated operations.',
-  },
-};
 
 const deriveDistributionStatus = (
   type: DistributionType,
@@ -138,7 +79,7 @@ const clampOperationsForType = (
 
 export const useDistributionStore = create<DistributionState>((set, _get) => ({
   rows: [],
-  operationsCatalog,
+  operationsCatalog: [],
   searchTerm: '',
   statusFilters: [],
   syncRowsFromStandardTargets: summaries =>
@@ -148,11 +89,10 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
       );
       const nextRows: DistributionRow[] = summaries.map(summary => {
         const existing = existingByTarget.get(summary.id);
-        const defaultConfig = DEFAULT_ROW_CONFIGS[summary.id];
         const nextOperations = existing
           ? existing.operations.map(operation => ({ ...operation }))
-          : defaultConfig?.operations?.map(operation => ({ ...operation })) ?? [];
-        const resolvedType = existing?.type ?? defaultConfig?.type ?? 'direct';
+          : [];
+        const resolvedType = existing?.type ?? 'direct';
         return applyDistributionStatus({
           id: existing?.id ?? summary.id,
           mappingRowId: summary.id,
@@ -161,8 +101,8 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           activity: summary.mappedAmount,
           type: resolvedType,
           operations: clampOperationsForType(resolvedType, nextOperations),
-          presetId: existing?.presetId ?? defaultConfig?.presetId ?? null,
-          notes: existing?.notes ?? defaultConfig?.notes,
+          presetId: existing?.presetId ?? null,
+          notes: existing?.notes,
           status: existing?.status ?? 'Unmapped',
         });
       });

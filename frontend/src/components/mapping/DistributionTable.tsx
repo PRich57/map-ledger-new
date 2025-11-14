@@ -2,7 +2,10 @@ import { ChangeEvent, Fragment, useEffect, useMemo, useRef, useState } from 'rea
 import { ArrowUpDown, ChevronRight, Search, X } from 'lucide-react';
 import { PRESET_OPTIONS } from './presets';
 import RatioAllocationManager from './RatioAllocationManager';
-import { useDistributionStore } from '../../store/distributionStore';
+import {
+  useDistributionStore,
+  type DistributionOperationCatalogItem,
+} from '../../store/distributionStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappingStore';
 import { useOrganizationStore } from '../../store/organizationStore';
@@ -114,8 +117,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     [standardTargets],
   );
   const previousSignature = useRef<string | null>(null);
-  const clientOperations = useMemo(() => {
-    const map = new Map<string, DistributionOperationShare>();
+  const clientOperations = useMemo<DistributionOperationCatalogItem[]>(() => {
+    const map = new Map<string, DistributionOperationCatalogItem>();
     companies.forEach(company => {
       company.clients.forEach(client => {
         if (activeClientId && client.id !== activeClientId) {
@@ -185,15 +188,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   }, [standardTargets, summarySignature, syncRowsFromStandardTargets]);
 
   useEffect(() => {
-    if (clientOperations.length === 0) {
-      return;
-    }
-    const nextSignature = clientOperations.map(operation => `${operation.id}:${operation.name}`).join('|');
-    const currentSignature = operationsCatalog.map(operation => `${operation.id}:${operation.name}`).join('|');
-    if (nextSignature !== currentSignature) {
-      setOperationsCatalog(clientOperations);
-    }
-  }, [clientOperations, operationsCatalog, setOperationsCatalog]);
+    setOperationsCatalog(clientOperations);
+  }, [clientOperations, setOperationsCatalog]);
 
   useEffect(() => {
     if (!focusMappingId) {
