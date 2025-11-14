@@ -1,12 +1,11 @@
 import { ChangeEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, ChevronRight, Search, X } from 'lucide-react';
-import { PRESET_OPTIONS } from './presets';
 import RatioAllocationManager from './RatioAllocationManager';
 import {
   useDistributionStore,
   type DistributionOperationCatalogItem,
 } from '../../store/distributionStore';
-import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappingStore';
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
@@ -178,6 +177,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const { getActivePresetForSource } = useRatioAllocationStore(state => ({
     getActivePresetForSource: state.getActivePresetForSource,
   }));
+  const presetOptions = useRatioAllocationStore(selectPresetSummaries);
 
   const operationTargetCatalog = useMemo(
     () => clientOperations.map(operation => ({ id: operation.id, label: operation.name ?? operation.id })),
@@ -575,9 +575,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         className="w-40 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
                         <option value="">No preset</option>
-                        {PRESET_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                        {presetOptions.map(option => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
                           </option>
                         ))}
                       </select>

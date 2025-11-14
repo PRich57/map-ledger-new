@@ -207,6 +207,11 @@ export type RatioAllocationHydrationPayload = {
   selectedPeriod?: string | null;
 };
 
+export type RatioPresetSummary = {
+  id: string;
+  name: string;
+};
+
 export type RatioAllocationState = {
   allocations: RatioAllocation[];
   basisAccounts: DynamicBasisAccount[];
@@ -267,6 +272,10 @@ export type RatioAllocationState = {
   getActivePresetForSource: (sourceAccountId: string) => DynamicAllocationPreset | null;
   setActivePresetForSource: (sourceAccountId: string, presetId: string | null) => void;
 };
+
+export const selectPresetSummaries = (
+  state: RatioAllocationState,
+): RatioPresetSummary[] => state.presets.map(preset => ({ id: preset.id, name: preset.name }));
 
 export const useRatioAllocationStore = create<RatioAllocationState>((set, get) => ({
   allocations: [],

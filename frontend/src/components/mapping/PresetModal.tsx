@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { PRESET_OPTIONS } from './presets';
+import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 
 interface PresetModalProps {
   open: boolean;
@@ -9,17 +9,20 @@ interface PresetModalProps {
 }
 
 export default function PresetModal({ open, selectedCount, onClose, onApply }: PresetModalProps) {
-  const [presetId, setPresetId] = useState<string>(PRESET_OPTIONS[0]?.value ?? '');
+  const presetOptions = useRatioAllocationStore(selectPresetSummaries);
+  const [presetId, setPresetId] = useState<string>('');
 
   useEffect(() => {
     if (open) {
-      setPresetId(PRESET_OPTIONS[0]?.value ?? '');
+      setPresetId(presetOptions[0]?.id ?? '');
     }
-  }, [open]);
+  }, [open, presetOptions]);
 
   if (!open) {
     return null;
   }
+
+  const isApplyDisabled = presetOptions.length === 0 || !presetId;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -50,12 +53,17 @@ export default function PresetModal({ open, selectedCount, onClose, onApply }: P
               value={presetId}
               onChange={event => setPresetId(event.target.value)}
               className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              disabled={presetOptions.length === 0}
             >
-              {PRESET_OPTIONS.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
+              {presetOptions.length === 0 ? (
+                <option value="">No presets available</option>
+              ) : (
+                presetOptions.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))
+              )}
             </select>
           </label>
 
@@ -69,7 +77,8 @@ export default function PresetModal({ open, selectedCount, onClose, onApply }: P
             </button>
             <button
               type="submit"
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:bg-blue-500 dark:hover:bg-blue-400 dark:focus:ring-offset-slate-900"
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-blue-500 dark:hover:bg-blue-400 dark:focus:ring-offset-slate-900"
+              disabled={isApplyDisabled}
             >
               Apply preset
             </button>

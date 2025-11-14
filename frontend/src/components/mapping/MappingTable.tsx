@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import MappingToolbar from './MappingToolbar';
 import MappingCompanyCell from './MappingCompanyCell';
-import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   getAccountExcludedAmount,
   selectFilteredAccounts,
@@ -40,7 +40,6 @@ import type {
 import MappingSplitRow from './MappingSplitRow';
 import MappingExclusionCell from './MappingExclusionCell';
 import DynamicAllocationRow from './DynamicAllocationRow';
-import { PRESET_OPTIONS } from './presets';
 import { buildTargetScoaOptions } from '../../utils/targetScoaOptions';
 import RatioAllocationManager from './RatioAllocationManager';
 import { getGroupTotal } from '../../utils/dynamicAllocation';
@@ -153,6 +152,7 @@ export default function MappingTable() {
       results: state.results,
     })
   );
+  const presetOptions = useRatioAllocationStore(selectPresetSummaries);
   const datapoints = useTemplateStore((state) => state.datapoints);
   const coaOptions = useMemo<TargetScoaOption[]>(
     () => buildTargetScoaOptions(datapoints),
@@ -722,9 +722,9 @@ export default function MappingTable() {
                         className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       >
                         <option value="">No preset</option>
-                        {PRESET_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                        {presetOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.name}
                           </option>
                         ))}
                       </select>
