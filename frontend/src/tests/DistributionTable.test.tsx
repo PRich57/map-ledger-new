@@ -1,14 +1,61 @@
 import { fireEvent, render, screen, within } from './testUtils';
 import DistributionTable from '../components/mapping/DistributionTable';
 import { useDistributionStore } from '../store/distributionStore';
+import { useOrganizationStore } from '../store/organizationStore';
 
 const resetDistributionStore = () => {
   useDistributionStore.setState({ rows: [], searchTerm: '', statusFilters: [] });
 };
 
+const resetOrganizationStore = () => {
+  useOrganizationStore.setState({
+    companies: [],
+    clientAccess: [],
+    configsByClient: {},
+    currentEmail: null,
+    isLoading: false,
+    error: null,
+  });
+};
+
+const seedOrganizationStore = () => {
+  resetOrganizationStore();
+  useOrganizationStore.setState({
+    companies: [
+      {
+        id: 'company-1',
+        name: 'Test Logistics',
+        clients: [
+          {
+            id: 'client-1',
+            name: 'Client One',
+            operations: [
+              { id: 'ops-log', name: 'Logistics' },
+              { id: 'ops-otr', name: 'Over-the-Road' },
+              { id: 'ops-ded', name: 'Dedicated' },
+              { id: 'ops-ltl', name: 'Less-than-Truckload' },
+              { id: 'ops-int', name: 'Intermodal' },
+            ],
+            metadata: {
+              sourceAccounts: [],
+              reportingPeriods: [],
+              mappingTypes: [],
+              targetSCoAs: [],
+              polarities: [],
+              presets: [],
+              exclusions: [],
+            },
+          },
+        ],
+      },
+    ],
+  });
+};
+
 describe('DistributionTable', () => {
   beforeEach(() => {
     resetDistributionStore();
+    seedOrganizationStore();
   });
 
   test('renders distribution rows with required columns', async () => {
