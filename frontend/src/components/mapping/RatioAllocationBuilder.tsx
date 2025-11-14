@@ -61,47 +61,76 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
     return map;
   }, []);
 
+  const { newPresetDynamicUsage, newPresetCanonicalUsage } = useMemo(() => {
+    const dynamicUsage = new Map<string, Set<string>>();
+    const canonicalUsage = new Map<string, Set<string>>();
+
+    const addUsage = (map: Map<string, Set<string>>, id: string | null, key: string) => {
+      if (!id) {
+        return;
+      }
+      if (!map.has(id)) {
+        map.set(id, new Set());
+      }
+      map.get(id)?.add(key);
+    };
+
+    newPresetRows.forEach((row, index) => {
+      const basisKey = `basis-${index}`;
+      const targetKey = `target-${index}`;
+      if (row.dynamicAccountId) {
+        addUsage(dynamicUsage, row.dynamicAccountId, basisKey);
+        const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
+        const canonicalId = resolveTargetAccountId(basisAccount?.mappedTargetId);
+        addUsage(canonicalUsage, canonicalId, basisKey);
+      }
+      const targetCanonicalId = resolveTargetAccountId(row.targetAccountId);
+      addUsage(canonicalUsage, targetCanonicalId, targetKey);
+    });
+
+    return { newPresetDynamicUsage: dynamicUsage, newPresetCanonicalUsage: canonicalUsage };
+  }, [basisAccounts, newPresetRows]);
+
   const computeNewPresetDynamicOptions = useCallback(
-    (excludeIndex?: number) => {
-      const usedDynamicIds = new Set(
-        newPresetRows
-          .map((row, index) => (index === excludeIndex ? null : row.dynamicAccountId))
-          .filter((value): value is string => Boolean(value)),
-      );
-      const usedCanonicalIds = new Set(
-        newPresetRows
-          .flatMap((row, index) =>
-            index === excludeIndex ? [] : resolvePresetRowCanonicalTargetIds(row, basisAccounts),
-          )
-          .filter((value): value is string => Boolean(value)),
-      );
+    (rowIndex?: number) => {
+      const dropdownKey = typeof rowIndex === 'number' ? `basis-${rowIndex}` : null;
       return basisAccounts
         .filter(account => {
-          if (usedDynamicIds.has(account.id)) {
-            return false;
+          const dynamicUsers = newPresetDynamicUsage.get(account.id);
+          if (dynamicUsers && dynamicUsers.size > 0) {
+            if (!dropdownKey || dynamicUsers.size > 1 || !dynamicUsers.has(dropdownKey)) {
+              return false;
+            }
           }
           const canonicalId = resolveTargetAccountId(account.mappedTargetId);
-          return !canonicalId || !usedCanonicalIds.has(canonicalId);
+          if (!canonicalId) {
+            return true;
+          }
+          const canonicalUsers = newPresetCanonicalUsage.get(canonicalId);
+          if (!canonicalUsers || canonicalUsers.size === 0) {
+            return true;
+          }
+          return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
         })
         .map(account => ({ value: account.id, label: account.name }));
     },
-    [basisAccounts, newPresetRows],
+    [basisAccounts, newPresetDynamicUsage, newPresetCanonicalUsage],
   );
 
   const computeNewPresetTargetOptions = useCallback(
-    (excludeIndex?: number) => {
-      const usedCanonicalIds = new Set(
-        newPresetRows
-          .flatMap((row, index) =>
-            index === excludeIndex ? [] : resolvePresetRowCanonicalTargetIds(row, basisAccounts),
-          )
-          .filter((value): value is string => Boolean(value)),
-      );
-      return STANDARD_CHART_OF_ACCOUNTS.filter(option => !usedCanonicalIds.has(option.id))
+    (rowIndex?: number) => {
+      const dropdownKey = typeof rowIndex === 'number' ? `target-${rowIndex}` : null;
+      return STANDARD_CHART_OF_ACCOUNTS.filter(option => {
+        const canonicalUsers = newPresetCanonicalUsage.get(option.id);
+        if (!canonicalUsers || canonicalUsers.size === 0) {
+          return true;
+        }
+        return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
+      })
         .map(option => ({ value: option.id, label: option.label }))
         .sort((a, b) => a.label.localeCompare(b.label));
     },
-    [basisAccounts, newPresetRows],
+    [newPresetCanonicalUsage],
   );
 
   const allocationIdForInitialSource = useMemo(() => {
