@@ -6,6 +6,7 @@ import { useDistributionStore } from '../../store/distributionStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappingStore';
 import { useOrganizationStore } from '../../store/organizationStore';
+import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
 import type {
   DistributionOperationShare,
   DistributionRow,
@@ -167,6 +168,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const [operationsDraft, setOperationsDraft] = useState<DistributionOperationShare[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
   const [activeDynamicAccountId, setActiveDynamicAccountId] = useState<string | null>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const { selectedIds, toggleSelection, setSelection, clearSelection } = useDistributionSelectionStore();
 
   const { getActivePresetForSource } = useRatioAllocationStore(state => ({
     getActivePresetForSource: state.getActivePresetForSource,
@@ -250,6 +254,17 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     });
   }, [filteredRows, sortConfig]);
 
+  useEffect(() => {
+    if (!selectAllRef.current) {
+      return;
+    }
+    const allIds = sortedRows.map(row => row.id);
+    const isAllSelected = allIds.length > 0 && allIds.every(id => selectedIds.has(id));
+    selectAllRef.current.checked = isAllSelected;
+    selectAllRef.current.indeterminate =
+      selectedIds.size > 0 && !isAllSelected && allIds.some(id => selectedIds.has(id));
+  }, [sortedRows, selectedIds]);
+
   const handleSort = (key: SortKey) => {
     setSortConfig(previous => {
       if (previous?.key === key) {
@@ -262,6 +277,18 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
 
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
+  };
+
+  const handleSelectAll = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      setSelection(sortedRows.map(row => row.id));
+    } else {
+      clearSelection();
+    }
+  };
+
+  const handleRowSelection = (id: string) => {
+    toggleSelection(id);
   };
 
   const handleToggleRow = (row: DistributionRow) => {
@@ -390,11 +417,21 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm dark:border-slate-700">
-        <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+        <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700" role="table">
+          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             <tr>
-              <th className="w-10 px-3 py-3">
-                <span className="sr-only">Toggle details</span>
+              <th scope="col" className="w-10 px-3 py-3">
+                <span className="sr-only">Toggle distribution operations</span>
+              </th>
+              <th scope="col" className="w-12 px-3 py-3">
+                <span className="sr-only">Select all rows</span>
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  aria-label="Select all distribution rows"
+                  onChange={handleSelectAll}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
               </th>
               {COLUMN_DEFINITIONS.map(column => {
                 const paddingClass = COLUMN_PADDING_CLASSES[column.key] ?? 'px-3';
@@ -424,31 +461,39 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
               const isEditing = editingRowId === row.id;
               const operationsSummary = formatOperations(row);
               const statusBadgeClass = STATUS_BADGE_CLASSES[row.status];
+              const isSelected = selectedIds.has(row.id);
               return (
                 <Fragment key={row.id}>
-                  <tr className="align-top">
-                    <td className="px-3 py-3">
+                  <tr className={`align-top ${isSelected ? 'bg-blue-50 dark:bg-slate-800/50' : ''}`}>
+                    <td className="px-3 py-4">
                       {row.type !== 'direct' ? (
                         <button
                           type="button"
                           onClick={() => handleToggleRow(row)}
                           aria-expanded={isExpanded}
                           aria-controls={`distribution-details-${row.id}`}
-                          className="rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
+                          aria-label={`${isExpanded ? 'Hide' : 'Show'} operations for ${row.accountId}`}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-slate-500 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
                         >
-                          <ChevronRight className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-90 text-blue-600' : ''}`} />
-                          <span className="sr-only">Toggle operations for {row.accountId}</span>
+                          <ChevronRight className={`h-6 w-6 transition-transform ${isExpanded ? 'rotate-90 text-blue-600' : ''}`} aria-hidden="true" />
                         </button>
                       ) : (
-                        <span className="inline-flex h-5 w-5 items-center justify-center text-slate-300 dark:text-slate-600" aria-hidden="true">
-                          —
-                        </span>
+                        <span className="inline-flex h-6 w-6 items-center justify-center" aria-hidden="true" />
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 font-medium text-slate-900 dark:text-slate-100">{row.accountId}</td>
-                    <td className="px-3 py-3 text-slate-700 dark:text-slate-200">{row.description}</td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300">{formatCurrency(row.activity)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-4">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select distribution row for account ${row.accountId}`}
+                        checked={isSelected}
+                        onChange={() => handleRowSelection(row.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-4 font-medium text-slate-900 dark:text-slate-100">{row.accountId}</td>
+                    <td className="px-3 py-4 text-slate-700 dark:text-slate-200">{row.description}</td>
+                    <td className="px-4 py-4 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300">{formatCurrency(row.activity)}</td>
+                    <td className="px-4 py-4">
                       <label htmlFor={`distribution-type-${row.id}`} className="sr-only">
                         Select distribution type
                       </label>
@@ -456,7 +501,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         id={`distribution-type-${row.id}`}
                         value={row.type}
                         onChange={event => updateRowType(row.id, event.target.value as DistributionType)}
-                        className="w-36 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="w-36 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
                         {TYPE_OPTIONS.map(option => (
                           <option key={option.value} value={option.value}>
@@ -465,14 +510,14 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-4">
                       {row.type === 'direct' ? (
                         operationsCatalog.length > 0 ? (
                           <select
                             aria-label="Select target operation"
                             value={row.operations[0]?.id ?? ''}
                             onChange={event => handleDirectOperationChange(row, event.target.value)}
-                            className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                            className="w-48 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                           >
                             <option value="">Select operation</option>
                             {operationsCatalog.map(option => (
@@ -507,7 +552,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-4">
                       <label htmlFor={`distribution-preset-${row.id}`} className="sr-only">
                         Select preset
                       </label>
@@ -515,7 +560,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         id={`distribution-preset-${row.id}`}
                         value={row.presetId ?? ''}
                         onChange={event => updateRowPreset(row.id, event.target.value ? event.target.value : null)}
-                        className="w-40 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="w-40 rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
                         <option value="">No preset</option>
                         {PRESET_OPTIONS.map(option => (
@@ -525,15 +570,15 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-3 text-right">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass}`}>
+                    <td className="px-3 py-4 text-right">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
                         {statusLabel(row.status)}
                       </span>
                     </td>
                   </tr>
                   {isExpanded && isEditing && (
                     <tr id={`distribution-details-${row.id}`}>
-                      <td colSpan={8} className="bg-slate-50 px-4 py-6 dark:bg-slate-800/60">
+                      <td colSpan={COLUMN_DEFINITIONS.length + 2} className="bg-slate-50 px-4 py-6 dark:bg-slate-800/60">
                         <div className="space-y-6">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div>
