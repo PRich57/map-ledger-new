@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { MappingPolarity, MappingStatus, MappingType, TargetScoaOption } from '../../types';
-import { PRESET_OPTIONS } from './presets';
+import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 
 interface BatchMapModalProps {
   open: boolean;
@@ -46,6 +46,7 @@ export default function BatchMapModal({
   const [presetId, setPresetId] = useState<string>('');
   const [polarity, setPolarity] = useState<MappingPolarity | ''>('');
   const [status, setStatus] = useState<MappingStatus | ''>('');
+  const presetOptions = useRatioAllocationStore(selectPresetSummaries);
 
   useEffect(() => {
     if (open) {
@@ -164,9 +165,9 @@ export default function BatchMapModal({
                 disabled={mappingType === 'exclude'}
               >
                 <option value="">Do not change</option>
-                {PRESET_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
+                {presetOptions.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
                   </option>
                 ))}
               </select>
