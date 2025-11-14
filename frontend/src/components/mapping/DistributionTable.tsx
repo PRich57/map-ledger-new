@@ -1,4 +1,4 @@
-import { ChangeEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, ChevronRight, Search, X } from 'lucide-react';
 import { PRESET_OPTIONS } from './presets';
 import RatioAllocationManager from './RatioAllocationManager';
@@ -178,6 +178,22 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const { getActivePresetForSource } = useRatioAllocationStore(state => ({
     getActivePresetForSource: state.getActivePresetForSource,
   }));
+
+  const operationTargetCatalog = useMemo(
+    () => clientOperations.map(operation => ({ id: operation.id, label: operation.name ?? operation.id })),
+    [clientOperations],
+  );
+
+  const resolveOperationCanonicalTargetId = useCallback((targetId?: string | null) => {
+    if (!targetId) {
+      return null;
+    }
+    const normalized = targetId.trim();
+    if (!normalized) {
+      return null;
+    }
+    return normalized.toUpperCase();
+  }, []);
 
   useEffect(() => {
     if (previousSignature.current === summarySignature) {
@@ -737,7 +753,12 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
               </button>
             </div>
             <div className="max-h-[80vh] overflow-y-auto p-6">
-              <RatioAllocationManager initialSourceAccountId={activeDynamicAccountId} onDone={() => setActiveDynamicAccountId(null)} />
+              <RatioAllocationManager
+                initialSourceAccountId={activeDynamicAccountId}
+                onDone={() => setActiveDynamicAccountId(null)}
+                targetCatalog={operationTargetCatalog}
+                resolveCanonicalTargetId={resolveOperationCanonicalTargetId}
+              />
             </div>
           </div>
         </div>
