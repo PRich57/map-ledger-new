@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import type {
   GLAccountMappingRow,
@@ -32,6 +32,24 @@ const clampPercentage = (value: number): number => {
 
 const roundToTwoDecimals = (value: number): number =>
   Math.round(value * 100) / 100;
+
+const formatPercentageLabel = (value: number): string =>
+  (Number.isFinite(value) ? value.toFixed(2) : '');
+
+const parsePercentageInput = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return null;
+  }
+  if (!/[0-9]/.test(trimmed)) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+};
 
 export default function MappingSplitRow({
   account,
@@ -68,11 +86,44 @@ export default function MappingSplitRow({
     };
   }, [splitRows]);
 
-  const handlePercentageChange = (splitId: string, value: string) => {
-    const rawValue = Number(value);
-    const numericValue = clampPercentage(rawValue);
-    const normalizedValue = roundToTwoDecimals(numericValue);
+  const [percentageInputs, setPercentageInputs] = useState<Record<string, string>>(() => {
+    const initialEntries: Record<string, string> = {};
+    account.splitDefinitions.forEach(split => {
+      const percentage = calculateSplitPercentage(account, split);
+      initialEntries[split.id] = formatPercentageLabel(percentage);
+    });
+    return initialEntries;
+  });
 
+  useEffect(() => {
+    setPercentageInputs(prev => {
+      const next = { ...prev };
+      let changed = false;
+      const splitIds = new Set(account.splitDefinitions.map(split => split.id));
+
+      account.splitDefinitions.forEach(split => {
+        const formattedValue = formatPercentageLabel(
+          calculateSplitPercentage(account, split),
+        );
+
+        if (next[split.id] !== formattedValue) {
+          next[split.id] = formattedValue;
+          changed = true;
+        }
+      });
+
+      Object.keys(next).forEach(key => {
+        if (!splitIds.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [account]);
+
+  const updatePercentageAllocations = (splitId: string, normalizedValue: number) => {
     const totalSplitCount = account.splitDefinitions.length;
     const activeSplits = account.splitDefinitions.filter(
       split => !split.isExclusion,
@@ -97,7 +148,43 @@ export default function MappingSplitRow({
         allocationType: 'percentage',
         allocationValue: remaining,
       });
+
+      setPercentageInputs(prev => ({
+        ...prev,
+        [splitId]: formatPercentageLabel(normalizedValue),
+        [partnerSplit.id]: formatPercentageLabel(remaining),
+      }));
+      return;
     }
+
+    setPercentageInputs(prev => ({
+      ...prev,
+      [splitId]: formatPercentageLabel(normalizedValue),
+    }));
+  };
+
+  const handlePercentageChange = (splitId: string, value: string) => {
+    setPercentageInputs(prev => ({
+      ...prev,
+      [splitId]: value,
+    }));
+  };
+
+  const handlePercentageBlur = (splitId: string, rawValue: string) => {
+    const parsedValue = parsePercentageInput(rawValue);
+
+    if (parsedValue === null) {
+      const fallback = splitRows.find(split => split.id === splitId);
+      setPercentageInputs(prev => ({
+        ...prev,
+        [splitId]: fallback ? formatPercentageLabel(fallback.percentage) : '',
+      }));
+      return;
+    }
+
+    const numericValue = clampPercentage(parsedValue);
+    const normalizedValue = roundToTwoDecimals(numericValue);
+    updatePercentageAllocations(splitId, normalizedValue);
   };
 
   const handleTargetChange = (splitId: string, value: string) => {
@@ -207,14 +294,11 @@ export default function MappingSplitRow({
                         </label>
                         <input
                           id={`split-percentage-${split.id}`}
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          value={Number.isFinite(split.percentage)
-                            ? split.percentage.toFixed(2)
-                            : '0.00'}
+                          type="text"
+                          inputMode="decimal"
+                          value={percentageInputs[split.id] ?? formatPercentageLabel(split.percentage)}
                           onChange={event => handlePercentageChange(split.id, event.target.value)}
+                          onBlur={event => handlePercentageBlur(split.id, event.target.value)}
                           className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                         />
                         <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">%</span>
