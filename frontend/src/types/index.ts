@@ -405,6 +405,8 @@ export interface DistributionOperationShare {
   allocation?: number;
 }
 
+export type DistributionStatus = Extract<MappingStatus, 'Mapped' | 'Unmapped'>;
+
 export interface DistributionRow {
   id: string;
   mappingRowId: string;
@@ -415,7 +417,7 @@ export interface DistributionRow {
   operations: DistributionOperationShare[];
   presetId?: string | null;
   notes?: string;
-  status: MappingStatus;
+  status: DistributionStatus;
 }
 
 export interface GLAccountMappingRow {

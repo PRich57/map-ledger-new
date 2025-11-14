@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import type {
   DistributionRow,
+  DistributionStatus,
   DistributionType,
-  MappingStatus,
   StandardScoaSummary,
 } from '../types';
 import { getStandardScoaOption } from '../data/standardChartOfAccounts';
@@ -16,17 +16,17 @@ interface DistributionState {
   rows: DistributionRow[];
   operationsCatalog: DistributionOperationCatalogItem[];
   searchTerm: string;
-  statusFilters: MappingStatus[];
+  statusFilters: DistributionStatus[];
   syncRowsFromStandardTargets: (summaries: StandardScoaSummary[]) => void;
   setSearchTerm: (term: string) => void;
-  toggleStatusFilter: (status: MappingStatus) => void;
+  toggleStatusFilter: (status: DistributionStatus) => void;
   clearStatusFilters: () => void;
   updateRow: (id: string, updates: Partial<DistributionRow>) => void;
   updateRowType: (id: string, type: DistributionType) => void;
   updateRowOperations: (id: string, operations: DistributionRow['operations']) => void;
   updateRowPreset: (id: string, presetId: string | null) => void;
   updateRowNotes: (id: string, notes: string) => void;
-  updateRowStatus: (id: string, status: MappingStatus) => void;
+  setOperationsCatalog: (operations: DistributionOperationCatalogItem[]) => void;
 }
 
 const operationsCatalog: DistributionOperationCatalogItem[] = [
@@ -51,7 +51,6 @@ const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
     operations: [{ id: 'ops-log', name: 'Logistics' }],
     presetId: 'preset-1',
     notes: 'Approved during March close.',
-    status: 'Mapped',
   },
   [DRIVER_BENEFITS_TARGET.id]: {
     type: 'percentage',
@@ -61,7 +60,6 @@ const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
     ],
     presetId: 'preset-2',
     notes: 'Split based on headcount.',
-    status: 'Mapped',
   },
   [NON_DRIVER_WAGES_TARGET.id]: {
     type: 'percentage',
@@ -71,7 +69,6 @@ const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
     ],
     presetId: 'preset-2',
     notes: 'Pending confirmation of allocation weights.',
-    status: 'Unmapped',
   },
   [FUEL_EXPENSE_TARGET.id]: {
     type: 'dynamic',
@@ -81,16 +78,44 @@ const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
     ],
     presetId: 'preset-1',
     notes: 'Allocate fuel based on miles driven.',
-    status: 'New',
   },
   [TRACTOR_MAINTENANCE_TARGET.id]: {
     type: 'direct',
     operations: [{ id: 'ops-ded', name: 'Dedicated' }],
     presetId: null,
     notes: 'Charged entirely to dedicated operations.',
-    status: 'New',
   },
 };
+
+const deriveDistributionStatus = (
+  type: DistributionType,
+  operations: DistributionRow['operations'],
+): DistributionStatus => {
+  if (type === 'direct') {
+    return operations.length === 1 ? 'Mapped' : 'Unmapped';
+  }
+
+  if (type === 'percentage') {
+    if (operations.length === 0) {
+      return 'Unmapped';
+    }
+
+    const allHaveAllocations = operations.every(operation => typeof operation.allocation === 'number');
+    if (!allHaveAllocations) {
+      return 'Unmapped';
+    }
+
+    const total = operations.reduce((sum, operation) => sum + (operation.allocation ?? 0), 0);
+    return Math.abs(total - 100) <= 0.01 ? 'Mapped' : 'Unmapped';
+  }
+
+  return operations.length > 0 ? 'Mapped' : 'Unmapped';
+};
+
+const applyDistributionStatus = (row: DistributionRow): DistributionRow => ({
+  ...row,
+  status: deriveDistributionStatus(row.type, row.operations),
+});
 
 const clampOperationsForType = (
   type: DistributionType,
@@ -128,7 +153,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           ? existing.operations.map(operation => ({ ...operation }))
           : defaultConfig?.operations?.map(operation => ({ ...operation })) ?? [];
         const resolvedType = existing?.type ?? defaultConfig?.type ?? 'direct';
-        return {
+        return applyDistributionStatus({
           id: existing?.id ?? summary.id,
           mappingRowId: summary.id,
           accountId: summary.value,
@@ -138,11 +163,8 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           operations: clampOperationsForType(resolvedType, nextOperations),
           presetId: existing?.presetId ?? defaultConfig?.presetId ?? null,
           notes: existing?.notes ?? defaultConfig?.notes,
-          status:
-            existing?.status ??
-            defaultConfig?.status ??
-            (summary.mappedAmount > 0 ? 'Mapped' : 'Unmapped'),
-        };
+          status: existing?.status ?? 'Unmapped',
+        });
       });
       return { rows: nextRows };
     }),
@@ -156,23 +178,38 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
   clearStatusFilters: () => set({ statusFilters: [] }),
   updateRow: (id, updates) =>
     set(state => ({
-      rows: state.rows.map(row => (row.id === id ? { ...row, ...updates } : row)),
+      rows: state.rows.map(row => {
+        if (row.id !== id) {
+          return row;
+        }
+        const nextRow: DistributionRow = {
+          ...row,
+          ...updates,
+          operations: updates.operations ?? row.operations,
+          type: updates.type ?? row.type,
+        };
+        return applyDistributionStatus(nextRow);
+      }),
     })),
   updateRowType: (id, type) =>
     set(state => ({
-      rows: state.rows.map(row =>
-        row.id === id
-          ? {
-              ...row,
-              type,
-              operations: clampOperationsForType(type, row.operations),
-            }
-          : row,
-      ),
+      rows: state.rows.map(row => {
+        if (row.id !== id) {
+          return row;
+        }
+        const nextOperations = clampOperationsForType(type, row.operations);
+        return applyDistributionStatus({
+          ...row,
+          type,
+          operations: nextOperations,
+        });
+      }),
     })),
   updateRowOperations: (id, operations) =>
     set(state => ({
-      rows: state.rows.map(row => (row.id === id ? { ...row, operations } : row)),
+      rows: state.rows.map(row =>
+        row.id === id ? applyDistributionStatus({ ...row, operations }) : row,
+      ),
     })),
   updateRowPreset: (id, presetId) =>
     set(state => ({
@@ -182,8 +219,8 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
     set(state => ({
       rows: state.rows.map(row => (row.id === id ? { ...row, notes: notes || undefined } : row)),
     })),
-  updateRowStatus: (id, status) =>
-    set(state => ({
-      rows: state.rows.map(row => (row.id === id ? { ...row, status } : row)),
-    })),
+  setOperationsCatalog: operations =>
+    set({
+      operationsCatalog: operations.map(operation => ({ ...operation })),
+    }),
 }));

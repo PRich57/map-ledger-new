@@ -5,29 +5,26 @@ import RatioAllocationManager from './RatioAllocationManager';
 import { useDistributionStore } from '../../store/distributionStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappingStore';
+import { useOrganizationStore } from '../../store/organizationStore';
 import type {
   DistributionOperationShare,
   DistributionRow,
+  DistributionStatus,
   DistributionType,
-  MappingStatus,
 } from '../../types';
 
 interface DistributionTableProps {
   focusMappingId?: string | null;
 }
 
-const STATUS_DEFINITIONS: { value: MappingStatus; label: string }[] = [
-  { value: 'New', label: 'New' },
+const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
   { value: 'Unmapped', label: 'Unmapped' },
   { value: 'Mapped', label: 'Mapped' },
-  { value: 'Excluded', label: 'Excluded' },
 ];
 
-const STATUS_BADGE_CLASSES: Record<MappingStatus, string> = {
-  New: 'bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200',
+const STATUS_BADGE_CLASSES: Record<DistributionStatus, string> = {
   Unmapped: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
   Mapped: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
-  Excluded: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200',
 };
 
 const TYPE_OPTIONS: { value: DistributionType; label: string }[] = [
@@ -41,13 +38,18 @@ type SortDirection = 'asc' | 'desc';
 
 const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'accountId', label: 'Account ID' },
-  { key: 'description', label: 'Standard chart description' },
-  { key: 'activity', label: 'Mapped value', align: 'right' },
-  { key: 'type', label: 'Distribution type' },
-  { key: 'operations', label: 'Operations summary' },
+  { key: 'description', label: 'Standard COA Description' },
+  { key: 'activity', label: 'Mapped Value', align: 'right' },
+  { key: 'type', label: 'Distribution Type' },
+  { key: 'operations', label: 'Target Operation' },
   { key: 'preset', label: 'Preset' },
   { key: 'status', label: 'Status', align: 'right' },
 ];
+
+const COLUMN_PADDING_CLASSES: Partial<Record<SortKey, string>> = {
+  activity: 'px-4',
+  type: 'px-4',
+};
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -57,8 +59,15 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 
 const formatCurrency = (value: number): string => currencyFormatter.format(value);
 
-const statusLabel = (value: MappingStatus) =>
+const statusLabel = (value: DistributionStatus) =>
   STATUS_DEFINITIONS.find(status => status.value === value)?.label ?? value;
+
+const formatOperationLabel = (operation: DistributionOperationShare) => {
+  if (operation.name && operation.name !== operation.id) {
+    return `${operation.id} – ${operation.name}`;
+  }
+  return operation.id;
+};
 
 const formatOperations = (row: DistributionRow) => {
   if (!row.operations.length) {
@@ -67,11 +76,11 @@ const formatOperations = (row: DistributionRow) => {
 
   if (row.type === 'percentage') {
     return row.operations
-      .map(operation => `${operation.name} (${operation.allocation ?? 0}%)`)
+      .map(operation => `${formatOperationLabel(operation)} (${operation.allocation ?? 0}%)`)
       .join(', ');
   }
 
-  return row.operations.map(operation => operation.name).join(', ');
+  return row.operations.map(operation => formatOperationLabel(operation)).join(', ');
 };
 
 const getSortValue = (row: DistributionRow, key: SortKey): string | number => {
@@ -97,11 +106,32 @@ const getSortValue = (row: DistributionRow, key: SortKey): string | number => {
 
 const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const standardTargets = useMappingStore(selectStandardScoaSummaries);
+  const activeClientId = useMappingStore(state => state.activeClientId);
+  const companies = useOrganizationStore(state => state.companies);
   const summarySignature = useMemo(
     () => standardTargets.map(target => `${target.id}:${target.mappedAmount}`).join('|'),
     [standardTargets],
   );
   const previousSignature = useRef<string | null>(null);
+  const clientOperations = useMemo(() => {
+    const map = new Map<string, DistributionOperationShare>();
+    companies.forEach(company => {
+      company.clients.forEach(client => {
+        if (activeClientId && client.id !== activeClientId) {
+          return;
+        }
+        client.operations.forEach(operation => {
+          const code = operation.id?.trim();
+          if (!code) {
+            return;
+          }
+          const name = operation.name?.trim() || code;
+          map.set(code, { id: code, name });
+        });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
+  }, [companies, activeClientId]);
   const {
     rows,
     operationsCatalog,
@@ -115,7 +145,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowOperations,
     updateRowPreset,
     updateRowNotes,
-    updateRowStatus,
+    setOperationsCatalog,
   } = useDistributionStore(state => ({
     rows: state.rows,
     operationsCatalog: state.operationsCatalog,
@@ -129,7 +159,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowOperations: state.updateRowOperations,
     updateRowPreset: state.updateRowPreset,
     updateRowNotes: state.updateRowNotes,
-    updateRowStatus: state.updateRowStatus,
+    setOperationsCatalog: state.setOperationsCatalog,
   }));
 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
@@ -151,17 +181,45 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   }, [standardTargets, summarySignature, syncRowsFromStandardTargets]);
 
   useEffect(() => {
+    if (clientOperations.length === 0) {
+      return;
+    }
+    const nextSignature = clientOperations.map(operation => `${operation.id}:${operation.name}`).join('|');
+    const currentSignature = operationsCatalog.map(operation => `${operation.id}:${operation.name}`).join('|');
+    if (nextSignature !== currentSignature) {
+      setOperationsCatalog(clientOperations);
+    }
+  }, [clientOperations, operationsCatalog, setOperationsCatalog]);
+
+  useEffect(() => {
     if (!focusMappingId) {
       return;
     }
     const targetRow = rows.find(row => row.mappingRowId === focusMappingId);
-    if (!targetRow) {
+    if (!targetRow || targetRow.type === 'direct') {
       return;
     }
     setExpandedRows(new Set([targetRow.id]));
     setEditingRowId(targetRow.id);
     setOperationsDraft(targetRow.operations.map(operation => ({ ...operation })));
   }, [focusMappingId, rows]);
+
+  useEffect(() => {
+    setExpandedRows(prev => {
+      const filtered = new Set(Array.from(prev).filter(id => {
+        const row = rows.find(item => item.id === id);
+        return row && row.type !== 'direct';
+      }));
+      return filtered.size === prev.size ? prev : filtered;
+    });
+    setEditingRowId(prev => {
+      if (!prev) {
+        return prev;
+      }
+      const row = rows.find(item => item.id === prev);
+      return row && row.type !== 'direct' ? prev : null;
+    });
+  }, [rows]);
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = searchTerm.trim().toLowerCase();
@@ -207,6 +265,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   };
 
   const handleToggleRow = (row: DistributionRow) => {
+    if (row.type === 'direct') {
+      return;
+    }
     const isExpanded = expandedRows.has(row.id);
     if (isExpanded) {
       setExpandedRows(new Set());
@@ -246,13 +307,17 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     );
   };
 
-  const handleDirectSelection = (operationId: string) => {
-    const catalogItem = operationsCatalog.find(item => item.id === operationId);
-    if (!catalogItem) {
-      setOperationsDraft([]);
+  const handleDirectOperationChange = (row: DistributionRow, operationId: string) => {
+    if (!operationId) {
+      updateRowOperations(row.id, []);
       return;
     }
-    setOperationsDraft([{ id: catalogItem.id, name: catalogItem.name }]);
+    const catalogItem = operationsCatalog.find(item => item.id === operationId);
+    if (!catalogItem) {
+      updateRowOperations(row.id, []);
+      return;
+    }
+    updateRowOperations(row.id, [{ id: catalogItem.id, name: catalogItem.name }]);
   };
 
   const handleSaveOperations = (row: DistributionRow) => {
@@ -331,23 +396,26 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
               <th className="w-10 px-3 py-3">
                 <span className="sr-only">Toggle details</span>
               </th>
-              {COLUMN_DEFINITIONS.map(column => (
-                <th
-                  key={column.key}
-                  scope="col"
-                  aria-sort={getAriaSort(column.key)}
-                  className={`px-3 py-3 ${column.align === 'right' ? 'text-right' : ''}`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleSort(column.key)}
-                    className="flex items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
+              {COLUMN_DEFINITIONS.map(column => {
+                const paddingClass = COLUMN_PADDING_CLASSES[column.key] ?? 'px-3';
+                return (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    aria-sort={getAriaSort(column.key)}
+                    className={`${paddingClass} py-3 ${column.align === 'right' ? 'text-right' : ''}`}
                   >
-                    {column.label}
-                    <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </th>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => handleSort(column.key)}
+                      className="flex items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
+                    >
+                      {column.label}
+                      <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
@@ -360,21 +428,27 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                 <Fragment key={row.id}>
                   <tr className="align-top">
                     <td className="px-3 py-3">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleRow(row)}
-                        aria-expanded={isExpanded}
-                        aria-controls={`distribution-details-${row.id}`}
-                        className="rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
-                      >
-                        <ChevronRight className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-90 text-blue-600' : ''}`} />
-                        <span className="sr-only">Toggle operations for {row.accountId}</span>
-                      </button>
+                      {row.type !== 'direct' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRow(row)}
+                          aria-expanded={isExpanded}
+                          aria-controls={`distribution-details-${row.id}`}
+                          className="rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
+                        >
+                          <ChevronRight className={`h-5 w-5 transition-transform ${isExpanded ? 'rotate-90 text-blue-600' : ''}`} />
+                          <span className="sr-only">Toggle operations for {row.accountId}</span>
+                        </button>
+                      ) : (
+                        <span className="inline-flex h-5 w-5 items-center justify-center text-slate-300 dark:text-slate-600" aria-hidden="true">
+                          —
+                        </span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 font-medium text-slate-900 dark:text-slate-100">{row.accountId}</td>
                     <td className="px-3 py-3 text-slate-700 dark:text-slate-200">{row.description}</td>
-                    <td className="px-3 py-3 text-right text-slate-600 dark:text-slate-300">{formatCurrency(row.activity)}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-4 py-3 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300">{formatCurrency(row.activity)}</td>
+                    <td className="px-4 py-3">
                       <label htmlFor={`distribution-type-${row.id}`} className="sr-only">
                         Select distribution type
                       </label>
@@ -392,23 +466,46 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                       </select>
                     </td>
                     <td className="px-3 py-3">
-                      <div className="space-y-2">
-                        <div className="text-slate-700 dark:text-slate-200">{operationsSummary}</div>
-                        {row.type === 'dynamic' && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            {(() => {
-                              const activePreset = getActivePresetForSource(row.accountId);
-                              return activePreset ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
-                                  Preset: {activePreset.name}
-                                </span>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400">No preset selected</span>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
+                      {row.type === 'direct' ? (
+                        operationsCatalog.length > 0 ? (
+                          <select
+                            aria-label="Select target operation"
+                            value={row.operations[0]?.id ?? ''}
+                            onChange={event => handleDirectOperationChange(row, event.target.value)}
+                            className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          >
+                            <option value="">Select operation</option>
+                            {operationsCatalog.map(option => (
+                              <option key={option.id} value={option.id}>
+                                {option.name && option.name !== option.id ? `${option.id} – ${option.name}` : option.id}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <p className="text-sm text-slate-500 dark:text-slate-400">No operations available for this client.</p>
+                        )
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="text-slate-700 dark:text-slate-200">{operationsSummary}</div>
+                          {row.operations.length === 0 && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">Assign operations to complete this distribution.</p>
+                          )}
+                          {row.type === 'dynamic' && (
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {(() => {
+                                const activePreset = getActivePresetForSource(row.accountId);
+                                return activePreset ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
+                                    Preset: {activePreset.name}
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-600 dark:text-amber-400">No preset selected</span>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <label htmlFor={`distribution-preset-${row.id}`} className="sr-only">
@@ -444,7 +541,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                                 Distribution details for {row.description}
                               </h4>
                               <p className="text-xs text-slate-500 dark:text-slate-400">
-                                Adjust operations, notes, and status for this standard account.
+                                Adjust operations and notes for this standard account.
                               </p>
                             </div>
                             <button
@@ -458,71 +555,58 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                           </div>
                           <div className="grid gap-6 lg:grid-cols-2">
                             <div className="space-y-4">
-                              {row.type === 'direct' && (
-                                <div className="space-y-1">
-                                  <label htmlFor={`direct-operation-${row.id}`} className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                                    Select operation
-                                  </label>
-                                  <select
-                                    id={`direct-operation-${row.id}`}
-                                    value={operationsDraft[0]?.id ?? ''}
-                                    onChange={event => handleDirectSelection(event.target.value)}
-                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-                                  >
-                                    <option value="">No operation selected</option>
-                                    {operationsCatalog.map(option => (
-                                      <option key={option.id} value={option.id}>
-                                        {option.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-
                               {row.type !== 'direct' && (
                                 <div className="space-y-3">
                                   <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Operations</p>
-                                  <div className="space-y-2">
-                                    {operationsCatalog.map(option => {
-                                      const isSelected = operationsDraft.some(operation => operation.id === option.id);
-                                      return (
-                                        <label
-                                          key={option.id}
-                                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-sm transition ${
-                                            isSelected
-                                              ? 'border-blue-500 bg-blue-50/60 dark:border-blue-400 dark:bg-blue-500/10'
-                                              : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-500'
-                                          }`}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={event => handleToggleOperation(option.id, event.target.checked)}
-                                            className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
-                                          />
-                                          <div className="flex-1">
-                                            <div className="font-medium text-slate-700 dark:text-slate-100">{option.name}</div>
-                                            {row.type === 'percentage' && isSelected && (
-                                              <div className="mt-1 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                                                <label htmlFor={`allocation-${row.id}-${option.id}`}>Allocation %</label>
-                                                <input
-                                                  id={`allocation-${row.id}-${option.id}`}
-                                                  type="number"
-                                                  min={0}
-                                                  max={100}
-                                                  value={operationsDraft.find(operation => operation.id === option.id)?.allocation ?? 0}
-                                                  onChange={event =>
-                                                    handleAllocationChange(option.id, Number(event.target.value))
-                                                  }
-                                                  className="w-20 rounded-md border border-slate-300 px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
-                                                />
-                                              </div>
-                                            )}
-                                          </div>
-                                        </label>
-                                      );
-                                    })}
-                                  </div>
+                                  {operationsCatalog.length === 0 ? (
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                                      No operations are available for this client. Import client operations to continue.
+                                    </p>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {operationsCatalog.map(option => {
+                                        const isSelected = operationsDraft.some(operation => operation.id === option.id);
+                                        const optionLabel = option.name && option.name !== option.id ? `${option.id} – ${option.name}` : option.id;
+                                        return (
+                                          <label
+                                            key={option.id}
+                                            className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-sm transition ${
+                                              isSelected
+                                                ? 'border-blue-500 bg-blue-50/60 dark:border-blue-400 dark:bg-blue-500/10'
+                                                : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-500'
+                                            }`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={isSelected}
+                                              onChange={event => handleToggleOperation(option.id, event.target.checked)}
+                                              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
+                                            />
+                                            <div className="flex-1">
+                                              <div className="font-medium text-slate-700 dark:text-slate-100">{optionLabel}</div>
+                                              {row.type === 'percentage' && isSelected && (
+                                                <div className="mt-1 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                                                  <label htmlFor={`allocation-${row.id}-${option.id}`}>Allocation %</label>
+                                                  <input
+                                                    id={`allocation-${row.id}-${option.id}`}
+                                                    type="number"
+                                                    min={0}
+                                                    max={100}
+                                                    step={0.1}
+                                                    value={operationsDraft.find(operation => operation.id === option.id)?.allocation ?? 0}
+                                                    onChange={event =>
+                                                      handleAllocationChange(option.id, Number.parseFloat(event.target.value))
+                                                    }
+                                                    className="w-24 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                                                  />
+                                                </div>
+                                              )}
+                                            </div>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                   {row.type === 'dynamic' && (
                                     <p className="text-xs text-slate-600 dark:text-slate-300">
                                       Dynamic allocations distribute amounts according to preset configurations. Use the builder to configure ratio weights.
@@ -569,23 +653,6 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                                   rows={4}
                                   className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
                                 />
-                              </div>
-                              <div>
-                                <label htmlFor={`distribution-status-${row.id}`} className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                                  Distribution status
-                                </label>
-                                <select
-                                  id={`distribution-status-${row.id}`}
-                                  value={row.status}
-                                  onChange={event => updateRowStatus(row.id, event.target.value as MappingStatus)}
-                                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-                                >
-                                  {STATUS_DEFINITIONS.map(option => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
                               </div>
                             </div>
                           </div>

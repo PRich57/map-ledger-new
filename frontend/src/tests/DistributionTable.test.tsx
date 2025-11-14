@@ -15,7 +15,7 @@ describe('DistributionTable', () => {
     render(<DistributionTable />);
 
     expect(screen.getByText('Account ID')).toBeInTheDocument();
-    expect(screen.getByText('Standard chart description')).toBeInTheDocument();
+    expect(screen.getByText('Standard COA Description')).toBeInTheDocument();
     expect(
       await screen.findByText('FREIGHT REVENUE LINEHAUL - COMPANY FLEET'),
     ).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe('DistributionTable', () => {
     const toggleButton = within(driverRow as HTMLTableRowElement).getByRole('button');
     fireEvent.click(toggleButton);
 
-    const intermodalToggle = await screen.findByLabelText('Intermodal');
+    const intermodalToggle = await screen.findByLabelText(/ops-int/i);
     fireEvent.click(intermodalToggle);
 
     const intermodalContainer = intermodalToggle.closest('label');
@@ -47,7 +47,7 @@ describe('DistributionTable', () => {
 
     fireEvent.click(screen.getByText('Save operations'));
 
-    expect(await screen.findByText(/Intermodal \(25%\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/ops-int.*25%/i)).toBeInTheDocument();
   });
 
   test('opens dynamic allocation builder for dynamic rows', async () => {
