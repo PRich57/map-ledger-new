@@ -1,13 +1,22 @@
 import { useEffect } from 'react';
-import RatioAllocationBuilder from './RatioAllocationBuilder';
+import RatioAllocationBuilder, {
+  type RatioAllocationTargetCatalogOption,
+} from './RatioAllocationBuilder';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 
 interface RatioAllocationManagerProps {
   initialSourceAccountId?: string | null;
   onDone?: () => void;
+  targetCatalog?: RatioAllocationTargetCatalogOption[];
+  resolveCanonicalTargetId?: (targetId?: string | null) => string | null;
 }
 
-const RatioAllocationManager = ({ initialSourceAccountId, onDone }: RatioAllocationManagerProps) => {
+const RatioAllocationManager = ({
+  initialSourceAccountId,
+  onDone,
+  targetCatalog,
+  resolveCanonicalTargetId,
+}: RatioAllocationManagerProps) => {
   const { getOrCreateAllocation } = useRatioAllocationStore();
 
   useEffect(() => {
@@ -25,7 +34,11 @@ const RatioAllocationManager = ({ initialSourceAccountId, onDone }: RatioAllocat
         </p>
       </div>
 
-      <RatioAllocationBuilder initialSourceAccountId={initialSourceAccountId} />
+      <RatioAllocationBuilder
+        initialSourceAccountId={initialSourceAccountId}
+        targetCatalog={targetCatalog}
+        resolveCanonicalTargetId={resolveCanonicalTargetId}
+      />
 
       {onDone && (
         <div className="flex justify-end">
