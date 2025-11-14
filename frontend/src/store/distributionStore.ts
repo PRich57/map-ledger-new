@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  DistributionOperationShare,
   DistributionRow,
   DistributionStatus,
   DistributionType,
@@ -26,6 +27,14 @@ interface DistributionState {
   updateRowPreset: (id: string, presetId: string | null) => void;
   updateRowNotes: (id: string, notes: string) => void;
   setOperationsCatalog: (operations: DistributionOperationCatalogItem[]) => void;
+  applyBatchDistribution: (
+    ids: string[],
+    updates: {
+      type?: DistributionType;
+      operation?: DistributionOperationShare | null;
+    },
+  ) => void;
+  applyPresetToRows: (ids: string[], presetId: string | null) => void;
 }
 
 const deriveDistributionStatus = (
@@ -163,4 +172,52 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
     set({
       operationsCatalog: operations.map(operation => ({ ...operation })),
     }),
+  applyBatchDistribution: (ids, updates) => {
+    if (!ids.length) {
+      return;
+    }
+    set(state => {
+      const idSet = new Set(ids);
+      return {
+        rows: state.rows.map(row => {
+          if (!idSet.has(row.id)) {
+            return row;
+          }
+          let nextRow: DistributionRow = { ...row };
+          if (updates.type && updates.type !== nextRow.type) {
+            nextRow = {
+              ...nextRow,
+              type: updates.type,
+              operations: clampOperationsForType(updates.type, nextRow.operations),
+            };
+          }
+          if (Object.prototype.hasOwnProperty.call(updates, 'operation')) {
+            const operationShare = updates.operation;
+            if (operationShare) {
+              nextRow = {
+                ...nextRow,
+                operations: clampOperationsForType(nextRow.type, [operationShare]),
+              };
+            } else {
+              nextRow = { ...nextRow, operations: [] };
+            }
+          }
+          return applyDistributionStatus(nextRow);
+        }),
+      };
+    });
+  },
+  applyPresetToRows: (ids, presetId) => {
+    if (!ids.length) {
+      return;
+    }
+    set(state => {
+      const idSet = new Set(ids);
+      return {
+        rows: state.rows.map(row =>
+          idSet.has(row.id) ? { ...row, presetId: presetId ?? null } : row,
+        ),
+      };
+    });
+  },
 }));
