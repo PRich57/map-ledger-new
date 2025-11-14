@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { DistributionRow, DistributionType, MappingStatus } from '../types';
+import type {
+  DistributionRow,
+  DistributionType,
+  MappingStatus,
+  StandardScoaSummary,
+} from '../types';
 import { getStandardScoaOption } from '../data/standardChartOfAccounts';
 
 export interface DistributionOperationCatalogItem {
@@ -12,6 +17,7 @@ interface DistributionState {
   operationsCatalog: DistributionOperationCatalogItem[];
   searchTerm: string;
   statusFilters: MappingStatus[];
+  syncRowsFromStandardTargets: (summaries: StandardScoaSummary[]) => void;
   setSearchTerm: (term: string) => void;
   toggleStatusFilter: (status: MappingStatus) => void;
   clearStatusFilters: () => void;
@@ -39,25 +45,15 @@ const NON_DRIVER_WAGES_TARGET = getStandardScoaOption('NON DRIVER WAGES & BENEFI
 const FUEL_EXPENSE_TARGET = getStandardScoaOption('FUEL EXPENSE - COMPANY FLEET');
 const TRACTOR_MAINTENANCE_TARGET = getStandardScoaOption('MAINTENANCE EXPENSE - TRACTOR - COMPANY FLEET');
 
-const seedRows: DistributionRow[] = [
-  {
-    id: 'dist-1',
-    mappingRowId: FREIGHT_REVENUE_TARGET.id,
-    accountId: FREIGHT_REVENUE_TARGET.value,
-    description: FREIGHT_REVENUE_TARGET.label,
-    activity: 500000,
+const DEFAULT_ROW_CONFIGS: Record<string, Partial<DistributionRow>> = {
+  [FREIGHT_REVENUE_TARGET.id]: {
     type: 'direct',
     operations: [{ id: 'ops-log', name: 'Logistics' }],
     presetId: 'preset-1',
     notes: 'Approved during March close.',
     status: 'Mapped',
   },
-  {
-    id: 'dist-2',
-    mappingRowId: DRIVER_BENEFITS_TARGET.id,
-    accountId: DRIVER_BENEFITS_TARGET.value,
-    description: DRIVER_BENEFITS_TARGET.label,
-    activity: 72000,
+  [DRIVER_BENEFITS_TARGET.id]: {
     type: 'percentage',
     operations: [
       { id: 'ops-ded', name: 'Dedicated', allocation: 60 },
@@ -67,12 +63,7 @@ const seedRows: DistributionRow[] = [
     notes: 'Split based on headcount.',
     status: 'Mapped',
   },
-  {
-    id: 'dist-3',
-    mappingRowId: NON_DRIVER_WAGES_TARGET.id,
-    accountId: NON_DRIVER_WAGES_TARGET.value,
-    description: NON_DRIVER_WAGES_TARGET.label,
-    activity: 48000,
+  [NON_DRIVER_WAGES_TARGET.id]: {
     type: 'percentage',
     operations: [
       { id: 'ops-ded', name: 'Dedicated', allocation: 55 },
@@ -82,12 +73,7 @@ const seedRows: DistributionRow[] = [
     notes: 'Pending confirmation of allocation weights.',
     status: 'Unmapped',
   },
-  {
-    id: 'dist-4',
-    mappingRowId: FUEL_EXPENSE_TARGET.id,
-    accountId: FUEL_EXPENSE_TARGET.value,
-    description: FUEL_EXPENSE_TARGET.label,
-    activity: 45000,
+  [FUEL_EXPENSE_TARGET.id]: {
     type: 'dynamic',
     operations: [
       { id: 'ops-log', name: 'Logistics' },
@@ -97,19 +83,14 @@ const seedRows: DistributionRow[] = [
     notes: 'Allocate fuel based on miles driven.',
     status: 'New',
   },
-  {
-    id: 'dist-5',
-    mappingRowId: TRACTOR_MAINTENANCE_TARGET.id,
-    accountId: TRACTOR_MAINTENANCE_TARGET.value,
-    description: TRACTOR_MAINTENANCE_TARGET.label,
-    activity: 20000,
+  [TRACTOR_MAINTENANCE_TARGET.id]: {
     type: 'direct',
     operations: [{ id: 'ops-ded', name: 'Dedicated' }],
     presetId: null,
     notes: 'Charged entirely to dedicated operations.',
     status: 'New',
   },
-];
+};
 
 const clampOperationsForType = (
   type: DistributionType,
@@ -131,10 +112,40 @@ const clampOperationsForType = (
 };
 
 export const useDistributionStore = create<DistributionState>((set, get) => ({
-  rows: seedRows,
+  rows: [],
   operationsCatalog,
   searchTerm: '',
   statusFilters: [],
+  syncRowsFromStandardTargets: summaries =>
+    set(state => {
+      const existingByTarget = new Map(
+        state.rows.map(row => [row.mappingRowId, row] as const),
+      );
+      const nextRows: DistributionRow[] = summaries.map(summary => {
+        const existing = existingByTarget.get(summary.id);
+        const defaultConfig = DEFAULT_ROW_CONFIGS[summary.id];
+        const nextOperations = existing
+          ? existing.operations.map(operation => ({ ...operation }))
+          : defaultConfig?.operations?.map(operation => ({ ...operation })) ?? [];
+        const resolvedType = existing?.type ?? defaultConfig?.type ?? 'direct';
+        return {
+          id: existing?.id ?? summary.id,
+          mappingRowId: summary.id,
+          accountId: summary.value,
+          description: summary.label,
+          activity: summary.mappedAmount,
+          type: resolvedType,
+          operations: clampOperationsForType(resolvedType, nextOperations),
+          presetId: existing?.presetId ?? defaultConfig?.presetId ?? null,
+          notes: existing?.notes ?? defaultConfig?.notes,
+          status:
+            existing?.status ??
+            defaultConfig?.status ??
+            (summary.mappedAmount > 0 ? 'Mapped' : 'Unmapped'),
+        };
+      });
+      return { rows: nextRows };
+    }),
   setSearchTerm: term => set({ searchTerm: term }),
   toggleStatusFilter: status =>
     set(state => ({

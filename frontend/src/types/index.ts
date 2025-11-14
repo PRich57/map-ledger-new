@@ -123,6 +123,13 @@ export interface TargetScoaOption {
   label: string;
 }
 
+export interface StandardScoaSummary {
+  id: string;
+  value: string;
+  label: string;
+  mappedAmount: number;
+}
+
 export interface ImportPreviewRow {
   entity: string;
   accountId: string;
