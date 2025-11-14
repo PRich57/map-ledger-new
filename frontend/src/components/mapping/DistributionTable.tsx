@@ -422,8 +422,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                       >
                         <option value="">No preset</option>
                         {PRESET_OPTIONS.map(option => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
+                          <option key={option.value} value={option.value}>
+                            {option.label}
                           </option>
                         ))}
                       </select>

@@ -2,11 +2,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'rea
 import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../../data/standardChartOfAccounts';
-import {
-  resolvePresetRowCanonicalTargetIds,
-  resolveTargetAccountId,
-  useRatioAllocationStore,
-} from '../../store/ratioAllocationStore';
+import { resolveTargetAccountId, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import type { DynamicAllocationPresetRow } from '../../types';
 import {
   allocateDynamic,
@@ -52,14 +48,6 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
   const newPresetTargetHeaderId = useId();
   const newPresetAmountHeaderId = useId();
   const newPresetActionsHeaderId = useId();
-
-  const targetLabelById = useMemo(() => {
-    const map = new Map<string, string>();
-    STANDARD_CHART_OF_ACCOUNTS.forEach(option => {
-      map.set(option.id, option.label);
-    });
-    return map;
-  }, []);
 
   const { newPresetDynamicUsage, newPresetCanonicalUsage } = useMemo(() => {
     const dynamicUsage = new Map<string, Set<string>>();
@@ -110,7 +98,11 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
           if (!canonicalUsers || canonicalUsers.size === 0) {
             return true;
           }
-          return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
+          return (
+            dropdownKey !== null &&
+            canonicalUsers.size === 1 &&
+            canonicalUsers.has(dropdownKey)
+          );
         })
         .map(account => ({ value: account.id, label: account.name }));
     },
@@ -125,7 +117,11 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
         if (!canonicalUsers || canonicalUsers.size === 0) {
           return true;
         }
-        return Boolean(dropdownKey) && canonicalUsers.size === 1 && canonicalUsers.has(dropdownKey);
+        return (
+          dropdownKey !== null &&
+          canonicalUsers.size === 1 &&
+          canonicalUsers.has(dropdownKey)
+        );
       })
         .map(option => ({ value: option.id, label: option.label }))
         .sort((a, b) => a.label.localeCompare(b.label));
@@ -862,8 +858,7 @@ const RatioAllocationBuilder = ({ initialSourceAccountId }: RatioAllocationBuild
                 ) : (
                   targetDetails.map((detail, index) => {
                     const percentage = previewPercentages[index] ?? 0;
-                    const ratio = percentage / 100;
-                    const allocatedValue = previewComputation.allocations[index] ?? 0;
+                      const allocatedValue = previewComputation.allocations[index] ?? 0;
                     const targetDatapoint = selectedAllocation?.targetDatapoints[index];
                     const isExcluded = detail.isExcluded;
                     const datapointId = targetDatapoint?.datapointId ?? detail.targetId;

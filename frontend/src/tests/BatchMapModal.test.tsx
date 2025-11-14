@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within } from './testUtils';
 import BatchMapModal from '../components/mapping/BatchMapModal';
 import { createSeedDatapoints } from '../data/coaSeeds';
 import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
@@ -22,7 +22,7 @@ describe('BatchMapModal', () => {
     const targetSelect = screen.getByLabelText('Target SCoA');
     const optionLabels = within(targetSelect)
       .getAllByRole('option')
-      .map(option => option.textContent?.trim())
+      .map((option: HTMLOptionElement) => option.textContent?.trim() ?? null)
       .filter((label): label is string => Boolean(label));
 
     STANDARD_CHART_OF_ACCOUNTS.forEach(option => {
