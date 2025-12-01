@@ -28,10 +28,14 @@ describe('clientHeaderMappingRepository', () => {
     mockedRunQuery.mockResolvedValue({
       recordset: [
         {
+          mapping_id: 7,
           client_id: 'C1',
           template_header: 'GL ID',
           source_header: 'Account Number',
+          mapping_method: 'manual',
+          inserted_dttm: new Date('2023-12-31T00:00:00Z'),
           updated_dttm: new Date('2024-01-01T00:00:00Z'),
+          updated_by: 'tester',
         },
       ],
     } as any);
@@ -41,10 +45,14 @@ describe('clientHeaderMappingRepository', () => {
     expect(mockedRunQuery).toHaveBeenCalled();
     expect(result).toEqual([
       {
+        mappingId: 7,
         clientId: 'C1',
         templateHeader: 'GL ID',
         sourceHeader: 'Account Number',
+        mappingMethod: 'manual',
+        insertedAt: '2023-12-31T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
+        updatedBy: 'tester',
       },
     ]);
   });
@@ -107,22 +115,20 @@ describe('clientHeaderMappingRepository', () => {
       { templateHeader: 'Account Description', sourceHeader: null },
     ]);
 
-    const deleteCall = mockedRunQuery.mock.calls.find(([query]) =>
-      typeof query === 'string' && query.includes('DELETE FROM')
+    const mergeCall = mockedRunQuery.mock.calls.find(([query]) =>
+      typeof query === 'string' && query.includes('MERGE')
     );
-    expect(deleteCall?.[1]).toMatchObject({
+
+    expect(mergeCall?.[1]).toMatchObject({
       clientId: 'C1',
       templateHeader0: 'GL ID',
-      templateHeader1: 'Account Description',
-    });
-
-    const insertCall = mockedRunQuery.mock.calls.find(([query]) =>
-      typeof query === 'string' && query.includes('INSERT INTO')
-    );
-    expect(insertCall?.[1]).toMatchObject({
       sourceHeader0: 'Updated',
     });
-
+    expect(
+      mockedRunQuery.mock.calls.some(([query]) =>
+        typeof query === 'string' && query.includes('DELETE FROM')
+      )
+    ).toBe(false);
     expect(result[0]?.sourceHeader).toBe('Updated');
   });
 });

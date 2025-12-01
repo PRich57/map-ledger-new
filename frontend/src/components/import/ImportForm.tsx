@@ -264,12 +264,27 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         return;
       }
 
-      const hasExistingMappings = Object.keys(savedHeaderMappings).length > 0;
-      const saved = await saveClientHeaderMappings(
-        clientId,
-        map,
-        hasExistingMappings
-      );
+      const normalizedMap = Object.entries(map).reduce<
+        Record<string, string>
+      >((acc, [template, source]) => {
+        if (source) {
+          acc[template] = source;
+        }
+        return acc;
+      }, {});
+
+      const hasChanges =
+        Object.keys(normalizedMap).length !==
+          Object.keys(savedHeaderMappings).length ||
+        Object.entries(normalizedMap).some(
+          ([template, source]) => savedHeaderMappings[template] !== source
+        );
+
+      if (!hasChanges) {
+        return;
+      }
+
+      const saved = await saveClientHeaderMappings(clientId, map);
       setSavedHeaderMappings(toHeaderMappingRecord(saved));
       setHeaderMappingError(null);
     },
