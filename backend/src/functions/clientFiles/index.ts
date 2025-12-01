@@ -38,37 +38,34 @@ const validateRecord = (payload: unknown): { record: NewClientFileRecord | null;
   const fileStorageUri = toOptionalString(bag.fileStorageUri);
   const fileStatus = toOptionalString(bag.fileStatus ?? bag.status);
 
-  const errors: string[] = [];
+  const missingFields = [
+    !clientId ? 'clientId is required' : null,
+    !sourceFileName ? 'sourceFileName is required' : null,
+    !fileStorageUri ? 'fileStorageUri is required' : null,
+    !fileStatus ? 'fileStatus is required' : null,
+  ].filter(Boolean) as string[];
 
-  if (!clientId) {
-    errors.push('clientId is required');
-  }
-  if (!sourceFileName) {
-    errors.push('sourceFileName is required');
-  }
-  if (!fileStorageUri) {
-    errors.push('fileStorageUri is required');
-  }
-  if (!fileStatus) {
-    errors.push('fileStatus is required');
+  if (missingFields.length > 0) {
+    return { record: null, errors: missingFields };
   }
 
-  if (errors.length > 0) {
-    return { record: null, errors };
-  }
+  const requiredClientId = clientId as string;
+  const requiredSourceFileName = sourceFileName as string;
+  const requiredFileStorageUri = fileStorageUri as string;
+  const requiredFileStatus = fileStatus as string;
 
   const baseRecord: NewClientFileRecord = {
-    clientId,
+    clientId: requiredClientId,
     userId: toOptionalString(bag.userId),
     uploadedBy: toOptionalString(bag.uploadedBy ?? bag.importedBy),
-    sourceFileName,
-    fileStorageUri,
+    sourceFileName: requiredSourceFileName,
+    fileStorageUri: requiredFileStorageUri,
     fileSize:
       typeof bag.fileSize === 'number' && Number.isFinite(bag.fileSize)
         ? bag.fileSize
         : undefined,
     fileType: toOptionalString(bag.fileType),
-    status: fileStatus,
+    status: requiredFileStatus,
     glPeriodStart: toOptionalString(bag.glPeriodStart ?? bag.period),
     glPeriodEnd: toOptionalString(bag.glPeriodEnd ?? bag.period),
     rowCount:
