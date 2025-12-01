@@ -186,8 +186,7 @@ export const upsertClientHeaderMappings = async (
       ON target.CLIENT_ID = source.CLIENT_ID AND target.TEMPLATE_HEADER = source.TEMPLATE_HEADER
     WHEN MATCHED AND (
       ISNULL(target.SOURCE_HEADER, '') <> ISNULL(source.SOURCE_HEADER, '') OR
-      ISNULL(target.MAPPING_METHOD, '') <> ISNULL(source.MAPPING_METHOD, '') OR
-      ISNULL(target.UPDATED_BY, '') <> ISNULL(source.UPDATED_BY, '')
+      ISNULL(target.MAPPING_METHOD, '') <> ISNULL(source.MAPPING_METHOD, '')
     ) THEN
       UPDATE SET
         SOURCE_HEADER = source.SOURCE_HEADER,
