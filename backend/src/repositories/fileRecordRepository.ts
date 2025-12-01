@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { runQuery } from '../utils/sqlClient';
 
 export interface FileRecordInput {
@@ -35,8 +34,6 @@ export const insertFileRecords = async (
   const params: Record<string, unknown> = { fileUploadId };
   const valuesClause = records
     .map((record, index) => {
-      const recordId = crypto.randomInt(1, 2 ** 31 - 1);
-      params[`recordId${index}`] = recordId;
       params[`accountId${index}`] = record.accountId;
       params[`accountName${index}`] = record.accountName;
       params[`activityAmount${index}`] = record.activityAmount;
@@ -49,14 +46,13 @@ export const insertFileRecords = async (
       params[`userDefined2_${index}`] = record.userDefined2 ?? null;
       params[`userDefined3_${index}`] = record.userDefined3 ?? null;
 
-      return `(@fileUploadId, @recordId${index}, @sourceSheetName${index}, @entityId${index}, @accountId${index}, @accountName${index}, @openingBalance${index}, @closingBalance${index}, @activityAmount${index}, @glMonth${index}, @userDefined1_${index}, @userDefined2_${index}, @userDefined3_${index})`;
+      return `(@fileUploadId, @sourceSheetName${index}, @entityId${index}, @accountId${index}, @accountName${index}, @openingBalance${index}, @closingBalance${index}, @activityAmount${index}, @glMonth${index}, @userDefined1_${index}, @userDefined2_${index}, @userDefined3_${index})`;
     })
     .join(', ');
 
-  await runQuery(
+  const insertResult = await runQuery<{ record_id: number }>(
     `INSERT INTO ${TABLE_NAME} (
       FILE_UPLOAD_ID,
-      RECORD_ID,
       SOURCE_SHEET_NAME,
       ENTITY_ID,
       ACCOUNT_ID,
@@ -69,15 +65,26 @@ export const insertFileRecords = async (
       USER_DEFINED2,
       USER_DEFINED3
     )
+    OUTPUT INSERTED.RECORD_ID as record_id
     VALUES ${valuesClause}`,
     params,
   );
 
-  return records.map((record, index) => ({
-    ...record,
-    recordId: params[`recordId${index}`] as number,
-    fileUploadId,
-  }));
+  const insertedRecords = insertResult.recordset ?? [];
+
+  return records.map((record, index) => {
+    const insertedRecordId = insertedRecords[index]?.record_id;
+
+    if (insertedRecordId === undefined) {
+      throw new Error('Failed to insert all file records');
+    }
+
+    return {
+      ...record,
+      recordId: insertedRecordId,
+      fileUploadId,
+    };
+  });
 };
 
 export const listFileRecords = async (
