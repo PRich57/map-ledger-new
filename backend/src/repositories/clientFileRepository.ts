@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { runQuery } from '../utils/sqlClient';
 
 export type ImportStatus = 'completed' | 'failed' | string;
@@ -26,7 +25,7 @@ export interface ClientFileEntity {
 }
 
 export interface ClientFileRecord {
-  id: string;
+  id: number;
   clientId: string;
   userId?: string;
   uploadedBy?: string;
@@ -63,7 +62,7 @@ export interface NewClientFileRecord {
 }
 
 interface RawClientFileRow {
-  fileUploadId: string;
+  fileUploadId: number;
   clientId: string;
   userId?: string;
   uploadedBy?: string;
@@ -135,12 +134,10 @@ const mapClientFileRow = (row: RawClientFileRow): ClientFileRecord => {
 export const saveClientFileMetadata = async (
   record: NewClientFileRecord
 ): Promise<ClientFileRecord> => {
-  const fileUploadId = crypto.randomUUID();
   const lastStepCompletedDttm = record.lastStepCompletedDttm ?? new Date().toISOString();
 
-  await runQuery(
+  const insertResult = await runQuery<{ file_upload_id: number }>(
     `INSERT INTO ml.CLIENT_FILES (
-      FILE_UPLOAD_ID,
       CLIENT_ID,
       UPLOADED_BY,
       SOURCE_FILE_NAME,
@@ -153,8 +150,8 @@ export const saveClientFileMetadata = async (
       ROW_COUNT,
       LAST_STEP_COMPLETED_DTTM
     )
+    OUTPUT INSERTED.FILE_UPLOAD_ID as file_upload_id
     VALUES (
-      @fileUploadId,
       @clientId,
       @uploadedBy,
       @sourceFileName,
@@ -168,7 +165,6 @@ export const saveClientFileMetadata = async (
       @lastStepCompletedDttm
     )`,
     {
-      fileUploadId,
       clientId: record.clientId,
       uploadedBy: record.uploadedBy ?? null,
       sourceFileName: record.sourceFileName,
@@ -182,6 +178,12 @@ export const saveClientFileMetadata = async (
       lastStepCompletedDttm,
     }
   );
+
+  const fileUploadId = insertResult.recordset?.[0]?.file_upload_id;
+
+  if (fileUploadId === undefined) {
+    throw new Error('Failed to persist client file metadata');
+  }
 
   if (Array.isArray(record.sheets) && record.sheets.length > 0) {
     const sheetTimestamp = new Date().toISOString();
@@ -344,7 +346,7 @@ export const listClientFiles = async (
     .join(', ');
 
   const sheetsResult = await runQuery<{
-    fileUploadId: string;
+    fileUploadId: number;
     sheetName: string;
     isSelected?: boolean | number;
     firstDataRowIndex?: number;
@@ -359,7 +361,7 @@ export const listClientFiles = async (
     sheetParameters
   );
 
-  const sheetsByFile = new Map<string, ClientFileSheet[]>();
+  const sheetsByFile = new Map<number, ClientFileSheet[]>();
   (sheetsResult.recordset ?? []).forEach((sheet) => {
     const existing = sheetsByFile.get(sheet.fileUploadId) ?? [];
     existing.push({
@@ -390,7 +392,7 @@ export const listClientFiles = async (
     .join(', ');
 
   const entitiesResult = await runQuery<{
-    fileUploadId: string;
+    fileUploadId: number;
     entityId?: string;
     entityName: string;
     rowCount: number;
@@ -405,7 +407,7 @@ export const listClientFiles = async (
     entityParameters
   );
 
-  const entitiesByFile = new Map<string, ClientFileEntity[]>();
+  const entitiesByFile = new Map<number, ClientFileEntity[]>();
   (entitiesResult.recordset ?? []).forEach((entity) => {
     const existing = entitiesByFile.get(entity.fileUploadId) ?? [];
     existing.push({

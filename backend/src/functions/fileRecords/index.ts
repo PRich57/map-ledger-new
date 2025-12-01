@@ -32,7 +32,7 @@ interface IngestSheet {
 }
 
 interface IngestPayload {
-  fileUploadId: string;
+  fileUploadId: number;
   clientId?: string;
   fileName?: string;
   headerMap: HeaderMap;
@@ -193,11 +193,19 @@ const deriveRecordsFromSheet = (
     headerLookup.get('amount') ||
     null;
   const entityHeader = headerLookup.get('entity') ?? headerLookup.get('entityname') ?? null;
+  const userDefined1Header = headerLookup.get('userdefined1') ?? null;
+  const userDefined2Header = headerLookup.get('userdefined2') ?? null;
+  const userDefined3Header = headerLookup.get('userdefined3') ?? null;
 
   const firstRowIndex =
     typeof sheet.firstDataRowIndex === 'number' && Number.isFinite(sheet.firstDataRowIndex)
       ? sheet.firstDataRowIndex
       : 1;
+
+  const getOptionalText = (value: unknown): string | null => {
+    const normalized = normalizeText(value);
+    return normalized ? normalized : null;
+  };
 
   return sheet.rows
     .map((row, index) => {
@@ -212,7 +220,12 @@ const deriveRecordsFromSheet = (
 
       const entityValue = normalizeText(getValueFromRow(row, entityHeader));
       const matchedEntity = matchEntity(entityValue, entities);
+      const normalizedEntityId = matchedEntity?.id || undefined;
       const normalizedEntityName = matchedEntity?.name || entityValue || undefined;
+
+      const userDefined1 = getOptionalText(getValueFromRow(row, userDefined1Header));
+      const userDefined2 = getOptionalText(getValueFromRow(row, userDefined2Header));
+      const userDefined3 = getOptionalText(getValueFromRow(row, userDefined3Header));
 
       const glMonth = detectGlMonth(row, sheet, fileName);
 
@@ -220,29 +233,48 @@ const deriveRecordsFromSheet = (
         accountId,
         accountName,
         activityAmount,
+        entityId: normalizedEntityId,
         entityName: normalizedEntityName,
         glMonth,
         sourceSheet: sheet.sheetName,
         sourceRowNumber: firstRowIndex + index,
+        userDefined1,
+        userDefined2,
+        userDefined3,
       } as FileRecordInput;
     })
     .filter((record): record is FileRecordInput => record !== null);
 };
 
-const normalizePayload = (body: unknown): IngestPayload | null => {
+const normalizePayload = (body: unknown): { payload: IngestPayload | null; errors: string[] } => {
   if (!body || typeof body !== 'object') {
-    return null;
+    return { payload: null, errors: ['Payload is not an object'] };
   }
 
   const payload = body as Record<string, unknown>;
-  const fileUploadId = getFirstStringValue(payload.fileUploadId);
+  const fileUploadIdRaw = getFirstStringValue(payload.fileUploadId);
+  const fileUploadId = fileUploadIdRaw ? Number(fileUploadIdRaw) : NaN;
   const headerMap = payload.headerMap as HeaderMap;
   const sheets = Array.isArray(payload.sheets)
     ? (payload.sheets as unknown[]).filter(Boolean)
     : [];
 
-  if (!fileUploadId || !headerMap || typeof headerMap !== 'object' || sheets.length === 0) {
-    return null;
+  const errors: string[] = [];
+
+  if (!Number.isFinite(fileUploadId)) {
+    errors.push('fileUploadId must be a finite number');
+  }
+
+  if (!headerMap || typeof headerMap !== 'object') {
+    errors.push('headerMap is required');
+  }
+
+  if (sheets.length === 0) {
+    errors.push('at least one sheet is required');
+  }
+
+  if (errors.length > 0) {
+    return { payload: null, errors };
   }
 
   const normalizedSheets: IngestSheet[] = sheets
@@ -284,7 +316,7 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
     .filter((sheet): sheet is IngestSheet => !!sheet && sheet.sheetName.length > 0);
 
   if (normalizedSheets.length === 0) {
-    return null;
+    return { payload: null, errors: ['No sheets contained row data'] };
   }
 
   const normalizedEntities: IngestEntity[] = Array.isArray(payload.entities)
@@ -327,12 +359,15 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
     : [];
 
   return {
-    fileUploadId,
-    clientId: getFirstStringValue(payload.clientId),
-    fileName: getFirstStringValue(payload.fileName),
-    headerMap,
-    sheets: normalizedSheets,
-    entities: normalizedEntities,
+    payload: {
+      fileUploadId,
+      clientId: getFirstStringValue(payload.clientId),
+      fileName: getFirstStringValue(payload.fileName),
+      headerMap,
+      sheets: normalizedSheets,
+      entities: normalizedEntities,
+    },
+    errors: [],
   };
 };
 
@@ -351,16 +386,28 @@ export const ingestFileRecordsHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const parsed = await readJson(request);
-    const payload = normalizePayload(parsed);
+    const { payload, errors } = normalizePayload(parsed);
 
     if (!payload) {
-      return json({ message: 'Invalid ingest payload' }, 400);
+      context.warn('Invalid ingest payload', { errors, payloadPreview: parsed });
+      return json({ message: 'Invalid ingest payload', errors }, 400);
     }
 
     const records = buildRecords(payload);
     if (records.length === 0) {
+      context.warn('No valid records found to ingest', {
+        fileUploadId: payload.fileUploadId,
+        sheetCount: payload.sheets.length,
+        headerMapKeys: Object.keys(payload.headerMap ?? {}),
+      });
       return json({ message: 'No valid records found to ingest' }, 400);
     }
+
+    context.info('Persisting file records', {
+      fileUploadId: payload.fileUploadId,
+      recordCount: records.length,
+      sheetCount: payload.sheets.length,
+    });
 
     const inserted = await insertFileRecords(payload.fileUploadId, records);
 
@@ -376,8 +423,9 @@ export const listFileRecordsHandler = async (
   context: InvocationContext,
 ): Promise<HttpResponseInit> => {
   try {
-    const fileUploadId = getFirstStringValue(request.query.get('fileUploadId'));
-    if (!fileUploadId) {
+    const fileUploadIdParam = getFirstStringValue(request.query.get('fileUploadId'));
+    const fileUploadId = fileUploadIdParam ? Number(fileUploadIdParam) : NaN;
+    if (!Number.isFinite(fileUploadId)) {
       return json({ message: 'Missing fileUploadId query parameter' }, 400);
     }
 
