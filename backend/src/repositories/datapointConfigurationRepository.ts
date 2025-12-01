@@ -84,8 +84,6 @@ type RawDatapointConfigurationRow = {
   updated_dttm: Date;
 };
 
-let tableEnsured = false;
-
 const toNullableString = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
     return null;
@@ -187,50 +185,10 @@ const mapRowToConfiguration = (
   updatedAt: row.updated_dttm.toISOString(),
 });
 
-const ensureTable = async () => {
-  if (tableEnsured) {
-    return;
-  }
-
-  await runQuery(
-    `IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '${TABLE_NAME}')
-BEGIN
-  CREATE TABLE dbo.${TABLE_NAME} (
-    ID UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
-    USER_EMAIL NVARCHAR(256) NOT NULL,
-    USER_NAME NVARCHAR(256) NULL,
-    CLIENT_ID NVARCHAR(128) NOT NULL,
-    CLIENT_NAME NVARCHAR(256) NOT NULL,
-    CONFIGURATION_LABEL NVARCHAR(256) NULL,
-    COMPANY_NAME NVARCHAR(256) NULL,
-    SOURCE_ACCOUNT_ID NVARCHAR(128) NULL,
-    SOURCE_ACCOUNT_NAME NVARCHAR(256) NULL,
-    SOURCE_ACCOUNT_DESCRIPTION NVARCHAR(MAX) NULL,
-    REPORTING_PERIOD NVARCHAR(64) NULL,
-    MAPPING_TYPE NVARCHAR(128) NULL,
-    TARGET_SCOA NVARCHAR(128) NULL,
-    POLARITY NVARCHAR(64) NULL,
-    PRESET NVARCHAR(128) NULL,
-    OPERATIONS_JSON NVARCHAR(MAX) NULL,
-    EXCLUSIONS_JSON NVARCHAR(MAX) NULL,
-    CONFIGURATION_JSON NVARCHAR(MAX) NULL,
-    CREATED_AT DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
-    UPDATED_DTTM DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME()
-  );
-  CREATE INDEX IX_${TABLE_NAME}_USER_EMAIL_CLIENT_ID
-    ON dbo.${TABLE_NAME}(USER_EMAIL, CLIENT_ID);
-END;`
-  );
-
-  tableEnsured = true;
-};
-
 export const listDatapointConfigurations = async (
   email: string,
   clientId?: string
 ): Promise<UserDatapointConfiguration[]> => {
-  await ensureTable();
-
   const normalizedEmail = normalizeEmail(email);
   const filters: string[] = ['USER_EMAIL = @email'];
   const parameters: Record<string, unknown> = { email: normalizedEmail };
@@ -255,8 +213,6 @@ export const listDatapointConfigurations = async (
 export const createDatapointConfiguration = async (
   input: DatapointConfigurationInput
 ): Promise<UserDatapointConfiguration> => {
-  await ensureTable();
-
   const id = crypto.randomUUID();
   const normalizedEmail = normalizeEmail(input.userEmail);
 
@@ -330,8 +286,6 @@ export const createDatapointConfiguration = async (
 export const updateDatapointConfiguration = async (
   input: DatapointConfigurationUpdate
 ): Promise<UserDatapointConfiguration> => {
-  await ensureTable();
-
   const normalizedEmail = normalizeEmail(input.userEmail);
   const result = await runQuery(
     `UPDATE dbo.${TABLE_NAME}
@@ -391,8 +345,6 @@ export const updateDatapointConfiguration = async (
 export const getDatapointConfigurationById = async (
   id: string
 ): Promise<UserDatapointConfiguration> => {
-  await ensureTable();
-
   const { recordset = [] } = await runQuery<RawDatapointConfigurationRow>(
     `SELECT ${SELECT_COLUMNS}
      FROM dbo.${TABLE_NAME}
@@ -405,9 +357,4 @@ export const getDatapointConfigurationById = async (
   }
 
   return mapRowToConfiguration(recordset[0]);
-};
-
-/* istanbul ignore next */
-export const __resetDatapointConfigurationRepositoryForTests = () => {
-  tableEnsured = false;
 };

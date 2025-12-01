@@ -19,7 +19,6 @@ export interface ClientHeaderMappingInput {
 }
 
 const TABLE_NAME = 'ml.CLIENT_HEADER_MAPPING';
-let tableEnsured = false;
 const logPrefix = '[clientHeaderMappingRepository]';
 const shouldLog = process.env.NODE_ENV !== 'test';
 
@@ -38,60 +37,6 @@ const normalizeHeader = (value?: string | null): string | null => {
 
   const trimmed = value.toString().trim();
   return trimmed.length > 0 ? trimmed : null;
-};
-
-const ensureTable = async () => {
-  if (tableEnsured) {
-    return;
-  }
-
-  await runQuery(
-    `IF NOT EXISTS (
-      SELECT 1
-      FROM sys.tables t
-      JOIN sys.schemas s ON t.schema_id = s.schema_id
-      WHERE t.name = 'CLIENT_HEADER_MAPPING' AND s.name = 'ml'
-    )
-    BEGIN
-      CREATE TABLE ${TABLE_NAME} (
-        MAPPING_ID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        CLIENT_ID INT NOT NULL,
-        SOURCE_HEADER NVARCHAR(100) NOT NULL,
-        TEMPLATE_HEADER NVARCHAR(100) NOT NULL,
-        MAPPING_METHOD NVARCHAR(100) NOT NULL,
-        INSERTED_DTTM DATETIME2 NOT NULL CONSTRAINT DF_CLIENT_HEADER_MAPPING_INSERTED DEFAULT SYSUTCDATETIME(),
-        UPDATED_DTTM DATETIME2 NULL,
-        UPDATED_BY NVARCHAR(100) NULL,
-        CONSTRAINT UX_CLIENT_HEADER_MAPPING UNIQUE (CLIENT_ID, TEMPLATE_HEADER)
-      );
-    END
-    ELSE
-    BEGIN
-      DECLARE @UpdatedDttmConstraint NVARCHAR(200);
-      SELECT @UpdatedDttmConstraint = dc.name
-      FROM sys.default_constraints dc
-      INNER JOIN sys.columns c ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id
-      WHERE dc.parent_object_id = OBJECT_ID('${TABLE_NAME}') AND c.name = 'UPDATED_DTTM';
-
-      IF @UpdatedDttmConstraint IS NOT NULL
-      BEGIN
-        EXEC('ALTER TABLE ${TABLE_NAME} DROP CONSTRAINT ' + QUOTENAME(@UpdatedDttmConstraint));
-      END
-
-      IF EXISTS (
-        SELECT 1
-        FROM sys.columns
-        WHERE object_id = OBJECT_ID('${TABLE_NAME}')
-          AND name = 'UPDATED_DTTM'
-          AND is_nullable = 0
-      )
-      BEGIN
-        ALTER TABLE ${TABLE_NAME} ALTER COLUMN UPDATED_DTTM DATETIME2 NULL;
-      END
-    END`
-  );
-
-  tableEnsured = true;
 };
 
 type NormalizedMapping = {
@@ -156,8 +101,6 @@ export const listClientHeaderMappings = async (
     return [];
   }
 
-  await ensureTable();
-
   const result = await runQuery<{
     mapping_id: number;
     client_id: string;
@@ -220,8 +163,6 @@ export const upsertClientHeaderMappings = async (
     });
     return listClientHeaderMappings(normalizedClientId);
   }
-
-  await ensureTable();
 
   const params: Record<string, unknown> = {
     clientId: normalizedClientId,
@@ -301,8 +242,6 @@ export const replaceClientHeaderMappings = async (
     });
     return listClientHeaderMappings(normalizedClientId);
   }
-
-  await ensureTable();
 
   const params: Record<string, unknown> = {
     clientId: normalizedClientId,
