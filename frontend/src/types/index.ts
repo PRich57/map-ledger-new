@@ -123,11 +123,46 @@ export interface TargetScoaOption {
   label: string;
 }
 
+export interface ChartOfAccount {
+  accountNumber: string;
+  coreAccount: string | null;
+  operationalGroup: string | null;
+  laborGroup: string | null;
+  accountType: string | null;
+  category: string | null;
+  subCategory: string | null;
+  description: string | null;
+}
+
+export interface ChartOfAccountOption extends TargetScoaOption, ChartOfAccount {}
+
 export interface StandardScoaSummary {
   id: string;
   value: string;
   label: string;
   mappedAmount: number;
+}
+
+export interface ReconciliationSourceMapping {
+  glAccountId: string;
+  glAccountName: string;
+  entityName?: string;
+  companyName: string;
+  amount: number;
+}
+
+export interface ReconciliationAccountBreakdown {
+  id: string;
+  label: string;
+  subcategory: string;
+  total: number;
+  sources: ReconciliationSourceMapping[];
+}
+
+export interface ReconciliationSubcategoryGroup {
+  subcategory: string;
+  total: number;
+  accounts: ReconciliationAccountBreakdown[];
 }
 
 export interface ImportPreviewRow {
@@ -147,20 +182,51 @@ export interface TrialBalanceRow {
   [key: string]: unknown;
 }
 
+export interface ImportSheet {
+  sheetName: string;
+  glMonth?: string;
+  rowCount: number;
+  isSelected?: boolean;
+  firstDataRowIndex?: number;
+}
+
+export interface ImportEntity {
+  entityId?: string;
+  entityName: string;
+  displayName?: string;
+  rowCount: number;
+  isSelected?: boolean;
+  insertedDttm?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
 export interface Import {
   id: string;
   clientId: string;
   fileName: string;
   fileSize: number;
   fileType: string;
-  fileData: string;
-  previewRows: ImportPreviewRow[];
   period: string;
   timestamp: string;
   status: 'completed' | 'failed';
   rowCount?: number;
   importedBy: string;
   userId: string;
+  sheets?: ImportSheet[];
+  entities?: ImportEntity[];
+}
+
+export interface FileRecord {
+  fileUploadId: string;
+  recordId: string;
+  accountId: string;
+  accountName: string;
+  activityAmount: number;
+  entityName?: string;
+  glMonth?: string;
+  sourceSheet?: string;
+  sourceRowNumber?: number;
 }
 
 export interface SyncedAccount {
@@ -364,20 +430,28 @@ export interface ClientRef {
   operations: OperationRef[];
 }
 
-export interface CompanyRef {
+export interface EntityRef {
   id: string;
   name: string;
   clients: ClientRef[];
 }
 
-export interface CompanySummary {
+export interface EntitySummary {
   id: string;
   name: string;
 }
 
-export interface GLAccountCompanyBreakdown {
+export interface ClientEntity {
   id: string;
-  company: string;
+  name: string;
+  displayName?: string;
+  entityName?: string;
+  aliases: string[];
+}
+
+export interface GLAccountEntityBreakdown {
+  id: string;
+  entity: string;
   balance: number;
 }
 
@@ -403,9 +477,10 @@ export interface DistributionOperationShare {
   id: string;
   name: string;
   allocation?: number;
+  notes?: string;
 }
 
-export type DistributionStatus = Extract<MappingStatus, 'Mapped' | 'Unmapped'>;
+export type DistributionStatus = 'Distributed' | 'Undistributed';
 
 export interface DistributionRow {
   id: string;
@@ -422,10 +497,8 @@ export interface DistributionRow {
 
 export interface GLAccountMappingRow {
   id: string;
-  companyId: string;
-  companyName: string;
-  entityId?: string;
-  entityName?: string;
+  entityId: string;
+  entityName: string;
   accountId: string;
   accountName: string;
   activity: number;
@@ -441,10 +514,10 @@ export interface GLAccountMappingRow {
   presetId?: string;
   notes?: string;
   splitDefinitions: MappingSplitDefinition[];
-  companies: GLAccountCompanyBreakdown[];
+  entities: GLAccountEntityBreakdown[];
   dynamicExclusionAmount?: number;
   glMonth?: string; // GL month in YYYY-MM format
-  requiresCompanyAssignment?: boolean;
+  requiresEntityAssignment?: boolean;
 }
 
 export interface GLUpload {

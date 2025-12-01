@@ -11,7 +11,7 @@ export function suggestColumnMatch(
     glaccountcode: 'GL ID',
     netchg: 'Net Change',
     netchangeamount: 'Net Change',
-    company: 'Company',
+    company: 'Entity',
   };
 
   const aliasMatch = Object.keys(knownAliases).find((alias) =>

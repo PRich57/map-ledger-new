@@ -17,6 +17,9 @@ const openApiSpec = {
     '/mapping/suggest': {
       get: { summary: 'Suggest account mapping' }
     },
+    '/chart-of-accounts': {
+      get: { summary: 'List chart of accounts' }
+    },
     '/user-clients': {
       get: { summary: 'List clients available to the current user' }
     },
@@ -27,6 +30,24 @@ const openApiSpec = {
       get: { summary: 'List saved datapoint configurations' },
       post: { summary: 'Create a new datapoint configuration' },
       put: { summary: 'Update an existing datapoint configuration' }
+    },
+    '/client-files': {
+      get: { summary: 'List paginated client file metadata' },
+      post: { summary: 'Persist client file metadata and sheet/entity details' }
+    },
+    '/client-entities': {
+      get: { summary: 'List entities configured for a client' }
+    },
+    '/client-header-mappings': {
+      get: { summary: 'List saved client header mappings for a client' },
+      post: { summary: 'Create or update client header mappings' },
+      put: { summary: 'Replace client header mappings for specific template headers' }
+    },
+    '/file-records': {
+      get: { summary: 'List ingested file records for a file upload' }
+    },
+    '/file-records/ingest': {
+      post: { summary: 'Ingest mapped file records for a file upload' }
     }
   }
 };

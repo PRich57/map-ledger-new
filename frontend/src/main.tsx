@@ -9,6 +9,10 @@ import { msalInstance, initializeMsal } from "./utils/msal";
 
 const rootEl = document.getElementById("root")!;
 
+if (typeof import.meta !== "undefined" && (import.meta as any).env) {
+  (globalThis as any).importMetaEnv = (import.meta as any).env;
+}
+
 initializeMsal().then(() => {
   ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>

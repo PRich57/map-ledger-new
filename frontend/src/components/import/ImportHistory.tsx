@@ -1,23 +1,23 @@
 import { useMemo, useState } from 'react';
 import {
   FileSpreadsheet,
-  Download,
   CheckCircle2,
   XCircle,
-  Eye,
-  Trash2,
   Search,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
 } from 'lucide-react';
 import { Import } from '../../types';
-import { base64ToBlob } from '../../utils/file';
 import { formatPeriodLabel, parsePeriodString } from '../../utils/period';
 
 interface ImportHistoryProps {
   imports: Import[];
-  onDeleteImport: (importId: string) => void;
+  isLoading?: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
 }
 
 type SortField = 'fileName' | 'clientId' | 'period' | 'status' | 'importedBy' | 'timestamp';
@@ -53,11 +53,19 @@ function formatFileSize(bytes: number): string {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[idx]}`;
 }
 
-export default function ImportHistory({ imports, onDeleteImport }: ImportHistoryProps) {
+export default function ImportHistory({
+  imports,
+  isLoading = false,
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('timestamp');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
+  const columnCount = sortableFields.length + 1;
 
   const filteredImports = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -151,25 +159,42 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
     );
   };
 
-  const handleDownload = (importItem: Import) => {
-    const blob = base64ToBlob(importItem.fileData, importItem.fileType);
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = importItem.fileName;
-    link.rel = 'noopener noreferrer';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleDelete = (importId: string) => {
-    onDeleteImport(importId);
-    setPreviewImport((current) => (current?.id === importId ? null : current));
-  };
-
   const closePreview = () => setPreviewImport(null);
+
+  const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const startRecord = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endRecord = total === 0 ? 0 : startRecord + imports.length - 1;
+
+  const renderPagination = () => (
+    <div className="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-sm text-gray-600">
+        Showing {startRecord.toLocaleString()}–{endRecord.toLocaleString()} of{' '}
+        {total.toLocaleString()} uploads
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(currentPage - 1, 1))}
+          disabled={currentPage === 1}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+        >
+          Previous
+        </button>
+        <span className="text-sm text-gray-700">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(currentPage + 1, totalPages))}
+          disabled={currentPage === totalPages}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50 hover:bg-gray-50"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-4">
@@ -208,15 +233,24 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
                 </th>
               ))}
               <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                Actions
+                Details
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 bg-white">
-            {filteredImports.length === 0 ? (
+            {isLoading ? (
               <tr>
                 <td
-                  colSpan={sortableFields.length + 1}
+                  colSpan={columnCount}
+                  className="px-6 py-10 text-center text-sm text-gray-500"
+                >
+                  Loading import history…
+                </td>
+              </tr>
+            ) : filteredImports.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columnCount}
                   className="px-6 py-12 text-center text-sm text-gray-500"
                 >
                   {imports.length === 0
@@ -273,33 +307,14 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
                       {new Date(importItem.timestamp).toLocaleString()}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImport(importItem)}
-                        className="text-gray-500 transition-colors hover:text-blue-600"
-                        aria-label={`Preview ${importItem.fileName}`}
-                      >
-                        <Eye className="h-5 w-5" aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDownload(importItem)}
-                        className="text-gray-500 transition-colors hover:text-blue-600"
-                        aria-label={`Download ${importItem.fileName}`}
-                      >
-                        <Download className="h-5 w-5" aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(importItem.id)}
-                        className="text-gray-400 transition-colors hover:text-red-600"
-                        aria-label={`Remove ${importItem.fileName} from history`}
-                      >
-                        <Trash2 className="h-5 w-5" aria-hidden="true" />
-                      </button>
-                    </div>
+                  <td className="px-6 py-4 whitespace-nowrap text-right">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImport(importItem)}
+                      className="text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"
+                    >
+                      View
+                    </button>
                   </td>
                 </tr>
               ))
@@ -307,6 +322,8 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
           </tbody>
         </table>
       </div>
+
+      {total > 0 && renderPagination()}
 
       {previewImport && (
         <div
@@ -327,14 +344,6 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
                 </p>
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDownload(previewImport)}
-                  className="inline-flex items-center gap-2 rounded-md bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100"
-                >
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                  Download
-                </button>
                 <button
                   type="button"
                   onClick={closePreview}
@@ -364,44 +373,41 @@ export default function ImportHistory({ imports, onDeleteImport }: ImportHistory
                 </div>
               </div>
 
-              <h4 className="mt-6 text-sm font-semibold text-gray-700">Preview Rows</h4>
-              <div className="mt-2 overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">Company</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">Account ID</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">Description</th>
-                      <th className="px-3 py-2 text-right font-medium text-gray-600">Net Change</th>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">GL Month</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {previewImport.previewRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-4 text-center text-sm text-gray-500">
-                          No preview data captured for this import.
-                        </td>
-                      </tr>
-                    ) : (
-                      previewImport.previewRows.map((row, index) => (
-                        <tr key={`${row.accountId}-${index}`} className="bg-white">
-                          <td className="px-3 py-2 text-gray-700">{row.entity}</td>
-                          <td className="px-3 py-2 text-gray-700">{row.accountId}</td>
-                          <td className="px-3 py-2 text-gray-700">{row.description}</td>
-                          <td className="px-3 py-2 text-right text-gray-700">
-                            {row.netChange.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </td>
-                          <td className="px-3 py-2 text-gray-700">{row.glMonth ?? '—'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              {previewImport.sheets && previewImport.sheets.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="text-sm font-semibold text-gray-700">Sheets</h4>
+                  <ul className="mt-2 space-y-2 text-sm text-gray-700">
+                    {previewImport.sheets.map((sheet) => (
+                      <li key={`${sheet.sheetName}-${sheet.glMonth ?? 'n/a'}`} className="flex justify-between">
+                        <span>
+                          {sheet.sheetName}
+                          {sheet.glMonth ? ` (${sheet.glMonth})` : ''}
+                        </span>
+                        <span className="text-gray-500">{sheet.rowCount.toLocaleString()} rows</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {previewImport.entities && previewImport.entities.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="text-sm font-semibold text-gray-700">Entities</h4>
+                  <ul className="mt-2 space-y-2 text-sm text-gray-700">
+                    {previewImport.entities.map((entity) => (
+                      <li
+                        key={entity.entityId ?? entity.entityName}
+                        className="flex justify-between"
+                      >
+                        <span>{entity.displayName ?? entity.entityName}</span>
+                        <span className="text-gray-500">
+                          {entity.rowCount.toLocaleString()} rows
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>

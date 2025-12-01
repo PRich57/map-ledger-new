@@ -1,146 +1,153 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 import { Import } from '../types';
 
-export const IMPORT_STORAGE_KEY = 'map-ledger-imports';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
-const baseImportsByUser: Record<string, Import[]> = {
-  '1': [
-    {
-      id: '1',
-      clientId: 'TRNS',
-      fileName: 'january_2024_tb.csv',
-      fileSize: 148,
-      fileType: 'text/csv',
-      fileData:
-        'QWNjb3VudCxEZXNjcmlwdGlvbixOZXQgQ2hhbmdlCjEwMDAsQ2FzaCw1MDAwCjIwMDAsUmV2ZW51ZSwtNTAwMAo=',
-      previewRows: [
-        {
-          accountId: '1000',
-          description: 'Cash',
-          entity: 'North Division',
-          netChange: 5000,
-          glMonth: '2024-01',
-        },
-        {
-          accountId: '2000',
-          description: 'Revenue',
-          entity: 'North Division',
-          netChange: -5000,
-          glMonth: '2024-01',
-        },
-      ],
-      period: '2024-01-01T00:00:00.000Z',
-      timestamp: '2024-01-15T10:30:00.000Z',
-      status: 'completed',
-      rowCount: 150,
-      importedBy: 'john.doe@example.com',
-      userId: '1',
-    },
-  ],
-  '2': [
-    {
-      id: '2',
-      clientId: 'HLTH',
-      fileName: 'february_2024_tb.csv',
-      fileSize: 156,
-      fileType: 'text/csv',
-      fileData:
-        'QWNjb3VudCxEZXNjcmlwdGlvbixOZXQgQ2hhbmdlCjExMDAsQWNjb3VudHMgUmVjZWl2YWJsZSwxNTAwCjMxMDAsU2VydmljZSBSZXZlbnVlLC0xNTAwCg==',
-      previewRows: [
-        {
-          accountId: '1100',
-          description: 'Accounts Receivable',
-          entity: 'Healthcare West',
-          netChange: 1500,
-          glMonth: '2024-02',
-        },
-        {
-          accountId: '3100',
-          description: 'Service Revenue',
-          entity: 'Healthcare West',
-          netChange: -1500,
-          glMonth: '2024-02',
-        },
-      ],
-      period: '2024-02-01T00:00:00.000Z',
-      timestamp: '2024-02-15T14:20:00.000Z',
-      status: 'completed',
-      rowCount: 180,
-      importedBy: 'jane.smith@example.com',
-      userId: '2',
-    },
-  ],
+const shouldLog =
+  import.meta.env.DEV ||
+  (typeof import.meta.env.VITE_ENABLE_DEBUG_LOGGING === 'string' &&
+    import.meta.env.VITE_ENABLE_DEBUG_LOGGING.toLowerCase() === 'true');
+
+const logPrefix = '[ImportStore]';
+
+const logDebug = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.debug(logPrefix, ...args);
 };
 
-export const createInitialImportMap = (): Record<string, Import[]> =>
-  Object.entries(baseImportsByUser).reduce(
-    (acc, [userId, imports]) => {
-      acc[userId] = imports.map((entry) => ({
-        ...entry,
-        previewRows: entry.previewRows.map((row) => ({ ...row })),
-      }));
-      return acc;
-    },
-    {} as Record<string, Import[]>
-  );
+const logError = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.error(logPrefix, ...args);
+};
 
-type ImportInput = Omit<Import, 'userId'>;
+export interface ImportHistoryResponse {
+  items: Import[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export type ImportPayload = Omit<Import, 'timestamp'> & { timestamp?: string };
 
 interface ImportState {
-  importsByUser: Record<string, Import[]>;
-  addImport: (userId: string, importData: ImportInput) => void;
-  deleteImport: (userId: string, importId: string) => void;
+  imports: Import[];
+  isLoading: boolean;
+  error: string | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  fetchImports: (params: {
+    userId: string;
+    clientId?: string;
+    page?: number;
+    pageSize?: number;
+  }) => Promise<void>;
+  recordImport: (payload: ImportPayload) => Promise<Import | null>;
+  setPage: (page: number) => void;
   reset: () => void;
 }
 
-const storage = createJSONStorage(() => {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage;
-  }
+const initialState: Pick<
+  ImportState,
+  'imports' | 'isLoading' | 'error' | 'page' | 'pageSize' | 'total'
+> = {
+  imports: [],
+  isLoading: false,
+  error: null,
+  page: 1,
+  pageSize: 10,
+  total: 0,
+};
 
-  const memoryStorage: Record<string, string> = {};
-  return {
-    getItem: (name: string) => memoryStorage[name] ?? null,
-    setItem: (name: string, value: string) => {
-      memoryStorage[name] = value;
-    },
-    removeItem: (name: string) => {
-      delete memoryStorage[name];
-    },
-  };
-});
-
-export const useImportStore = create<ImportState>()(
-  persist(
-    (set) => ({
-      importsByUser: createInitialImportMap(),
-      addImport: (userId, importData) =>
-        set((state) => {
-          const entry: Import = { ...importData, userId };
-          const userImports = state.importsByUser[userId] ?? [];
-          return {
-            importsByUser: {
-              ...state.importsByUser,
-              [userId]: [entry, ...userImports],
-            },
-          };
-        }),
-      deleteImport: (userId, importId) =>
-        set((state) => {
-          const userImports = state.importsByUser[userId] ?? [];
-          return {
-            importsByUser: {
-              ...state.importsByUser,
-              [userId]: userImports.filter((entry) => entry.id !== importId),
-            },
-          };
-        }),
-      reset: () => set({ importsByUser: createInitialImportMap() }),
-    }),
-    {
-      name: IMPORT_STORAGE_KEY,
-      storage,
+const buildQueryString = (params: Record<string, string | number | undefined>) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      search.set(key, String(value));
     }
-  )
-);
+  });
+  return search.toString();
+};
+
+export const useImportStore = create<ImportState>((set, get) => ({
+  ...initialState,
+  setPage: (page) => set({ page }),
+  fetchImports: async ({ userId, clientId, page, pageSize }) => {
+    set({ isLoading: true, error: null });
+    const currentPage = page ?? get().page;
+    const currentPageSize = pageSize ?? get().pageSize;
+
+    try {
+      const query = buildQueryString({
+        userId,
+        clientId,
+        page: currentPage,
+        pageSize: currentPageSize,
+      });
+
+      const response = await fetch(`${API_BASE_URL}/client-files?${query}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch import history (${response.status})`);
+      }
+
+      const payload = (await response.json()) as ImportHistoryResponse;
+      logDebug('Fetched import history', payload);
+
+      set({
+        imports: payload.items ?? [],
+        total: payload.total ?? 0,
+        page: payload.page ?? currentPage,
+        pageSize: payload.pageSize ?? currentPageSize,
+        isLoading: false,
+        error: null,
+      });
+    } catch (error) {
+      logError('Unable to load import history', error);
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to load imports',
+      });
+    }
+  },
+  recordImport: async (payload) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/client-files`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save import metadata (${response.status})`);
+      }
+
+      const body = (await response.json()) as { item?: Import };
+      const saved = body.item ?? {
+        ...payload,
+        timestamp: payload.timestamp ?? new Date().toISOString(),
+      };
+
+      const { page, pageSize, imports } = get();
+      const nextImports = page === 1 ? [saved, ...imports].slice(0, pageSize) : imports;
+      set({
+        imports: nextImports,
+        total: get().total + 1,
+      });
+
+      return saved;
+    } catch (error) {
+      logError('Unable to persist import metadata', error);
+      set({ error: error instanceof Error ? error.message : 'Failed to save import' });
+      return null;
+    }
+  },
+  reset: () => set({ ...initialState }),
+}));

@@ -137,4 +137,3 @@ test('shows error when handleRedirectPromise fails', async () => {
     expect(screen.getByRole('alert')).toHaveTextContent('redirect error')
   );
 });
-

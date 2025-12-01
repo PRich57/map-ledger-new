@@ -60,6 +60,8 @@ export default function MappingSplitRow({
   onUpdateSplit,
   onRemoveSplit,
 }: MappingSplitRowProps) {
+  const headingId = panelId ? `${panelId}-heading` : undefined;
+
   const splitRows = useMemo(() => {
     return account.splitDefinitions.map(split => {
       const percentage = calculateSplitPercentage(account, split);
@@ -209,16 +211,29 @@ export default function MappingSplitRow({
   };
 
   return (
-    <tr>
-      <td
-        id={panelId}
-        colSpan={colSpan}
-        className="bg-slate-50 px-4 py-4 dark:bg-slate-800/40"
-      >
-        <div className="space-y-4">
+    <tr className="align-top">
+      <td colSpan={colSpan} className="bg-slate-50 px-2 py-3 dark:bg-slate-800/50">
+        <div
+          id={panelId}
+          role="region"
+          aria-labelledby={headingId}
+          className="relative ml-6 space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
+        >
+          <div
+            aria-hidden="true"
+            className="absolute -left-6 top-3 h-3 w-3 rounded-full bg-white ring-2 ring-blue-500 dark:bg-slate-900"
+          />
+          <div
+            aria-hidden="true"
+            className="absolute -left-5 top-6 bottom-3 w-px bg-slate-200 dark:bg-slate-700"
+          />
+
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <p
+                id={headingId}
+                className="text-sm font-semibold text-slate-700 dark:text-slate-200"
+              >
                 Allocation splits
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">

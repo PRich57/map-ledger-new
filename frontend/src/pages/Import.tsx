@@ -7,28 +7,41 @@ import { useImportStore } from '../store/importStore';
 import ImportHistory from '../components/import/ImportHistory';
 import ImportForm from '../components/import/ImportForm';
 import TemplateGuide from '../components/import/TemplateGuide';
-import { fileToBase64 } from '../utils/file';
-import type { CompanySummary, ImportPreviewRow, TrialBalanceRow } from '../types';
+import type {
+  ClientEntity,
+  EntitySummary,
+  ImportSheet,
+  TrialBalanceRow,
+} from '../types';
+import type { ParsedUpload } from '../utils/parseTrialBalanceWorkbook';
 import { useMappingStore } from '../store/mappingStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import scrollPageToTop from '../utils/scroll';
+import { slugify } from '../utils/slugify';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 export default function Import() {
   const { user } = useAuthStore();
   const userId = user?.id ?? null;
   const navigate = useNavigate();
   const [isImporting, setIsImporting] = useState(false);
-  const addImport = useImportStore((state) => state.addImport);
-  const deleteImport = useImportStore((state) => state.deleteImport);
-  const imports = useImportStore((state) =>
-    userId ? state.importsByUser[userId] ?? [] : []
-  );
+  const imports = useImportStore((state) => state.imports);
+  const fetchImports = useImportStore((state) => state.fetchImports);
+  const historyLoading = useImportStore((state) => state.isLoading);
+  const historyError = useImportStore((state) => state.error);
+  const recordImport = useImportStore((state) => state.recordImport);
+  const page = useImportStore((state) => state.page);
+  const pageSize = useImportStore((state) => state.pageSize);
+  const total = useImportStore((state) => state.total);
+  const setPage = useImportStore((state) => state.setPage);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const companies = useOrganizationStore((state) => state.companies);
   const fetchOrganizations = useOrganizationStore((state) => state.fetchForUser);
   const orgLoading = useOrganizationStore((state) => state.isLoading);
   const orgError = useOrganizationStore((state) => state.error);
+  const fetchFileRecords = useMappingStore((state) => state.fetchFileRecords);
 
   useEffect(() => {
     if (user?.email) {
@@ -50,34 +63,24 @@ export default function Import() {
 
   const singleClient = clientSummaries.length === 1 ? clientSummaries[0] : null;
 
-  const companyNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    companies.forEach((company) => {
-      map.set(company.id, company.name);
-    });
-    return map;
-  }, [companies]);
-
-  const handleDeleteImport = (importId: string) => {
+  useEffect(() => {
     if (!userId) {
       return;
     }
 
-    deleteImport(userId, importId);
-    setError(null);
-    setSuccess('Import removed from history');
-  };
-
-  const loadImportedAccounts = useMappingStore(state => state.loadImportedAccounts);
+    fetchImports({ userId, clientId: singleClient?.id, page, pageSize });
+  }, [fetchImports, userId, singleClient?.id, page, pageSize]);
 
   const handleFileImport = async (
     rows: TrialBalanceRow[],
     clientId: string,
-    _companyIds: string[],
-    _headerMap: Record<string, string | null>,
+    selectedEntities: ClientEntity[],
+    headerMap: Record<string, string | null>,
     glMonths: string[],
     fileName: string,
-    file: File
+    file: File,
+    sheetSelections: ImportSheet[],
+    sheetUploads: ParsedUpload[],
   ) => {
     setIsImporting(true);
     setError(null);
@@ -88,51 +91,173 @@ export default function Import() {
         throw new Error('You must be signed in to upload files.');
       }
 
-      const selectedCompanies: CompanySummary[] = Array.from(
-        new Map(
-          _companyIds.map((companyId) => {
-            const companyName = companyNameById.get(companyId) ?? companyId;
-            return [companyId, { id: companyId, name: companyName }];
-          }),
-        ).values(),
-      );
+      if (selectedEntities.length === 0) {
+        throw new Error('Please select at least one entity to import.');
+      }
+
+      const normalizeEntityValue = (value?: string | null) => {
+        const normalized = slugify(value ?? '');
+        if (normalized && normalized.length > 0) {
+          return normalized;
+        }
+        return (value ?? '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+      };
+
+      const entityLookup = new Map<string, ClientEntity>();
+      selectedEntities.forEach((entity) => {
+        const variants = new Set([
+          entity.name,
+          entity.displayName,
+          entity.entityName,
+          ...entity.aliases,
+        ]);
+        variants.forEach((variant) => {
+          const normalized = normalizeEntityValue(variant);
+          if (normalized.length > 0 && !entityLookup.has(normalized)) {
+            entityLookup.set(normalized, entity);
+          }
+        });
+      });
+
+      const entityRowCounts = new Map<string, number>();
+      const resolvedRows = rows.map((row) => {
+        const matchedEntity = (() => {
+          const normalized = normalizeEntityValue(row.entity);
+          const matched = normalized.length > 0 ? entityLookup.get(normalized) : null;
+          if (matched) {
+            return matched;
+          }
+          if (selectedEntities.length === 1) {
+            return selectedEntities[0];
+          }
+          return null;
+        })();
+
+        if (!matchedEntity) {
+          return row;
+        }
+
+        entityRowCounts.set(
+          matchedEntity.id,
+          (entityRowCounts.get(matchedEntity.id) ?? 0) + 1,
+        );
+
+        const canonicalName = matchedEntity.displayName ?? matchedEntity.name;
+
+        if (row.entity === canonicalName) {
+          return row;
+        }
+
+        return { ...row, entity: canonicalName };
+      });
+
+      const singleEntity = selectedEntities.length === 1 ? selectedEntities[0] : null;
+      if (singleEntity && (entityRowCounts.get(singleEntity.id) ?? 0) === 0) {
+        entityRowCounts.set(singleEntity.id, resolvedRows.length);
+      }
+
+      const entitiesForMetadata = selectedEntities.map((entity) => ({
+        entityId: entity.id,
+        entityName: entity.displayName ?? entity.name,
+        displayName: entity.displayName ?? entity.name,
+        rowCount: entityRowCounts.get(entity.id) ?? 0,
+        isSelected: true,
+      }));
+
+      const mappingEntities: EntitySummary[] = selectedEntities.map((entity) => ({
+        id: entity.id,
+        name: entity.displayName ?? entity.name,
+      }));
+
+      const entityIds = mappingEntities.map((entity) => entity.id);
+
+      const ingestEntities = selectedEntities.map((entity) => ({
+        id: entity.id,
+        name: entity.displayName ?? entity.name,
+        aliases: entity.aliases,
+      }));
 
       const importId = crypto.randomUUID();
-      const previewRows: ImportPreviewRow[] = rows.slice(0, 10).map((row) => ({
-        accountId: row.accountId,
-        description: row.description,
-        entity: row.entity,
-        netChange: row.netChange,
-        glMonth: row.glMonth,
-      }));
-      const fileData = await fileToBase64(file);
       const fileType = file.type || 'application/octet-stream';
 
       // Use the first GL month for the import record, or a placeholder if none detected
-      const primaryPeriod = glMonths.length > 0 ? glMonths[0] : new Date().toISOString().slice(0, 7);
+      const primaryPeriod =
+        glMonths.length > 0 ? glMonths[0] : new Date().toISOString().slice(0, 7);
 
-      addImport(user.id, {
+      const sheets =
+        sheetSelections.length > 0
+          ? sheetSelections.map((sheet) => ({
+              ...sheet,
+              isSelected: sheet.isSelected ?? true,
+            }))
+          : (() => {
+              const counts = new Map<string, number>();
+              if (glMonths.length === 0) {
+                counts.set(primaryPeriod, rows.length);
+              } else {
+                glMonths.forEach((month) => counts.set(month, 0));
+                rows.forEach((row) => {
+                  const key = row.glMonth ?? primaryPeriod;
+                  counts.set(key, (counts.get(key) ?? 0) + 1);
+                });
+              }
+
+              return Array.from(counts.entries()).map(([sheetName, count]) => ({
+                sheetName,
+                glMonth: sheetName,
+                rowCount: count,
+                isSelected: true,
+              }));
+            })();
+
+      await recordImport({
         id: importId,
         clientId,
+        userId: user.id,
         fileName,
         fileSize: file.size,
         fileType,
-        fileData,
-        previewRows,
         period: primaryPeriod,
         timestamp: new Date().toISOString(),
         status: 'completed',
-        rowCount: rows.length,
+        rowCount: resolvedRows.length,
         importedBy: user.email,
+        sheets,
+        entities: entitiesForMetadata,
       });
 
-      loadImportedAccounts({
-        uploadId: importId,
+      const ingestPayload = {
+        fileUploadId: importId,
         clientId,
-        companyIds: _companyIds,
-        companies: selectedCompanies,
+        fileName,
+        headerMap,
+        sheets: sheetUploads.map((sheet) => ({
+          sheetName: sheet.sheetName,
+          glMonth: sheet.metadata.glMonth || sheet.metadata.sheetNameDate || undefined,
+          isSelected: true,
+          rows: sheet.rows,
+          firstDataRowIndex: sheet.firstDataRowIndex,
+        })),
+        entities: ingestEntities,
+      };
+
+      const ingestResponse = await fetch(`${API_BASE_URL}/file-records/ingest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(ingestPayload),
+      });
+
+      if (!ingestResponse.ok) {
+        throw new Error(`Failed to ingest file records (${ingestResponse.status})`);
+      }
+
+      await fetchFileRecords(importId, {
+        clientId,
+        entities: mappingEntities,
+        entityIds,
         period: primaryPeriod,
-        rows,
       });
 
       setSuccess('File imported successfully');
@@ -248,7 +373,27 @@ export default function Import() {
         <CardHeader>
           <h2 className="text-lg font-medium text-gray-900">Import History</h2>
         </CardHeader>
-        <ImportHistory imports={imports} onDeleteImport={handleDeleteImport} />
+        {historyError && (
+          <div className="px-6 text-sm text-red-600">{historyError}</div>
+        )}
+        <ImportHistory
+          imports={imports}
+          isLoading={historyLoading}
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={(nextPage) => {
+            setPage(nextPage);
+            if (userId) {
+              fetchImports({
+                userId,
+                clientId: singleClient?.id,
+                page: nextPage,
+                pageSize,
+              });
+            }
+          }}
+        />
       </Card>
     </div>
   );

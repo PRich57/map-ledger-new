@@ -1,6 +1,7 @@
 import { ChangeEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUpDown, Check, ChevronRight, HelpCircle, X } from 'lucide-react';
 import RatioAllocationManager from './RatioAllocationManager';
+import DistributionDynamicAllocationRow from './DistributionDynamicAllocationRow';
 import {
   useDistributionStore,
   type DistributionOperationCatalogItem,
@@ -10,6 +11,7 @@ import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappin
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
 import DistributionToolbar from './DistributionToolbar';
+import DistributionSplitRow from './DistributionSplitRow';
 import type {
   DistributionOperationShare,
   DistributionRow,
@@ -22,13 +24,14 @@ interface DistributionTableProps {
 }
 
 const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
-  { value: 'Unmapped', label: 'Unmapped' },
-  { value: 'Mapped', label: 'Mapped' },
+  { value: 'Undistributed', label: 'Undistributed' },
+  { value: 'Distributed', label: 'Distributed' },
 ];
 
 const STATUS_BADGE_CLASSES: Record<DistributionStatus, string> = {
-  Unmapped: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
-  Mapped: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
+  Undistributed:
+    'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
+  Distributed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
 };
 
 const TYPE_OPTIONS: { value: DistributionType; label: string }[] = [
@@ -43,7 +46,7 @@ type SortDirection = 'asc' | 'desc';
 const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'accountId', label: 'Account ID' },
   { key: 'description', label: 'Standard COA Description' },
-  { key: 'activity', label: 'Mapped Value', align: 'right' },
+  { key: 'activity', label: 'Activity', align: 'right' },
   { key: 'type', label: 'Distribution Type' },
   { key: 'operations', label: 'Target Operation' },
   { key: 'preset', label: 'Preset' },
@@ -53,16 +56,22 @@ const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: 'right' }[] = [
 const COLUMN_WIDTH_CLASSES: Partial<Record<SortKey, string>> = {
   accountId: 'w-32',
   description: 'min-w-[18rem]',
-  activity: 'w-32',
-  type: 'w-40',
-  operations: 'min-w-[18rem]',
+  activity: 'min-w-[11rem]',
+  type: 'w-44',
+  operations: 'min-w-[20rem]',
   preset: 'w-40',
   status: 'w-32',
 };
 
+const COLUMN_SPACING_CLASSES: Partial<Record<SortKey, string>> = {
+  activity: 'pr-10',
+  type: 'pr-10',
+  operations: 'pr-6',
+};
+
 const STATUS_ICONS: Record<DistributionStatus, typeof Check | typeof HelpCircle> = {
-  Mapped: Check,
-  Unmapped: HelpCircle,
+  Distributed: Check,
+  Undistributed: HelpCircle,
 };
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -95,6 +104,29 @@ const formatOperations = (row: DistributionRow) => {
   }
 
   return row.operations.map(operation => formatOperationLabel(operation)).join(', ');
+};
+
+const operationsAreEqual = (
+  previous: DistributionOperationShare[],
+  next: DistributionOperationShare[],
+): boolean => {
+  if (previous.length !== next.length) {
+    return false;
+  }
+
+  return previous.every((operation, index) => {
+    const comparison = next[index];
+    if (!comparison) {
+      return false;
+    }
+
+    return (
+      operation.id === comparison.id &&
+      operation.name === comparison.name &&
+      (operation.allocation ?? null) === (comparison.allocation ?? null) &&
+      (operation.notes ?? '') === (comparison.notes ?? '')
+    );
+  });
 };
 
 const getSortValue = (row: DistributionRow, key: SortKey): string | number => {
@@ -155,7 +187,6 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType,
     updateRowOperations,
     updateRowPreset,
-    updateRowNotes,
     setOperationsCatalog,
   } = useDistributionStore(state => ({
     rows: state.rows,
@@ -166,7 +197,6 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType: state.updateRowType,
     updateRowOperations: state.updateRowOperations,
     updateRowPreset: state.updateRowPreset,
-    updateRowNotes: state.updateRowNotes,
     setOperationsCatalog: state.setOperationsCatalog,
   }));
 
@@ -186,7 +216,14 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const presetOptions = useRatioAllocationStore(selectPresetSummaries);
 
   const operationTargetCatalog = useMemo(
-    () => clientOperations.map(operation => ({ id: operation.id, label: operation.name ?? operation.id })),
+    () =>
+      clientOperations.map(operation => ({
+        id: operation.id,
+        label:
+          operation.name && operation.name !== operation.id
+            ? `${operation.id} – ${operation.name}`
+            : operation.id,
+      })),
     [clientOperations],
   );
 
@@ -199,6 +236,29 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       return null;
     }
     return normalized.toUpperCase();
+  }, []);
+
+  const sanitizeOperationsDraft = useCallback((draft: DistributionOperationShare[]): DistributionOperationShare[] => {
+    const sanitized = draft.reduce<DistributionOperationShare[]>((acc, operation) => {
+      const id = operation.id?.trim();
+      if (!id) {
+        return acc;
+      }
+      const allocation =
+        typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
+          ? operation.allocation
+          : undefined;
+      const notes = operation.notes?.trim();
+      acc.push({
+        id,
+        name: operation.name?.trim() || id,
+        allocation,
+        notes: notes || undefined,
+      });
+      return acc;
+    }, []);
+
+    return sanitized;
   }, []);
 
   useEffect(() => {
@@ -346,30 +406,23 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     setOperationsDraft(row.operations.map(operation => ({ ...operation })));
   };
 
-  const handleToggleOperation = (operationId: string, enabled: boolean) => {
-    const catalogItem = operationsCatalog.find(item => item.id === operationId);
-    if (!catalogItem) {
+  useEffect(() => {
+    if (!editingRowId) {
       return;
     }
 
-    setOperationsDraft(previous => {
-      if (enabled) {
-        if (previous.some(operation => operation.id === operationId)) {
-          return previous;
-        }
-        return [...previous, { id: catalogItem.id, name: catalogItem.name }];
-      }
-      return previous.filter(operation => operation.id !== operationId);
-    });
-  };
+    const targetRow = rows.find(row => row.id === editingRowId);
+    if (!targetRow || targetRow.type === 'direct') {
+      return;
+    }
 
-  const handleAllocationChange = (operationId: string, value: number) => {
-    setOperationsDraft(previous =>
-      previous.map(operation =>
-        operation.id === operationId ? { ...operation, allocation: Number.isFinite(value) ? value : 0 } : operation,
-      ),
-    );
-  };
+    const sanitized = sanitizeOperationsDraft(operationsDraft);
+    if (operationsAreEqual(targetRow.operations, sanitized)) {
+      return;
+    }
+
+    updateRowOperations(editingRowId, sanitized);
+  }, [editingRowId, operationsDraft, rows, sanitizeOperationsDraft, updateRowOperations]);
 
   const handleDirectOperationChange = (row: DistributionRow, operationId: string) => {
     if (!operationId) {
@@ -384,14 +437,6 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowOperations(row.id, [{ id: catalogItem.id, name: catalogItem.name }]);
   };
 
-  const handleSaveOperations = (row: DistributionRow) => {
-    updateRowOperations(row.id, operationsDraft);
-  };
-
-  const handleCancelOperations = (row: DistributionRow) => {
-    setOperationsDraft(row.operations.map(operation => ({ ...operation })));
-  };
-
   const getAriaSort = (columnKey: SortKey): 'ascending' | 'descending' | 'none' => {
     if (sortConfig?.key !== columnKey) {
       return 'none';
@@ -403,8 +448,12 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     <div className="space-y-6">
       <DistributionToolbar />
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 shadow-sm dark:border-slate-700">
-        <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700" role="table">
+      <div className="overflow-x-auto">
+        <table
+          className="divide-y divide-slate-200 dark:divide-slate-700"
+          role="table"
+          style={{ minWidth: '100%' }}
+        >
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             <tr>
               <th scope="col" className="w-10 px-3 py-3">
@@ -422,17 +471,19 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
               </th>
               {COLUMN_DEFINITIONS.map(column => {
                 const widthClass = COLUMN_WIDTH_CLASSES[column.key] ?? '';
+                const spacingClass = COLUMN_SPACING_CLASSES[column.key] ?? '';
+                const buttonAlignmentClass = column.align === 'right' ? 'justify-end text-right' : '';
                 return (
                   <th
                     key={column.key}
                     scope="col"
                     aria-sort={getAriaSort(column.key)}
-                    className={`px-3 py-3 ${widthClass} ${column.align === 'right' ? 'text-right' : ''}`}
+                    className={`px-3 py-3 ${widthClass} ${spacingClass} ${column.align === 'right' ? 'text-right' : ''}`}
                   >
                     <button
                       type="button"
                       onClick={() => handleSort(column.key)}
-                      className="flex items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
+                      className={`flex w-full items-center gap-1 font-semibold text-slate-700 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-200 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900 ${buttonAlignmentClass}`}
                     >
                       {column.label}
                       <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
@@ -442,7 +493,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
+          <tbody className="divide-y divide-slate-200 bg-white text-sm dark:divide-slate-700 dark:bg-slate-900">
             {sortedRows.map(row => {
               const isExpanded = expandedRows.has(row.id);
               const isEditing = editingRowId === row.id;
@@ -459,14 +510,17 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                           type="button"
                           onClick={() => handleToggleRow(row)}
                           aria-expanded={isExpanded}
-                          aria-controls={`distribution-details-${row.id}`}
+                          aria-controls={`distribution-panel-${row.id}`}
                           aria-label={`${isExpanded ? 'Hide' : 'Show'} operations for ${row.accountId}`}
-                          className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-500 transition hover:border-blue-500 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-400 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-slate-500 transition hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-slate-300 dark:hover:text-blue-300 dark:focus:ring-offset-slate-900"
                         >
-                          <ChevronRight className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90 text-blue-600' : ''}`} aria-hidden="true" />
+                          <ChevronRight
+                            className={`h-6 w-6 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                            aria-hidden="true"
+                          />
                         </button>
                       ) : (
-                        <span className="flex h-6 w-6 items-center justify-center" aria-hidden="true" />
+                        <span className="inline-flex h-6 w-6 items-center justify-center" aria-hidden="true" />
                       )}
                     </td>
                     <td className="px-3 py-4 align-middle">
@@ -484,10 +538,12 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                     <td className={`px-3 py-4 text-slate-700 dark:text-slate-200 ${COLUMN_WIDTH_CLASSES.description ?? ''}`}>
                       {row.description}
                     </td>
-                    <td className={`px-3 py-4 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300 ${COLUMN_WIDTH_CLASSES.activity ?? ''}`}>
+                    <td
+                      className={`pl-3 py-4 text-right font-medium tabular-nums text-slate-600 dark:text-slate-300 ${COLUMN_WIDTH_CLASSES.activity ?? ''} ${COLUMN_SPACING_CLASSES.activity ?? ''}`}
+                    >
                       {formatCurrency(row.activity)}
                     </td>
-                    <td className={`px-3 py-4 ${COLUMN_WIDTH_CLASSES.type ?? ''}`}>
+                    <td className={`px-3 py-4 ${COLUMN_WIDTH_CLASSES.type ?? ''} ${COLUMN_SPACING_CLASSES.type ?? ''}`}>
                       <label htmlFor={`distribution-type-${row.id}`} className="sr-only">
                         Select distribution type
                       </label>
@@ -504,7 +560,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         ))}
                       </select>
                     </td>
-                    <td className={`px-3 py-4 ${COLUMN_WIDTH_CLASSES.operations ?? ''}`}>
+                    <td className={`px-3 py-4 ${COLUMN_WIDTH_CLASSES.operations ?? ''} ${COLUMN_SPACING_CLASSES.operations ?? ''}`}>
                       {row.type === 'direct' ? (
                         operationsCatalog.length > 0 ? (
                           <select
@@ -526,25 +582,11 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                       ) : (
                         <div className="space-y-2">
                           <p className="text-sm text-slate-700 dark:text-slate-200">{operationsSummary}</p>
-                          {row.operations.length === 0 && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">Assign operations to complete this distribution.</p>
+                          {row.type === 'dynamic' && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
+                              {activePreset ? `Preset: ${activePreset.name}` : 'No preset selected'}
+                            </span>
                           )}
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRow(row)}
-                              aria-expanded={isExpanded}
-                              aria-controls={`distribution-details-${row.id}`}
-                              className="text-xs font-medium text-blue-600 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:text-blue-300 dark:hover:text-blue-200 dark:focus:ring-offset-slate-900"
-                            >
-                              {isExpanded ? 'Hide details' : 'Edit distribution'}
-                            </button>
-                            {row.type === 'dynamic' && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200">
-                                {activePreset ? `Preset: ${activePreset.name}` : 'No preset selected'}
-                              </span>
-                            )}
-                          </div>
                         </div>
                       )}
                     </td>
@@ -578,172 +620,28 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                       })()}
                     </td>
                   </tr>
-                  {isExpanded && isEditing && (
-                    <tr id={`distribution-details-${row.id}`}>
-                      <td colSpan={COLUMN_DEFINITIONS.length + 2} className="bg-slate-50 px-4 py-6 dark:bg-slate-800/60">
+                  {isExpanded && isEditing && row.type === 'percentage' && (
+                    <tr id={`distribution-panel-${row.id}`}>
+                      <td colSpan={COLUMN_DEFINITIONS.length + 2} className="bg-slate-50 px-4 py-6 dark:bg-slate-800/40">
                         <div className="space-y-6">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                Distribution details for {row.description}
-                              </h4>
-                              <p className="text-xs text-slate-500 dark:text-slate-400">
-                                Adjust operations and notes for this standard account.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRow(row)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:text-slate-300 dark:hover:text-slate-100 dark:focus-visible:ring-offset-slate-900"
-                            >
-                              <X className="h-3.5 w-3.5" aria-hidden="true" />
-                              Close
-                            </button>
-                          </div>
-                          <div className="grid gap-6 lg:grid-cols-3">
-                            <div className="space-y-4 lg:col-span-2">
-                              {row.type !== 'direct' && (
-                                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Operations</p>
-                                      <p className="text-xs text-slate-500 dark:text-slate-400">Select the target operations that should receive this value.</p>
-                                    </div>
-                                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{operationsDraft.length} selected</span>
-                                  </div>
-                                  {operationsCatalog.length === 0 ? (
-                                    <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-                                      No operations are available for this client. Import client operations to continue.
-                                    </p>
-                                  ) : (
-                                    <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
-                                      {operationsCatalog.map(option => {
-                                        const isSelected = operationsDraft.some(operation => operation.id === option.id);
-                                        const optionLabel = option.name && option.name !== option.id ? `${option.id} – ${option.name}` : option.id;
-                                        return (
-                                          <label
-                                            key={option.id}
-                                            className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 text-sm shadow-sm transition ${
-                                              isSelected
-                                                ? 'border-blue-500 bg-blue-50/60 dark:border-blue-400 dark:bg-blue-500/10'
-                                                : 'border-slate-300 bg-white hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-500'
-                                            }`}
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={isSelected}
-                                              onChange={event => handleToggleOperation(option.id, event.target.checked)}
-                                              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
-                                            />
-                                            <div className="flex-1">
-                                              <div className="font-medium text-slate-700 dark:text-slate-100">{optionLabel}</div>
-                                              {row.type === 'percentage' && isSelected && (
-                                                <div className="mt-1 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                                                  <label htmlFor={`allocation-${row.id}-${option.id}`}>Allocation %</label>
-                                                  <input
-                                                    id={`allocation-${row.id}-${option.id}`}
-                                                    type="number"
-                                                    min={0}
-                                                    max={100}
-                                                    step={0.1}
-                                                    value={operationsDraft.find(operation => operation.id === option.id)?.allocation ?? 0}
-                                                    onChange={event => handleAllocationChange(option.id, Number.parseFloat(event.target.value))}
-                                                    className="w-24 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-                                                  />
-                                                </div>
-                                              )}
-                                            </div>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                  {row.type === 'dynamic' && (
-                                    <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
-                                      Dynamic allocations distribute amounts according to preset configurations. Use the builder to configure ratio weights.
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSaveOperations(row)}
-                                  className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:bg-blue-500 dark:hover:bg-blue-400 dark:focus-visible:ring-offset-slate-900"
-                                >
-                                  Save operations
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelOperations(row)}
-                                  className="inline-flex items-center rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
-                                >
-                                  Reset changes
-                                </button>
-                                {row.type === 'dynamic' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveDynamicAccountId(row.accountId)}
-                                    className="inline-flex items-center rounded-md border border-emerald-500 px-3 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:border-emerald-400 dark:text-emerald-300 dark:hover:bg-emerald-500/10 dark:focus-visible:ring-offset-slate-900"
-                                  >
-                                    Open dynamic allocation builder
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <div className="space-y-4">
-                              <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                                <dl className="space-y-3 text-sm">
-                                  <div className="flex items-center justify-between">
-                                    <dt className="text-slate-500 dark:text-slate-400">Distribution type</dt>
-                                    <dd className="font-medium text-slate-900 dark:text-slate-100">
-                                      {TYPE_OPTIONS.find(option => option.value === row.type)?.label ?? row.type}
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt className="text-slate-500 dark:text-slate-400">Status</dt>
-                                    <dd className="mt-1">
-                                      {(() => {
-                                        const StatusIcon = STATUS_ICONS[row.status];
-                                        return (
-                                          <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
-                                            <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                                            {statusLabel(row.status)}
-                                          </span>
-                                        );
-                                      })()}
-                                    </dd>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <dt className="text-slate-500 dark:text-slate-400">Preset</dt>
-                                    <dd className="text-slate-700 dark:text-slate-200">
-                                      {row.presetId ? presetOptions.find(option => option.id === row.presetId)?.name ?? row.presetId : 'No preset selected'}
-                                    </dd>
-                                  </div>
-                                  <div>
-                                    <dt className="text-slate-500 dark:text-slate-400">Operations summary</dt>
-                                    <dd className="mt-1 text-slate-700 dark:text-slate-200">{operationsSummary}</dd>
-                                  </div>
-                                </dl>
-                              </div>
-                              <div>
-                                <label htmlFor={`distribution-notes-${row.id}`} className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                                  Distribution notes
-                                </label>
-                                <textarea
-                                  id={`distribution-notes-${row.id}`}
-                                  value={row.notes ?? ''}
-                                  onChange={event => updateRowNotes(row.id, event.target.value)}
-                                  rows={4}
-                                  className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
-                                />
-                              </div>
-                            </div>
-                          </div>
+                          <DistributionSplitRow
+                            row={row}
+                            operationsCatalog={operationsCatalog}
+                            operationsDraft={operationsDraft}
+                            setOperationsDraft={setOperationsDraft}
+                          />
                         </div>
                       </td>
                     </tr>
+                  )}
+                  {isExpanded && isEditing && row.type === 'dynamic' && (
+                    <DistributionDynamicAllocationRow
+                      row={row}
+                      colSpan={COLUMN_DEFINITIONS.length + 2}
+                      panelId={`distribution-panel-${row.id}`}
+                      onOpenBuilder={() => setActiveDynamicAccountId(row.accountId)}
+                      operationsCatalog={operationsCatalog}
+                    />
                   )}
                 </Fragment>
               );
@@ -788,6 +686,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                 onDone={() => setActiveDynamicAccountId(null)}
                 targetCatalog={operationTargetCatalog}
                 resolveCanonicalTargetId={resolveOperationCanonicalTargetId}
+                targetLabel="Target operation"
+                targetPlaceholder="Select target operation"
+                targetEmptyLabel="No operations available"
               />
             </div>
           </div>

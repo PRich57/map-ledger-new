@@ -1,4 +1,4 @@
-import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
+import { getChartOfAccountOptions } from '../store/chartOfAccountsStore';
 import { Datapoint, TargetScoaOption } from '../types';
 
 const convertDatapointToOption = (datapoint: Datapoint): TargetScoaOption => ({
@@ -14,7 +14,7 @@ export const buildTargetScoaOptions = (
     .flat()
     .map(convertDatapointToOption);
 
-  const merged = [...templateOptions, ...STANDARD_CHART_OF_ACCOUNTS];
+  const merged = [...templateOptions, ...getChartOfAccountOptions()];
   const uniqueById = new Map<string, TargetScoaOption>();
 
   merged.forEach(option => {

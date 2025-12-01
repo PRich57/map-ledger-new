@@ -10,6 +10,7 @@ export interface ParsedUpload {
   period: string;
   headers: string[];
   rows: ParsedRow[];
+  firstDataRowIndex?: number;
   metadata: Record<string, string>; // stores entity, glMonth, etc.
 }
 
@@ -105,6 +106,7 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
     let headerRowFound = false;
     const headerExtensionRows = new Set<number>();
     const rows: ParsedRow[] = [];
+    let firstDataRowIndex: number | undefined;
 
     // Extract date from sheet name (e.g., "Trial balance report (Aug'24)" -> "2024-08")
     const sheetNameDate = extractDateFromText(sheet.name);
@@ -113,7 +115,7 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
       entity: getCellValue(sheet, 'B1'),
       glMonth: getCellValue(sheet, 'B4'),
       reportName: getCellValue(sheet, 'B2'),
-      sheetNameDate: sheetNameDate // Add extracted date from sheet name
+      sheetNameDate, // Add extracted date from sheet name
     };
 
     sheet.eachRow((row, rowNumber) => {
@@ -173,6 +175,9 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
             }
           }
         });
+        if (firstDataRowIndex === undefined) {
+          firstDataRowIndex = rowNumber;
+        }
         rows.push(rowObj);
       }
     });
@@ -183,6 +188,7 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
         period: sheet.name.replace('Export ', ''),
         headers,
         rows,
+        firstDataRowIndex,
         metadata
       });
     }

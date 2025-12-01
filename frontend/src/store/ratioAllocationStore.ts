@@ -12,7 +12,10 @@ import {
   RatioAllocation,
   RatioAllocationTargetDatapoint,
 } from '../types';
-import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
+import {
+  findChartOfAccountOption,
+  getChartOfAccountOptions,
+} from './chartOfAccountsStore';
 import {
   allocateDynamicWithPresets,
   getBasisValue,
@@ -30,7 +33,7 @@ const createId = (): string => {
 
 
 const getTargetNameById = (targetId: string): string => {
-  const option = STANDARD_CHART_OF_ACCOUNTS.find(item => item.id === targetId);
+  const option = findChartOfAccountOption(targetId);
   return option?.label ?? targetId;
 };
 
@@ -42,9 +45,7 @@ export const resolveTargetAccountId = (value?: string | null): string | null => 
   if (!normalized) {
     return null;
   }
-  const match = STANDARD_CHART_OF_ACCOUNTS.find(
-    option => option.id === normalized || option.value === normalized,
-  );
+  const match = findChartOfAccountOption(normalized);
   return match?.id ?? normalized;
 };
 
@@ -1132,8 +1133,9 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
 
     const dropdownKey = typeof rowIndex === 'number' ? `target-${rowIndex}` : null;
 
-    return STANDARD_CHART_OF_ACCOUNTS.filter(option => {
-      const canonicalUsers = canonicalUsage.get(option.id);
+    return getChartOfAccountOptions()
+      .filter(option => {
+        const canonicalUsers = canonicalUsage.get(option.id);
         if (!canonicalUsers || canonicalUsers.size === 0) {
           return true;
         }

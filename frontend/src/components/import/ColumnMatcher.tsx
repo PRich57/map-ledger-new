@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 interface ColumnMatcherProps {
   sourceHeaders: string[];
   destinationHeaders: string[];
-  onComplete: (mapping: Record<string, string | null>) => void;
+  initialAssignments?: Record<string, string | null>;
+  onComplete: (mapping: Record<string, string | null>) => void | Promise<void>;
 }
 
 function normalize(label: string): string {
@@ -40,9 +41,16 @@ function guessMatches(source: string[], dest: string[]): Record<string, string |
   return result;
 }
 
-export default function ColumnMatcher({ sourceHeaders, destinationHeaders, onComplete }: ColumnMatcherProps) {
+export default function ColumnMatcher({
+  sourceHeaders,
+  destinationHeaders,
+  initialAssignments,
+  onComplete,
+}: ColumnMatcherProps) {
   const [assignments, setAssignments] = useState<Record<string, string | null>>({});
   const [unassigned, setUnassigned] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const annotatedHeaders = sourceHeaders.map((label, idx, arr) => {
@@ -54,12 +62,39 @@ export default function ColumnMatcher({ sourceHeaders, destinationHeaders, onCom
       return label;
     });
 
-    const initial = guessMatches(annotatedHeaders, destinationHeaders);
-    const used = Object.values(initial).filter(Boolean) as string[];
+    const seedAssignments: Record<string, string | null> = {};
+    const used = new Set<string>();
 
-    setAssignments(initial);
-    setUnassigned(annotatedHeaders.filter(h => !used.includes(h)));
-  }, [sourceHeaders, destinationHeaders]);
+    if (initialAssignments) {
+      destinationHeaders.forEach((dest) => {
+        const desired = initialAssignments[dest];
+        if (!desired) {
+          return;
+        }
+
+        const match = annotatedHeaders.find(
+          (header) => !used.has(header) && (header === desired || normalize(header) === normalize(desired))
+        );
+
+        if (match) {
+          seedAssignments[dest] = match;
+          used.add(match);
+        }
+      });
+    }
+
+    const remainingSources = annotatedHeaders.filter((header) => !used.has(header));
+    const remainingDestinations = destinationHeaders.filter((dest) => !seedAssignments[dest]);
+
+    const guesses = guessMatches(remainingSources, remainingDestinations);
+    const mergedAssignments = { ...seedAssignments, ...guesses };
+    const assignedSources = new Set(
+      Object.values(mergedAssignments).filter(Boolean) as string[]
+    );
+
+    setAssignments(mergedAssignments);
+    setUnassigned(annotatedHeaders.filter((header) => !assignedSources.has(header)));
+  }, [sourceHeaders, destinationHeaders, initialAssignments]);
 
   const handleDrop = (src: string, dest: string) => {
     setAssignments(prev => {
@@ -128,12 +163,34 @@ export default function ColumnMatcher({ sourceHeaders, destinationHeaders, onCom
           </div>
         ))}
 
-        <button
-          onClick={() => onComplete(assignments)}
-          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Confirm Mappings
-        </button>
+        <div className="space-y-2 mt-4">
+          <button
+            onClick={async () => {
+              try {
+                setError(null);
+                setIsSaving(true);
+                await onComplete(assignments);
+              } catch (err) {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : 'Unable to save header mappings'
+                );
+              } finally {
+                setIsSaving(false);
+              }
+            }}
+            disabled={isSaving}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isSaving ? 'Saving...' : 'Confirm Mappings'}
+          </button>
+          {error && (
+            <p className="text-sm text-red-600" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

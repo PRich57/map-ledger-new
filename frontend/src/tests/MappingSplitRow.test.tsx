@@ -9,8 +9,6 @@ const targetOptions: TargetScoaOption[] = [
 
 const buildAccount = (): GLAccountMappingRow => ({
   id: 'acct-test',
-  companyId: 'company-1',
-  companyName: 'Acme Logistics',
   entityId: 'entity-1',
   entityName: 'Acme Entity',
   accountId: '5000',
@@ -37,8 +35,8 @@ const buildAccount = (): GLAccountMappingRow => ({
       allocationValue: 40,
     },
   ],
-  companies: [
-    { id: 'entity-1', company: 'Acme Entity', balance: 100000 },
+  entities: [
+    { id: 'entity-1', entity: 'Acme Entity', balance: 100000 },
   ],
 });
 

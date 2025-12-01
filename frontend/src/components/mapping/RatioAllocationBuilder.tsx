@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
-import { STANDARD_CHART_OF_ACCOUNTS } from '../../data/standardChartOfAccounts';
+import { useChartOfAccountsStore } from '../../store/chartOfAccountsStore';
 import { resolveTargetAccountId, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import type { DynamicAllocationPresetRow } from '../../types';
 import {
@@ -19,22 +19,22 @@ export type RatioAllocationTargetCatalogOption = {
   label: string;
 };
 
-const DEFAULT_TARGET_CATALOG: RatioAllocationTargetCatalogOption[] =
-  STANDARD_CHART_OF_ACCOUNTS.map(option => ({
-    id: option.id,
-    label: option.label,
-  }));
-
 interface RatioAllocationBuilderProps {
   initialSourceAccountId?: string | null;
   targetCatalog?: RatioAllocationTargetCatalogOption[];
   resolveCanonicalTargetId?: (targetId?: string | null) => string | null;
+  targetLabel?: string;
+  targetPlaceholder?: string;
+  targetEmptyLabel?: string;
 }
 
 const RatioAllocationBuilder = ({
   initialSourceAccountId,
   targetCatalog,
   resolveCanonicalTargetId,
+  targetLabel = 'Target account',
+  targetPlaceholder = 'Select target account',
+  targetEmptyLabel = 'No target accounts available',
 }: RatioAllocationBuilderProps) => {
   const {
     allocations,
@@ -59,6 +59,7 @@ const RatioAllocationBuilder = ({
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
   const [newPresetRows, setNewPresetRows] = useState<DynamicAllocationPresetRow[]>([]);
+  const { options: chartOfAccountOptions } = useChartOfAccountsStore();
 
   const newPresetBasisHeaderId = useId();
   const newPresetTargetHeaderId = useId();
@@ -79,8 +80,18 @@ const RatioAllocationBuilder = ({
     [resolveCanonicalTargetId],
   );
 
+  const defaultTargetCatalog = useMemo(
+    () =>
+      chartOfAccountOptions.map(option => ({
+        id: option.id,
+        label: option.label,
+      })),
+    [chartOfAccountOptions],
+  );
+
   const preparedTargetCatalog = useMemo(() => {
-    const sourceCatalog = targetCatalog && targetCatalog.length > 0 ? targetCatalog : DEFAULT_TARGET_CATALOG;
+    const sourceCatalog =
+      targetCatalog && targetCatalog.length > 0 ? targetCatalog : defaultTargetCatalog;
     const seen = new Map<string, RatioAllocationTargetCatalogOption>();
     sourceCatalog.forEach(option => {
       const id = option.id?.trim();
@@ -93,7 +104,7 @@ const RatioAllocationBuilder = ({
       }
     });
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [targetCatalog]);
+  }, [defaultTargetCatalog, targetCatalog]);
 
   const { newPresetDynamicUsage, newPresetCanonicalUsage } = useMemo(() => {
     const dynamicUsage = new Map<string, Set<string>>();
@@ -543,7 +554,7 @@ const RatioAllocationBuilder = ({
                         Basis datapoint
                       </th>
                       <th id={newPresetTargetHeaderId} scope="col" className="px-3 py-2">
-                        Target account
+                        {targetLabel}
                       </th>
                       <th id={newPresetAmountHeaderId} scope="col" className="px-3 py-2">
                         Basis amount
@@ -597,7 +608,7 @@ const RatioAllocationBuilder = ({
                           </td>
                           <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
                             <label htmlFor={targetSelectId} className="sr-only">
-                              Target account
+                              {targetLabel}
                             </label>
                             <select
                               id={targetSelectId}
@@ -618,8 +629,8 @@ const RatioAllocationBuilder = ({
                             >
                               <option value="">
                                 {targetOptions.length === 0
-                                  ? 'No target accounts available'
-                                  : 'Select target account'}
+                                  ? targetEmptyLabel
+                                  : targetPlaceholder}
                               </option>
                               {targetOptions.map(option => (
                                 <option key={option.value} value={option.value}>
@@ -765,7 +776,7 @@ const RatioAllocationBuilder = ({
                               Basis datapoint
                             </th>
                             <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                              Target account
+                              {targetLabel}
                             </th>
                             <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                               Basis value
@@ -821,10 +832,10 @@ const RatioAllocationBuilder = ({
                                         })
                                       }
                                       className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                                      aria-label="Preset target account"
+                                      aria-label={targetLabel}
                                     >
                                       {targetOptions.length === 0 ? (
-                                        <option value="">No targets available</option>
+                                        <option value="">{targetEmptyLabel}</option>
                                       ) : (
                                         targetOptions.map(option => (
                                           <option key={option.id} value={option.id}>
@@ -933,7 +944,7 @@ const RatioAllocationBuilder = ({
               <thead className="bg-slate-50 dark:bg-slate-900">
                 <tr>
                   <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    Target account
+                    {targetLabel}
                   </th>
                   <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     Exclude

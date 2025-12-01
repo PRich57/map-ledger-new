@@ -3,7 +3,7 @@ import { Calendar, Check } from 'lucide-react';
 import { useMappingStore, selectAvailablePeriods } from '../../store/mappingStore';
 
 interface MonthScopeSelectorProps {
-  companyId: string;
+  entityId: string;
   accountId: string;
   currentMonth?: string | null;
   onApply: (months: string[] | 'all') => void;
@@ -11,7 +11,7 @@ interface MonthScopeSelectorProps {
 }
 
 const MonthScopeSelector = ({
-  companyId,
+  entityId,
   accountId,
   currentMonth,
   onApply,
@@ -26,10 +26,10 @@ const MonthScopeSelector = ({
   const accountPeriods = useMemo(() => {
     const accounts = useMappingStore.getState().accounts;
     return accounts
-      .filter(acc => acc.companyId === companyId && acc.accountId === accountId)
+      .filter(acc => acc.entityId === entityId && acc.accountId === accountId)
       .map(acc => acc.glMonth)
       .filter((month): month is string => Boolean(month));
-  }, [companyId, accountId]);
+  }, [entityId, accountId]);
 
   const handleToggleMonth = (month: string) => {
     setSelectedMonths(prev => {

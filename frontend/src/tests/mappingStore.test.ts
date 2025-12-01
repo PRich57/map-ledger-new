@@ -7,11 +7,40 @@ import {
   createInitialMappingAccounts,
   selectStatusCounts,
   selectSummaryMetrics,
+  selectFilteredAccounts,
   useMappingStore,
 } from '../store/mappingStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
-import type { TrialBalanceRow } from '../types';
-import { getStandardScoaOption } from '../data/standardChartOfAccounts';
+import type { GLAccountMappingRow, TrialBalanceRow } from '../types';
+import { getChartOfAccountOptions } from '../store/chartOfAccountsStore';
+
+const buildMappingAccount = (
+  overrides: Partial<GLAccountMappingRow> & { id: string },
+): GLAccountMappingRow => ({
+  id: overrides.id,
+  entityId: 'ent-1',
+  entityName: 'Entity One',
+  accountId: '1000',
+  accountName: 'Sample Account',
+  activity: overrides.netChange ?? 0,
+  status: 'Unmapped',
+  mappingType: 'direct',
+  netChange: 0,
+  operation: 'Ops',
+  polarity: 'Debit',
+  splitDefinitions: [],
+  entities: [],
+  ...overrides,
+});
+
+const findTargetByDescription = (description: string) =>
+  getChartOfAccountOptions().find(target => {
+    const normalized = description.toLowerCase();
+    return (
+      target.description?.toLowerCase() === normalized ||
+      target.label.toLowerCase().includes(normalized)
+    );
+  });
 
 describe('mappingStore selectors', () => {
   beforeEach(() => {
@@ -19,8 +48,10 @@ describe('mappingStore selectors', () => {
       accounts: createInitialMappingAccounts(),
       searchTerm: '',
       activeStatuses: [],
-      activeCompanies: [],
-      activeCompanyIds: [],
+      activeEntityId: null,
+      activeEntities: [],
+      activeEntityIds: [],
+      activePeriod: null,
     });
     useRatioAllocationStore.setState({
       allocations: [],
@@ -78,9 +109,13 @@ describe('mappingStore selectors', () => {
   });
 
   it('exposes mapped SCoA accounts to the dynamic allocation basis list', () => {
-    const payrollTarget = getStandardScoaOption(
+    const payrollTarget = findTargetByDescription(
       'DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET',
     );
+
+    if (!payrollTarget) {
+      throw new Error('Expected chart of account target to be available');
+    }
 
     act(() => {
       useMappingStore.getState().updateTarget('acct-1', payrollTarget.value);
@@ -98,10 +133,10 @@ describe('mappingStore selectors', () => {
   });
 
   it('includes percentage split targets in the basis selection before status is finalized', () => {
-    const driverTarget = getStandardScoaOption(
+    const driverTarget = findTargetByDescription(
       'DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET',
     );
-    const nonDriverTarget = getStandardScoaOption(
+    const nonDriverTarget = findTargetByDescription(
       'NON DRIVER WAGES & BENEFITS - TOTAL ASSET OPERATIONS',
     );
 
@@ -265,11 +300,27 @@ describe('mappingStore selectors', () => {
   it('tracks status counts across all mapping rows', () => {
     const counts = selectStatusCounts(useMappingStore.getState());
     expect(counts).toEqual({
-      New: 1,
+      New: 2,
       Unmapped: 0,
-      Mapped: 2,
+      Mapped: 1,
       Excluded: 1,
     });
+  });
+
+  it('filters summary metrics by active entity', () => {
+    act(() => {
+      useMappingStore.setState(state => ({ ...state, activeEntityId: 'comp-acme' }));
+    });
+
+    const summary = selectSummaryMetrics(useMappingStore.getState());
+    expect(summary).toEqual(
+      expect.objectContaining({
+        totalAccounts: 2,
+        grossTotal: 620000,
+        excludedTotal: 0,
+        netTotal: 620000,
+      }),
+    );
   });
 
   it('loads imported rows into mapping state', () => {
@@ -296,8 +347,8 @@ describe('mappingStore selectors', () => {
         .loadImportedAccounts({
           uploadId: 'import-1',
           clientId: 'cli-123',
-          companyIds: ['ent-1'],
-          companies: [{ id: 'ent-1', name: 'Entity One' }],
+          entityIds: ['ent-1'],
+          entities: [{ id: 'ent-1', name: 'Entity One' }],
           period: '2024-01',
           rows,
         });
@@ -314,8 +365,9 @@ describe('mappingStore selectors', () => {
     );
     expect(state.activeUploadId).toBe('import-1');
     expect(state.activeClientId).toBe('cli-123');
-    expect(state.activeCompanyIds).toEqual(['ent-1']);
-    expect(state.activeCompanies).toEqual([
+    expect(state.activeEntityId).toBe('ent-1');
+    expect(state.activeEntityIds).toEqual(['ent-1']);
+    expect(state.activeEntities).toEqual([
       { id: 'ent-1', name: 'Entity One' },
     ]);
     expect(state.activePeriod).toBe('2024-01');
@@ -343,8 +395,8 @@ describe('mappingStore selectors', () => {
       useMappingStore.getState().loadImportedAccounts({
         uploadId: 'import-dup',
         clientId: 'cli-123',
-        companyIds: ['comp-1'],
-        companies: [{ id: 'comp-1', name: 'AMX Inc.' }],
+        entityIds: ['comp-1'],
+        entities: [{ id: 'comp-1', name: 'AMX Inc.' }],
         period: '2025-08',
         rows,
       });
@@ -353,26 +405,78 @@ describe('mappingStore selectors', () => {
     const state = useMappingStore.getState();
     expect(state.accounts).toHaveLength(2);
     state.accounts.forEach((account) => {
-      expect(account.requiresCompanyAssignment).toBe(true);
+      expect(account.requiresEntityAssignment).toBe(true);
     });
 
     act(() => {
-      useMappingStore.getState().updateAccountCompany(state.accounts[0].id, {
-        companyName: 'AMX Inc.',
-        companyId: 'comp-1',
+      useMappingStore.getState().updateAccountEntity(state.accounts[0].id, {
+        entityName: 'AMX Inc.',
+        entityId: 'comp-1',
       });
-      useMappingStore.getState().updateAccountCompany(state.accounts[1].id, {
-        companyName: 'AMX Canada',
+      useMappingStore.getState().updateAccountEntity(state.accounts[1].id, {
+        entityName: 'AMX Canada',
       });
     });
 
     const resolved = useMappingStore.getState().accounts;
-    expect(resolved.map((account) => account.companyName)).toEqual([
+    expect(resolved.map((account) => account.entityName)).toEqual([
       'AMX Inc.',
       'AMX Canada',
     ]);
     resolved.forEach((account) => {
-      expect(account.requiresCompanyAssignment).toBe(false);
+      expect(account.requiresEntityAssignment).toBe(false);
     });
+  });
+
+  it('surfaces the most recent non-zero month per account when viewing all periods', () => {
+    const accounts: GLAccountMappingRow[] = [
+      buildMappingAccount({
+        id: 'acct-jan',
+        glMonth: '2024-01',
+        netChange: 150,
+        activity: 150,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+      }),
+      buildMappingAccount({
+        id: 'acct-feb',
+        glMonth: '2024-02',
+        netChange: 0,
+        activity: 0,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+      }),
+      buildMappingAccount({
+        id: 'acct-mar',
+        glMonth: '2024-03',
+        netChange: 275,
+        activity: 275,
+        accountName: 'COGS',
+        accountId: '5000',
+      }),
+    ];
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts,
+        activePeriod: null,
+        activeEntityId: 'ent-1',
+        activeEntities: [{ id: 'ent-1', name: 'Entity One' }],
+        activeEntityIds: ['ent-1'],
+        activeStatuses: [],
+        searchTerm: '',
+      }));
+    });
+
+    const filtered = selectFilteredAccounts(useMappingStore.getState());
+
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0]).toEqual(
+      expect.objectContaining({ accountId: '5000', glMonth: '2024-03', netChange: 275 }),
+    );
+    expect(filtered[1]).toEqual(
+      expect.objectContaining({ accountId: '4000', glMonth: '2024-01', netChange: 150 }),
+    );
   });
 });

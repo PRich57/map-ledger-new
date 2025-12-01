@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import type { CompanySummary, GLAccountMappingRow } from '../../types';
+import type { EntitySummary, GLAccountMappingRow } from '../../types';
 
-interface MappingCompanyCellProps {
+interface MappingEntityCellProps {
   account: GLAccountMappingRow;
-  options: CompanySummary[];
+  options: EntitySummary[];
   requiresManualAssignment: boolean;
   hasCompositeConflict: boolean;
   onCommit: (
     accountId: string,
-    companyName: string,
-    matchedCompanyId?: string | null,
+    entityName: string,
+    matchedEntityId?: string | null,
   ) => void;
 }
 
@@ -29,21 +29,21 @@ const getInputClasses = (
   return `${base} border-slate-300 focus:border-blue-500 focus:ring-blue-500/40`;
 };
 
-export default function MappingCompanyCell({
+export default function MappingEntityCell({
   account,
   options,
   requiresManualAssignment,
   hasCompositeConflict,
   onCommit,
-}: MappingCompanyCellProps) {
-  const [value, setValue] = useState(account.companyName ?? '');
+}: MappingEntityCellProps) {
+  const [value, setValue] = useState(account.entityName ?? '');
 
   useEffect(() => {
-    setValue(account.companyName ?? '');
-  }, [account.companyName, account.id]);
+    setValue(account.entityName ?? '');
+  }, [account.entityName, account.id]);
 
   const datalistId = useMemo(
-    () => (options.length > 0 ? `company-options-${account.id}` : undefined),
+    () => (options.length > 0 ? `entity-options-${account.id}` : undefined),
     [account.id, options.length],
   );
 
@@ -78,7 +78,7 @@ export default function MappingCompanyCell({
     if (showError) {
       return {
         tone: 'error' as const,
-        text: 'Duplicate combination. Enter a unique company name for this account and GL month.',
+        text: 'Duplicate combination. Enter a unique entity name for this account and GL month.',
       };
     }
 
@@ -86,15 +86,15 @@ export default function MappingCompanyCell({
       return {
         tone: 'warning' as const,
         text: requiresManualAssignment
-          ? 'Assign a company to distinguish duplicate accounts for this month.'
-          : 'Company name is required.',
+          ? 'Assign an entity to distinguish duplicate accounts for this month.'
+          : 'Entity name is required.',
       };
     }
 
     if (requiresManualAssignment) {
       return {
         tone: 'warning' as const,
-        text: 'Confirm this company assignment for the duplicate account.',
+        text: 'Confirm this entity assignment for the duplicate account.',
       };
     }
 
@@ -109,7 +109,7 @@ export default function MappingCompanyCell({
         onChange={(event) => setValue(event.target.value)}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        placeholder={requiresManualAssignment ? 'Enter company name' : 'Company name'}
+        placeholder={requiresManualAssignment ? 'Enter entity name' : 'Entity name'}
         className={getInputClasses(showError, showRequiredWarning || requiresManualAssignment)}
       />
       {datalistId && (

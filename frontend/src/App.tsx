@@ -7,6 +7,7 @@ import {
 } from 'react-router-dom';
 import Layout from './components/Layout';
 import { useAuthStore } from './store/authStore';
+import { useChartOfAccountsStore } from './store/chartOfAccountsStore';
 import { msalInstance } from './utils/msal';
 import { env } from './utils/env';
 import type { GroupTokenClaims } from './types';
@@ -120,6 +121,7 @@ function ProtectedRoutes() {
 function App() {
   const { isAuthenticated } = useAuthStore();
   const [checkingAuth, setCheckingAuth] = React.useState(true);
+  const initializeChartOfAccounts = useChartOfAccountsStore(state => state.initialize);
 
   React.useEffect(() => {
     const initAuth = async () => {
@@ -158,6 +160,12 @@ function App() {
 
     initAuth();
   }, []);
+
+  React.useEffect(() => {
+    initializeChartOfAccounts().catch(error => {
+      console.error('Failed to load chart of accounts', error);
+    });
+  }, [initializeChartOfAccounts]);
 
   if (checkingAuth) {
     return <div>Loading...</div>;

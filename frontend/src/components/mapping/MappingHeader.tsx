@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
 import { CalendarDays, Building2 } from 'lucide-react';
 import { useClientStore } from '../../store/clientStore';
-import { useMappingStore, selectAvailablePeriods, selectActivePeriod } from '../../store/mappingStore';
+import {
+  useMappingStore,
+  selectAvailablePeriods,
+  selectActivePeriod,
+  selectAccounts,
+} from '../../store/mappingStore';
 
 interface MappingHeaderProps {
   clientId?: string;
@@ -11,7 +16,7 @@ interface MappingHeaderProps {
 const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   const clients = useClientStore(state => state.clients);
   const operations = useMappingStore(state =>
-    state.accounts.map(account => account.operation)
+    selectAccounts(state).map(account => account.operation)
   );
   const availablePeriods = useMappingStore(selectAvailablePeriods);
   const activePeriod = useMappingStore(selectActivePeriod);

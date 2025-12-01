@@ -46,7 +46,7 @@ export default function ExcludeAccounts({ rows, onConfirm }: ExcludeAccountsProp
         <thead>
           <tr className="bg-gray-50 text-left dark:bg-slate-800">
             <th className="p-2 text-gray-700 dark:text-gray-300">Exclude</th>
-            <th className="p-2 text-gray-700 dark:text-gray-300">Company</th>
+            <th className="p-2 text-gray-700 dark:text-gray-300">Entity</th>
             <th className="p-2 text-gray-700 dark:text-gray-300">Account ID</th>
             <th className="p-2 text-gray-700 dark:text-gray-300">Description</th>
             <th className="p-2 text-right text-gray-700 dark:text-gray-300">Net Change</th>

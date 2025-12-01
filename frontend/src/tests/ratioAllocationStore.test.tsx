@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from './testUtils';
-import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
+import { getChartOfAccountOptions } from '../store/chartOfAccountsStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
 import RatioAllocationBuilder from '../components/mapping/RatioAllocationBuilder';
 
@@ -18,6 +18,8 @@ const resetStore = () => {
   });
 };
 
+const getTargetOptions = () => getChartOfAccountOptions();
+
 describe('ratioAllocationStore', () => {
   beforeEach(() => {
     resetStore();
@@ -32,7 +34,7 @@ describe('ratioAllocationStore', () => {
       mappedTargetId: 'ops-target',
       valuesByPeriod: { '2024-01': 1200 },
     };
-    const targetOption = STANDARD_CHART_OF_ACCOUNTS[0];
+    const targetOption = getTargetOptions()[0];
     const preset = {
       id: 'preset-1',
       name: 'Operations preset',
@@ -100,7 +102,7 @@ describe('ratioAllocationStore', () => {
       mappedTargetId: 'ops-target',
       valuesByPeriod: { '2024-01': 500 },
     };
-    const targetOption = STANDARD_CHART_OF_ACCOUNTS[1];
+    const targetOption = getTargetOptions()[1];
     const allocation = {
       id: 'allocation-auto',
       name: 'Allocation auto',
@@ -160,7 +162,7 @@ describe('ratioAllocationStore', () => {
       },
     ];
 
-    const targetOption = STANDARD_CHART_OF_ACCOUNTS[0];
+    const targetOption = getTargetOptions()[0];
     const presets = [
       {
         id: 'preset-1',
@@ -245,7 +247,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('rejects duplicate account selections across preset rows', () => {
-    const [first, second, third, fourth, fifth, sixth, seventh] = STANDARD_CHART_OF_ACCOUNTS;
+    const [first, second, third, fourth, fifth, sixth, seventh] = getTargetOptions();
 
     act(() => {
       useRatioAllocationStore.getState().createPreset({
@@ -269,7 +271,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('excludes used account ids from preset availability helpers', () => {
-    const [first, second, third, fourth, fifth] = STANDARD_CHART_OF_ACCOUNTS;
+    const [first, second, third, fourth, fifth] = getTargetOptions();
     const basisAccounts = [first, second, third, fourth, fifth].map((option, index) => ({
       id: option.id,
       name: `Basis ${index + 1}`,
@@ -316,7 +318,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('hides already selected accounts in new preset builder rows', async () => {
-    const [first, second, third] = STANDARD_CHART_OF_ACCOUNTS;
+    const [first, second, third] = getTargetOptions();
     const basisAccounts = [first, second, third].map((option, index) => ({
       id: option.id,
       name: `Basis ${index + 1}`,
@@ -393,7 +395,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('prevents reusing a canonical target when creating a preset', async () => {
-    const [targetAlpha, targetBeta, targetGamma] = STANDARD_CHART_OF_ACCOUNTS;
+    const [targetAlpha, targetBeta, targetGamma] = getTargetOptions();
     const basisAccounts = [
       {
         id: 'basis-alpha',
@@ -494,7 +496,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('prevents reusing a canonical target when editing a preset', async () => {
-    const [targetAlpha, targetBeta, targetGamma] = STANDARD_CHART_OF_ACCOUNTS;
+    const [targetAlpha, targetBeta, targetGamma] = getTargetOptions();
     const basisAccounts = [
       {
         id: 'basis-alpha',
@@ -579,7 +581,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('normalizes allocation result percentages that would otherwise total 99.99%', async () => {
-    const [targetA, targetB, targetC] = STANDARD_CHART_OF_ACCOUNTS;
+    const [targetA, targetB, targetC] = getTargetOptions();
     const targetOptions = [targetA, targetB, targetC];
     const basisAccounts = [
       {
@@ -678,7 +680,7 @@ describe('ratioAllocationStore', () => {
   });
 
   it('normalizes allocation result percentages that would otherwise total 100.01%', async () => {
-    const [targetA, targetB, targetC] = STANDARD_CHART_OF_ACCOUNTS;
+    const [targetA, targetB, targetC] = getTargetOptions();
     const targetOptions = [targetA, targetB, targetC];
     const basisAccounts = [
       {

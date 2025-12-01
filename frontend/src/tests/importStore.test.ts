@@ -1,96 +1,86 @@
-import {
-  IMPORT_STORAGE_KEY,
-  createInitialImportMap,
-  useImportStore,
-} from '../store/importStore';
+import { useImportStore } from '../store/importStore';
 
 describe('useImportStore', () => {
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
-    const store = useImportStore.getState();
-    store.reset();
-
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(IMPORT_STORAGE_KEY);
-    }
+    useImportStore.getState().reset();
+    global.fetch = jest.fn();
   });
 
-  it('stores uploads on the current user account', () => {
-    const store = useImportStore.getState();
-    const initialUserUploads = store.importsByUser['1']?.length ?? 0;
-    const otherUserUploads = store.importsByUser['2']?.length ?? 0;
-
-    store.addImport('1', {
-      id: 'new-import-id',
-      clientId: 'ACME',
-      fileName: 'acme_march.csv',
-      fileSize: 2048,
-      fileType: 'text/csv',
-      fileData: 'QWNtZSxEYXRhCjE=',
-      previewRows: [],
-      period: '2024-03-01T00:00:00.000Z',
-      timestamp: '2024-03-05T12:00:00.000Z',
-      status: 'completed',
-      rowCount: 42,
-      importedBy: 'john.doe@example.com',
-    });
-
-    const updated = useImportStore.getState();
-
-    expect(updated.importsByUser['1']).toHaveLength(initialUserUploads + 1);
-    expect(updated.importsByUser['1'][0]).toMatchObject({
-      id: 'new-import-id',
-      userId: '1',
-      fileName: 'acme_march.csv',
-      importedBy: 'john.doe@example.com',
-    });
-    expect(updated.importsByUser['2']).toHaveLength(otherUserUploads);
+  afterEach(() => {
+    useImportStore.getState().reset();
+    global.fetch = originalFetch;
   });
 
-  it('resets the store to the initial import history', () => {
-    const store = useImportStore.getState();
-    store.addImport('1', {
-      id: 'temp-import',
+  it('fetches imports for the provided user', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            id: 'import-1',
+            clientId: 'ACME',
+            fileName: 'trial_balance.csv',
+            fileSize: 2048,
+            fileType: 'text/csv',
+            period: '2024-04',
+            timestamp: '2024-04-02T09:30:00.000Z',
+            status: 'completed',
+            rowCount: 10,
+            importedBy: 'john.doe@example.com',
+            userId: 'user-1',
+          },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      }),
+    });
+
+    await useImportStore.getState().fetchImports({ userId: 'user-1' });
+
+    const state = useImportStore.getState();
+    expect(state.imports).toHaveLength(1);
+    expect(state.total).toBe(1);
+    expect(state.error).toBeNull();
+  });
+
+  it('records a new import and prepends it when on the first page', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        item: {
+          id: 'import-2',
+          clientId: 'ACME',
+          userId: 'user-1',
+          fileName: 'new_upload.csv',
+          fileSize: 1024,
+          fileType: 'text/csv',
+          period: '2024-05',
+          timestamp: '2024-05-03T10:00:00.000Z',
+          status: 'completed',
+          rowCount: 5,
+          importedBy: 'john.doe@example.com',
+        },
+      }),
+    });
+
+    const result = await useImportStore.getState().recordImport({
+      id: 'import-2',
       clientId: 'ACME',
-      fileName: 'temp.csv',
+      userId: 'user-1',
+      fileName: 'new_upload.csv',
       fileSize: 1024,
       fileType: 'text/csv',
-      fileData: 'VGVtcCxEYXRhCjE=',
-      previewRows: [],
-      period: '2024-04-01T00:00:00.000Z',
-      timestamp: '2024-04-02T09:30:00.000Z',
-      status: 'completed',
-      rowCount: 10,
-      importedBy: 'john.doe@example.com',
-    });
-
-    store.reset();
-
-    expect(useImportStore.getState().importsByUser).toEqual(
-      createInitialImportMap()
-    );
-  });
-});
-
-  it('removes an import from history', () => {
-    const store = useImportStore.getState();
-    store.addImport('1', {
-      id: 'remove-me',
-      clientId: 'ACME',
-      fileName: 'remove.csv',
-      fileSize: 512,
-      fileType: 'text/csv',
-      fileData: 'UmVtb3ZlLERhdGEK',
-      previewRows: [],
-      period: '2024-05-01T00:00:00.000Z',
-      timestamp: '2024-05-02T10:00:00.000Z',
+      period: '2024-05',
       status: 'completed',
       rowCount: 5,
       importedBy: 'john.doe@example.com',
     });
 
-    store.deleteImport('1', 'remove-me');
-
-    expect(useImportStore.getState().importsByUser['1']).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'remove-me' })])
-    );
+    expect(result?.id).toBe('import-2');
+    expect(useImportStore.getState().imports[0]?.id).toBe('import-2');
+    expect(useImportStore.getState().total).toBe(1);
   });
+});

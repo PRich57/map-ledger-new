@@ -1,7 +1,7 @@
 import { render, screen, within } from './testUtils';
 import BatchMapModal from '../components/mapping/BatchMapModal';
 import { createSeedDatapoints } from '../data/coaSeeds';
-import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
+import { getChartOfAccountOptions } from '../store/chartOfAccountsStore';
 import { buildTargetScoaOptions } from '../utils/targetScoaOptions';
 
 describe('BatchMapModal', () => {
@@ -25,7 +25,7 @@ describe('BatchMapModal', () => {
       .map((option: HTMLOptionElement) => option.textContent?.trim() ?? null)
       .filter((label): label is string => Boolean(label));
 
-    STANDARD_CHART_OF_ACCOUNTS.forEach(option => {
+    getChartOfAccountOptions().forEach(option => {
       expect(optionLabels).toContain(option.label);
     });
   });

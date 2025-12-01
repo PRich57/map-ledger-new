@@ -15,8 +15,8 @@ import type {
 } from '../../types';
 
 const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
-  { value: 'Unmapped', label: 'Unmapped' },
-  { value: 'Mapped', label: 'Mapped' },
+  { value: 'Undistributed', label: 'Undistributed' },
+  { value: 'Distributed', label: 'Distributed' },
 ];
 
 export default function DistributionToolbar() {
@@ -65,7 +65,7 @@ export default function DistributionToolbar() {
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-1 flex-col gap-4 lg:flex-row lg:items-end">
           <div className="flex max-w-sm flex-col">
@@ -87,11 +87,7 @@ export default function DistributionToolbar() {
             </div>
           </div>
           <div className="flex flex-col gap-2">
-            <div
-              role="group"
-              aria-label="Filter distribution by status"
-              className="flex flex-wrap items-center gap-2"
-            >
+            <div role="group" aria-label="Filter distribution by status" className="flex flex-wrap items-center gap-2">
               {STATUS_DEFINITIONS.map(status => {
                 const isActive = statusFilters.includes(status.value);
                 return (
@@ -169,6 +165,6 @@ export default function DistributionToolbar() {
         onClose={() => setPresetModalOpen(false)}
         onApply={handleApplyPreset}
       />
-    </div>
+    </>
   );
 }

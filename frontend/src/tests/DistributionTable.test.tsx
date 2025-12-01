@@ -83,14 +83,27 @@ describe('DistributionTable', () => {
     const toggleButton = within(driverRow as HTMLTableRowElement).getByLabelText(/operations for/i);
     fireEvent.click(toggleButton);
 
-    const intermodalToggle = await screen.findByLabelText(/ops-int/i);
-    fireEvent.click(intermodalToggle);
+    const detailHeading = await screen.findByRole('heading', {
+      name: /distribution details for/i,
+    });
+    const detailRow = detailHeading.closest('tr');
+    expect(detailRow).not.toBeNull();
 
-    const intermodalContainer = intermodalToggle.closest('label');
-    expect(intermodalContainer).not.toBeNull();
+    const addOperationButton = within(detailRow as HTMLTableRowElement).getByRole('button', {
+      name: /add operation/i,
+    });
+    fireEvent.click(addOperationButton);
 
-    const allocationInput = within(intermodalContainer as HTMLLabelElement).getByLabelText('Allocation %');
+    const [operationSelect] = within(detailRow as HTMLTableRowElement).getAllByLabelText(
+      'Select target operation',
+    );
+    fireEvent.change(operationSelect, { target: { value: 'ops-int' } });
+
+    const [allocationInput] = within(detailRow as HTMLTableRowElement).getAllByLabelText(
+      'Enter allocation percentage',
+    );
     fireEvent.change(allocationInput, { target: { value: '25' } });
+    fireEvent.blur(allocationInput);
 
     fireEvent.click(screen.getByText('Save operations'));
 
@@ -107,9 +120,10 @@ describe('DistributionTable', () => {
     const toggleButton = within(fuelRow as HTMLTableRowElement).getByLabelText(/operations for/i);
     fireEvent.click(toggleButton);
 
-    const builderButton = await screen.findByText('Open dynamic allocation builder');
+    const builderButton = await screen.findByText('Open preset builder');
     fireEvent.click(builderButton);
 
     expect(await screen.findByText('Dynamic allocations')).toBeInTheDocument();
+    expect(await screen.findByText('Target operation')).toBeInTheDocument();
   });
 });

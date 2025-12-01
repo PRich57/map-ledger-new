@@ -1,5 +1,5 @@
 import type {
-  CompanySummary,
+  EntitySummary,
   GLAccountMappingRow,
   MappingPolarity,
   TrialBalanceRow,
@@ -9,7 +9,7 @@ import { slugify } from './slugify';
 interface BuildMappingRowsFromImportOptions {
   uploadId: string;
   clientId?: string | null;
-  selectedCompanies?: CompanySummary[];
+  selectedEntities?: EntitySummary[];
 }
 
 const determinePolarity = (value: number): MappingPolarity => {
@@ -22,11 +22,11 @@ const determinePolarity = (value: number): MappingPolarity => {
   return 'Absolute';
 };
 
-const matchSelectedCompany = (
+const matchSelectedEntity = (
   entity: string | undefined,
-  selectedCompanies?: CompanySummary[],
-): CompanySummary | null => {
-  if (!entity || !selectedCompanies || selectedCompanies.length === 0) {
+  selectedEntities?: EntitySummary[],
+): EntitySummary | null => {
+  if (!entity || !selectedEntities || selectedEntities.length === 0) {
     return null;
   }
 
@@ -38,15 +38,15 @@ const matchSelectedCompany = (
   const normalized = trimmed.toLowerCase();
   const slug = slugify(trimmed);
 
-  for (const company of selectedCompanies) {
-    const candidates = [company.id, company.name, slugify(company.name)];
+  for (const selected of selectedEntities) {
+    const candidates = [selected.id, selected.name, slugify(selected.name)];
     if (
       candidates.some((candidate) => {
         const comparison = candidate.trim().toLowerCase();
         return comparison === normalized || comparison === slug;
       })
     ) {
-      return company;
+      return selected;
     }
   }
 
@@ -57,11 +57,11 @@ const normalizeEntity = (
   entity: string | undefined,
   fallbackId: string,
   fallbackName: string,
-  selectedCompanies?: CompanySummary[],
+  selectedEntities?: EntitySummary[],
 ): { id: string; name: string } => {
-  const matchedCompany = matchSelectedCompany(entity, selectedCompanies);
-  if (matchedCompany) {
-    return { id: matchedCompany.id, name: matchedCompany.name };
+  const matchedEntity = matchSelectedEntity(entity, selectedEntities);
+  if (matchedEntity) {
+    return { id: matchedEntity.id, name: matchedEntity.name };
   }
 
   const trimmed = entity?.trim();
@@ -73,9 +73,9 @@ const normalizeEntity = (
     };
   }
 
-  if (selectedCompanies && selectedCompanies.length === 1) {
-    const [singleCompany] = selectedCompanies;
-    return { id: singleCompany.id, name: singleCompany.name };
+  if (selectedEntities && selectedEntities.length === 1) {
+    const [singleEntity] = selectedEntities;
+    return { id: singleEntity.id, name: singleEntity.name };
   }
 
   return { id: fallbackId, name: fallbackName };
@@ -111,11 +111,11 @@ export const buildMappingRowsFromImport = (
       row.entity,
       fallbackEntityId,
       fallbackName,
-      options.selectedCompanies,
+      options.selectedEntities,
     );
     const rawAccountId = (row.accountId ?? '').toString().trim();
     const accountId = rawAccountId.length > 0 ? rawAccountId : `account-${index + 1}`;
-    const compositeKey = `${normalized.id}__${accountId}`;
+    const compositeKey = `${normalized.id}__${accountId}${row.glMonth ? `__${row.glMonth}` : ''}__${index}`;
     const rowId = options.uploadId ? `${options.uploadId}-${compositeKey}` : compositeKey;
     const rawNetChange = Number(row.netChange ?? 0);
     const netChange = Number.isFinite(rawNetChange) ? rawNetChange : 0;
@@ -124,8 +124,6 @@ export const buildMappingRowsFromImport = (
 
     return {
       id: rowId,
-      companyId: normalized.id,
-      companyName: normalized.name,
       entityId: normalized.id,
       entityName: normalized.name,
       accountId,
@@ -137,15 +135,15 @@ export const buildMappingRowsFromImport = (
       operation,
       polarity,
       splitDefinitions: [],
-      companies: [
+      entities: [
         {
           id: normalized.id,
-          company: normalized.name,
+          entity: normalized.name,
           balance: netChange,
         },
       ],
       glMonth: row.glMonth, // Preserve GL month from import
-      requiresCompanyAssignment: false,
+      requiresEntityAssignment: false,
     };
   });
 };

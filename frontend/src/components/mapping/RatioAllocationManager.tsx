@@ -9,6 +9,9 @@ interface RatioAllocationManagerProps {
   onDone?: () => void;
   targetCatalog?: RatioAllocationTargetCatalogOption[];
   resolveCanonicalTargetId?: (targetId?: string | null) => string | null;
+  targetLabel?: string;
+  targetPlaceholder?: string;
+  targetEmptyLabel?: string;
 }
 
 const RatioAllocationManager = ({
@@ -16,6 +19,9 @@ const RatioAllocationManager = ({
   onDone,
   targetCatalog,
   resolveCanonicalTargetId,
+  targetLabel,
+  targetPlaceholder,
+  targetEmptyLabel,
 }: RatioAllocationManagerProps) => {
   const { getOrCreateAllocation } = useRatioAllocationStore();
 
@@ -38,6 +44,9 @@ const RatioAllocationManager = ({
         initialSourceAccountId={initialSourceAccountId}
         targetCatalog={targetCatalog}
         resolveCanonicalTargetId={resolveCanonicalTargetId}
+        targetLabel={targetLabel}
+        targetPlaceholder={targetPlaceholder}
+        targetEmptyLabel={targetEmptyLabel}
       />
 
       {onDone && (

@@ -61,7 +61,7 @@ jest.mock('../src/utils/sqlClient', () => ({
             exclusions_json: JSON.stringify(['Exclude 1']),
             configuration_json: JSON.stringify({ setting: true }),
             created_at: createdAt,
-            updated_at: updatedAt,
+            updated_dttm: updatedAt,
           },
         ],
       } as any);
@@ -149,7 +149,7 @@ jest.mock('../src/utils/sqlClient', () => ({
             exclusions_json: JSON.stringify([]),
             configuration_json: JSON.stringify({ setting: false }),
             created_at: createdAt,
-            updated_at: updatedAt,
+            updated_dttm: updatedAt,
           },
         ],
       } as any);
@@ -213,7 +213,7 @@ jest.mock('../src/utils/sqlClient', () => ({
             exclusions_json: JSON.stringify([]),
             configuration_json: null,
             created_at: createdAt,
-            updated_at: updatedAt,
+            updated_dttm: updatedAt,
           },
         ],
       } as any);

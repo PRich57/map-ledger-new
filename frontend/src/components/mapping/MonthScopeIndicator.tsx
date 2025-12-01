@@ -11,9 +11,9 @@ const MonthScopeIndicator = ({ account }: MonthScopeIndicatorProps) => {
   const allAccounts = useMappingStore(state => state.accounts);
 
   const monthInfo = useMemo(() => {
-    // Find all accounts with same companyId and accountId
+    // Find all accounts with same entityId and accountId
     const relatedAccounts = allAccounts.filter(
-      acc => acc.companyId === account.companyId && acc.accountId === account.accountId
+      acc => acc.entityId === account.entityId && acc.accountId === account.accountId
     );
 
     if (relatedAccounts.length <= 1) {
@@ -33,7 +33,7 @@ const MonthScopeIndicator = ({ account }: MonthScopeIndicatorProps) => {
       differentMappings,
       monthCount: relatedAccounts.length,
     };
-  }, [allAccounts, account.companyId, account.accountId]);
+  }, [allAccounts, account.entityId, account.accountId]);
 
   if (!monthInfo.hasMultipleMonths) {
     return null;

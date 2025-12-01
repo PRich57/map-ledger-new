@@ -58,7 +58,7 @@ const SELECT_COLUMNS = `
   EXCLUSIONS_JSON AS exclusions_json,
   CONFIGURATION_JSON AS configuration_json,
   CREATED_AT AS created_at,
-  UPDATED_AT AS updated_at
+  UPDATED_DTTM AS updated_dttm
 `;
 
 type RawDatapointConfigurationRow = {
@@ -81,7 +81,7 @@ type RawDatapointConfigurationRow = {
   exclusions_json: string | null;
   configuration_json: string | null;
   created_at: Date;
-  updated_at: Date;
+  updated_dttm: Date;
 };
 
 let tableEnsured = false;
@@ -184,7 +184,7 @@ const mapRowToConfiguration = (
   exclusions: parseJsonArray(row.exclusions_json),
   configuration: parseJsonObject(row.configuration_json),
   createdAt: row.created_at.toISOString(),
-  updatedAt: row.updated_at.toISOString(),
+  updatedAt: row.updated_dttm.toISOString(),
 });
 
 const ensureTable = async () => {
@@ -215,7 +215,7 @@ BEGIN
     EXCLUSIONS_JSON NVARCHAR(MAX) NULL,
     CONFIGURATION_JSON NVARCHAR(MAX) NULL,
     CREATED_AT DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
-    UPDATED_AT DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME()
+    UPDATED_DTTM DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME()
   );
   CREATE INDEX IX_${TABLE_NAME}_USER_EMAIL_CLIENT_ID
     ON dbo.${TABLE_NAME}(USER_EMAIL, CLIENT_ID);
@@ -245,7 +245,7 @@ export const listDatapointConfigurations = async (
   const { recordset = [] } = await runQuery<RawDatapointConfigurationRow>(
     `SELECT ${SELECT_COLUMNS}
      FROM dbo.${TABLE_NAME} ${whereClause}
-     ORDER BY UPDATED_AT DESC`,
+     ORDER BY UPDATED_DTTM DESC`,
     parameters
   );
 
@@ -352,7 +352,7 @@ export const updateDatapointConfiguration = async (
       OPERATIONS_JSON = @operationsJson,
       EXCLUSIONS_JSON = @exclusionsJson,
       CONFIGURATION_JSON = @configurationJson,
-      UPDATED_AT = SYSUTCDATETIME()
+      UPDATED_DTTM = SYSUTCDATETIME()
     WHERE ID = @id AND USER_EMAIL = @userEmail`,
     {
       id: input.id,

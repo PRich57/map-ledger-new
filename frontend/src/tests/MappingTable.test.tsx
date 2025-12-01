@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from './testUtils';
 import MappingTable from '../components/mapping/MappingTable';
 import { createInitialMappingAccounts, useMappingStore } from '../store/mappingStore';
 import { COA_SEED_DATAPOINTS } from '../data/coaSeeds';
-import { STANDARD_CHART_OF_ACCOUNTS } from '../data/standardChartOfAccounts';
 import type { MappingSplitDefinition, TargetScoaOption } from '../types';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
+import { getChartOfAccountOptions } from '../store/chartOfAccountsStore';
 
 const resetMappingStore = () => {
   useMappingStore.setState({
@@ -30,6 +30,8 @@ const resetRatioStore = () => {
   });
 };
 
+const getTargetCatalog = () => getChartOfAccountOptions();
+
 const buildPercentageSplit = (
   index: number,
   target: TargetScoaOption,
@@ -43,7 +45,7 @@ const buildPercentageSplit = (
 });
 
 const seedPayrollTaxesWithThreeSplits = () => {
-  const [targetOne, targetTwo, targetThree] = STANDARD_CHART_OF_ACCOUNTS;
+  const [targetOne, targetTwo, targetThree] = getTargetCatalog();
 
   if (!targetOne || !targetTwo || !targetThree) {
     throw new Error('Standard chart of accounts must include at least three entries.');
@@ -237,7 +239,7 @@ describe('MappingTable', () => {
       ...Object.values(COA_SEED_DATAPOINTS)
         .flat()
         .map(datapoint => datapoint.accountName),
-      ...STANDARD_CHART_OF_ACCOUNTS.map(option => option.label),
+      ...getTargetCatalog().map(option => option.label),
     ]);
 
     expectedLabels.forEach(name => {
@@ -249,9 +251,9 @@ describe('MappingTable', () => {
     render(<MappingTable />);
 
     expect(
-      screen.getByRole('columnheader', { name: /Company/i }),
+      screen.getByRole('columnheader', { name: /Entity/i }),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Company / Company')).not.toBeInTheDocument();
+    expect(screen.queryByText('Entity / Entity')).not.toBeInTheDocument();
 
     const companyCells = screen.getAllByText('Acme Freight');
     expect(companyCells.length).toBeGreaterThan(0);
@@ -329,4 +331,3 @@ describe('MappingTable', () => {
     expect(within(fuelRow).getByText('40.00%')).toBeInTheDocument();
   });
 });
-

@@ -1,7 +1,6 @@
 import {
   ChangeEvent,
   Fragment,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -18,7 +17,6 @@ import {
   XCircle,
 } from 'lucide-react';
 import MappingToolbar from './MappingToolbar';
-import MappingCompanyCell from './MappingCompanyCell';
 import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   getAccountExcludedAmount,
@@ -26,6 +24,7 @@ import {
   selectActiveStatuses,
   selectSearchTerm,
   selectSplitValidationIssues,
+  selectAvailablePeriods,
   useMappingStore,
 } from '../../store/mappingStore';
 import { useTemplateStore } from '../../store/templateStore';
@@ -47,7 +46,6 @@ import { formatCurrencyAmount } from '../../utils/currency';
 import { computeDynamicExclusionSummaries } from '../../utils/dynamicExclusions';
 
 type SortKey =
-  | 'companyName'
   | 'accountId'
   | 'accountName'
   | 'netChange'
@@ -106,7 +104,6 @@ const MAPPING_TYPE_OPTIONS: { value: MappingType; label: string }[] = (
 const formatNetChange = (value: number) => formatCurrencyAmount(value);
 
 const COLUMN_DEFINITIONS: { key: SortKey; label: string }[] = [
-  { key: 'companyName', label: 'Company' },
   { key: 'accountId', label: 'Account ID' },
   { key: 'accountName', label: 'Description' },
   { key: 'netChange', label: 'Activity' },
@@ -120,8 +117,9 @@ const COLUMN_DEFINITIONS: { key: SortKey; label: string }[] = [
 ];
 
 const COLUMN_WIDTH_CLASSES: Partial<Record<SortKey, string>> = {
-  targetScoa: 'w-48',
+  targetScoa: 'min-w-[14rem] md:min-w-[16rem] lg:min-w-[18rem]',
   exclusion: 'w-56',
+  aiConfidence: 'w-28',
 };
 
 const COLUMN_ALIGNMENT_CLASSES: Partial<Record<SortKey, string>> = {
@@ -159,6 +157,7 @@ export default function MappingTable() {
     [datapoints]
   );
   const accounts = useMappingStore(selectFilteredAccounts);
+  const availablePeriods = useMappingStore(selectAvailablePeriods);
   const activePeriod = useMappingStore((state) => state.activePeriod);
   const searchTerm = useMappingStore(selectSearchTerm);
   const activeStatuses = useMappingStore(selectActiveStatuses);
@@ -180,11 +179,6 @@ export default function MappingTable() {
   const { selectedIds, toggleSelection, setSelection, clearSelection } =
     useMappingSelectionStore();
   const splitValidationIssues = useMappingStore(selectSplitValidationIssues);
-  const allAccounts = useMappingStore((state) => state.accounts);
-  const activeCompanies = useMappingStore((state) => state.activeCompanies);
-  const updateAccountCompany = useMappingStore(
-    (state) => state.updateAccountCompany,
-  );
   const [sortConfig, setSortConfig] = useState<{
     key: SortKey;
     direction: SortDirection;
@@ -198,43 +192,16 @@ export default function MappingTable() {
     null
   );
 
+  const latestPeriod = useMemo(() => {
+    if (availablePeriods.length === 0) {
+      return null;
+    }
+    return availablePeriods[availablePeriods.length - 1] ?? null;
+  }, [availablePeriods]);
+
   const splitIssueIds = useMemo(
     () => new Set(splitValidationIssues.map((issue) => issue.accountId)),
     [splitValidationIssues]
-  );
-
-  const compositeConflictIds = useMemo(() => {
-    const grouped = new Map<string, string[]>();
-    allAccounts.forEach((account) => {
-      const monthKey = account.glMonth ?? 'unspecified';
-      const companyKey = account.companyName?.trim().toLowerCase() ?? '';
-      const key = `${companyKey || '__blank__'}__${account.accountId}__${monthKey}`;
-      const existing = grouped.get(key);
-      if (existing) {
-        existing.push(account.id);
-      } else {
-        grouped.set(key, [account.id]);
-      }
-    });
-
-    const conflicts = new Set<string>();
-    grouped.forEach((ids) => {
-      if (ids.length > 1) {
-        ids.forEach((id) => conflicts.add(id));
-      }
-    });
-
-    return conflicts;
-  }, [allAccounts]);
-
-  const handleCompanyCommit = useCallback(
-    (accountId: string, companyName: string, matchedCompanyId?: string | null) => {
-      updateAccountCompany(accountId, {
-        companyName,
-        companyId: matchedCompanyId ?? undefined,
-      });
-    },
-    [updateAccountCompany],
   );
 
   const dynamicIssueIds = useMemo(() => {
@@ -345,7 +312,7 @@ export default function MappingTable() {
         [
           account.accountId,
           account.accountName,
-          account.companyName,
+          account.entityName,
           account.activity,
           account.netChange.toString(),
           formatNetChange(account.netChange),
@@ -454,6 +421,8 @@ export default function MappingTable() {
     return sortConfig.direction === 'asc' ? 'ascending' : 'descending';
   };
 
+  let hasRenderedPriorPeriodDivider = false;
+
   return (
     <div className="space-y-4">
       <MappingToolbar />
@@ -464,9 +433,6 @@ export default function MappingTable() {
         >
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             <tr>
-              <th scope="col" className="w-10 px-3 py-3">
-                <span className="sr-only">Toggle split details</span>
-              </th>
               <th scope="col" className="w-12 px-3 py-3">
                 <span className="sr-only">Select all rows</span>
                 <input
@@ -476,6 +442,9 @@ export default function MappingTable() {
                   onChange={handleSelectAll}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
+              </th>
+              <th scope="col" className="w-10 px-3 py-3">
+                <span className="sr-only">Toggle split details</span>
               </th>
               {COLUMN_DEFINITIONS.map((column) => (
                 <th
@@ -498,9 +467,20 @@ export default function MappingTable() {
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
             {sortedAccounts.map((account, index) => {
+              const isPriorPeriod = latestPeriod !== null && account.glMonth !== latestPeriod;
+              const shouldRenderDivider = isPriorPeriod && !hasRenderedPriorPeriodDivider;
+
+              if (shouldRenderDivider) {
+                hasRenderedPriorPeriodDivider = true;
+              }
+
               const isSelected = selectedIds.has(account.id);
               const targetScoa =
                 account.manualCOAId ?? account.suggestedCOAId ?? '';
+              const targetScoaLabel = targetScoa
+                ? coaOptions.find((option) => option.value === targetScoa)?.label ??
+                  targetScoa
+                : '';
               const requiresSplit =
                 account.mappingType === 'percentage' ||
                 account.mappingType === 'dynamic';
@@ -534,15 +514,35 @@ export default function MappingTable() {
               const hasDynamicExclusionOverride =
                 account.mappingType === 'dynamic' && Boolean(dynamicExclusion);
 
-              const rowKey = `${account.id}-${account.companyId}-${account.glMonth ?? 'no-period'}-${index}`;
+              const rowKey = `${account.id}-${account.entityId}-${account.glMonth ?? 'no-period'}-${index}`;
 
               return (
                 <Fragment key={rowKey}>
+                  {shouldRenderDivider && (
+                    <tr className="bg-slate-100 dark:bg-slate-800/60">
+                      <td
+                        className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-200"
+                        colSpan={12}
+                      >
+                        Earlier GL months
+                        {latestPeriod ? ` (before ${latestPeriod})` : ''}
+                      </td>
+                    </tr>
+                  )}
                   <tr
                     className={
                       isSelected ? 'bg-blue-50 dark:bg-slate-800/50' : undefined
                     }
                   >
+                    <td className="px-3 py-4">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select account ${account.accountId}`}
+                        checked={isSelected}
+                        onChange={() => handleRowSelection(account.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
                     <td className="px-3 py-4">
                       {requiresSplit ? (
                         <button
@@ -564,28 +564,6 @@ export default function MappingTable() {
                           aria-hidden="true"
                         />
                       )}
-                    </td>
-                    <td className="px-3 py-4">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select account ${account.accountId}`}
-                        checked={isSelected}
-                        onChange={() => handleRowSelection(account.id)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </td>
-                    <td className="max-w-[220px] px-3 py-4 align-top">
-                      <MappingCompanyCell
-                        account={account}
-                        options={activeCompanies}
-                        requiresManualAssignment={
-                          Boolean(account.requiresCompanyAssignment) ||
-                          (activeCompanies.length <= 1 &&
-                            compositeConflictIds.has(account.id))
-                        }
-                        hasCompositeConflict={compositeConflictIds.has(account.id)}
-                        onCommit={handleCompanyCommit}
-                      />
                     </td>
                     <td className="whitespace-nowrap px-3 py-4 text-slate-700 dark:text-slate-200">
                       {account.accountId}
@@ -663,14 +641,17 @@ export default function MappingTable() {
                             Select target SCoA for {account.accountName}
                           </label>
                           <select
-                            id={`scoa-${account.id}`}
-                            value={targetScoa}
-                            onChange={(event) =>
-                              updateTarget(account.id, event.target.value)
-                            }
-                            className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                          >
-                            <option value="">Select target</option>
+                          id={`scoa-${account.id}`}
+                          value={targetScoa}
+                          onChange={(event) =>
+                            updateTarget(account.id, event.target.value)
+                          }
+                          title={
+                            targetScoaLabel || 'Select a target Statement of Accounts value'
+                          }
+                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                          <option value="">Select target</option>
                             {coaOptions.map((option) => (
                               <option key={option.id} value={option.value}>
                                 {option.label}
@@ -729,14 +710,16 @@ export default function MappingTable() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-4 text-slate-700 dark:text-slate-200">
+                    <td
+                      className={`px-3 py-4 text-slate-700 dark:text-slate-200 ${COLUMN_WIDTH_CLASSES.aiConfidence ?? ''}`}
+                    >
                       <div className="flex items-center gap-2">
                         <span className="font-medium">
                           {account.aiConfidence !== undefined
                             ? `${account.aiConfidence}%`
                             : '—'}
                         </span>
-                        <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div className="h-2 w-20 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
                           <div
                             className="h-full rounded-full bg-blue-600 dark:bg-blue-400"
                             style={{
@@ -871,8 +854,6 @@ function getSortValue(
   resolveStatus?: StatusResolver
 ): string | number {
   switch (key) {
-    case 'companyName':
-      return account.companyName;
     case 'accountId':
       return account.accountId;
     case 'accountName':

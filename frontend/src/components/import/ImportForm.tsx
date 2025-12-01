@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Upload, X, Download } from 'lucide-react';
 import Select from '../ui/Select';
 import MultiSelect from '../ui/MultiSelect';
 import { useOrganizationStore } from '../../store/organizationStore';
+import { useClientEntityStore } from '../../store/clientEntityStore';
 import {
   parseTrialBalanceWorkbook,
   ParsedUpload,
@@ -14,15 +15,21 @@ import {
   getClientTemplateMapping,
   ClientTemplateConfig,
 } from '../../utils/getClientTemplateMapping';
+import {
+  fetchClientHeaderMappings,
+  saveClientHeaderMappings,
+} from '../../utils/clientHeaderMappings';
+import type { ClientHeaderMapping } from '../../utils/clientHeaderMappings';
 import PreviewTable from './PreviewTable';
-import type { TrialBalanceRow } from '../../types';
+import type { ClientEntity, ImportSheet, TrialBalanceRow } from '../../types';
 import { normalizeGlMonth, isValidNormalizedMonth } from '../../utils/extractDateFromText';
+import { detectLikelyEntities } from '../../utils/detectClientEntities';
 
 const templateHeaders = [
   'GL ID',
   'Account Description',
   'Net Change',
-  'Company',
+  'Entity',
   'User Defined 1',
   'User Defined 2',
   'User Defined 3',
@@ -79,11 +86,13 @@ interface ImportFormProps {
   onImport: (
     uploads: TrialBalanceRow[],
     clientId: string,
-    companyIds: string[],
+    entitySelections: ClientEntity[],
     headerMap: Record<string, string | null>,
     glMonths: string[],
     fileName: string,
-    file: File
+    file: File,
+    sheetSelections: ImportSheet[],
+    selectedSheetUploads: ParsedUpload[],
   ) => void | Promise<void>;
   isImporting: boolean;
 }
@@ -92,7 +101,11 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const companies = useOrganizationStore((state) => state.companies);
   const isLoadingClients = useOrganizationStore((state) => state.isLoading);
-  const [companyIds, setCompanyIds] = useState<string[]>([]);
+  const fetchClientEntities = useClientEntityStore((state) => state.fetchForClient);
+  const entityStoreError = useClientEntityStore((state) => state.error);
+  const isLoadingEntities = useClientEntityStore((state) => state.isLoading);
+  const entitiesByClient = useClientEntityStore((state) => state.entitiesByClient);
+  const [entityIds, setEntityIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploads, setUploads] = useState<ParsedUpload[]>([]);
@@ -101,8 +114,25 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     string,
     string | null
   > | null>(null);
+  const [savedHeaderMappings, setSavedHeaderMappings] = useState<
+    Record<string, string>
+  >({});
+  const [isLoadingHeaderMappings, setIsLoadingHeaderMappings] = useState(false);
+  const [headerMappingError, setHeaderMappingError] = useState<string | null>(null);
   const [combinedRows, setCombinedRows] = useState<TrialBalanceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [hasManualEntitySelection, setHasManualEntitySelection] = useState(false);
+
+  const toHeaderMappingRecord = useCallback(
+    (items: ClientHeaderMapping[]): Record<string, string> =>
+      items.reduce((acc, mapping) => {
+        if (templateHeaders.includes(mapping.templateHeader) && mapping.sourceHeader) {
+          acc[mapping.templateHeader] = mapping.sourceHeader;
+        }
+        return acc;
+      }, {} as Record<string, string>),
+    []
+  );
 
   const previewSampleRows = useMemo(() => {
     if (uploads.length === 0 || selectedSheets.length === 0) return [] as Record<string, unknown>[];
@@ -143,18 +173,29 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
   const singleClientId = clientOptions.length === 1 ? clientOptions[0].id : null;
 
-  const companyOptions = useMemo(() => {
+  const entityOptions = useMemo(() => {
     if (!clientId) return [];
-    return companies.filter((company) =>
-      company.clients.some((c) => c.id === clientId)
-    );
-  }, [clientId, companies]);
+    return entitiesByClient[clientId] ?? [];
+  }, [clientId, entitiesByClient]);
+
+  const singleEntity = entityOptions.length === 1 ? entityOptions[0] : null;
 
   useEffect(() => {
-    if (companies.length === 1) {
-      setCompanyIds([companies[0].id]);
+    if (clientId) {
+      fetchClientEntities(clientId);
     }
-  }, [companies]);
+  }, [clientId, fetchClientEntities]);
+
+  useEffect(() => {
+    setEntityIds([]);
+    setHasManualEntitySelection(false);
+  }, [clientId]);
+
+  useEffect(() => {
+    if (singleEntity && !hasManualEntitySelection) {
+      setEntityIds([singleEntity.id]);
+    }
+  }, [singleEntity, hasManualEntitySelection]);
 
   useEffect(() => {
     if (singleClientId) {
@@ -163,13 +204,52 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [singleClientId]);
 
   useEffect(() => {
-    const available = companyOptions.map((company) => company.id);
-    if (available.length === 1) {
-      setCompanyIds([available[0]]);
-    } else {
-      setCompanyIds([]);
+    if (!clientId) {
+      setSavedHeaderMappings({});
+      return;
     }
-  }, [clientId, companyOptions]);
+
+    const loadMappings = async () => {
+      setIsLoadingHeaderMappings(true);
+      setHeaderMappingError(null);
+      try {
+        const stored = await fetchClientHeaderMappings(clientId);
+        setSavedHeaderMappings(toHeaderMappingRecord(stored));
+      } catch (err) {
+        setHeaderMappingError(
+          'Unable to load saved header mappings. You can still continue with manual matching.'
+        );
+        setSavedHeaderMappings({});
+      } finally {
+        setIsLoadingHeaderMappings(false);
+      }
+    };
+
+    void loadMappings();
+  }, [clientId, toHeaderMappingRecord]);
+
+  useEffect(() => {
+    if (!hasManualEntitySelection && entityOptions.length > 0 && uploads.length > 0) {
+      const detected = detectLikelyEntities({
+        uploads,
+        selectedSheetIndexes: selectedSheets,
+        entities: entityOptions,
+        combinedRows,
+        fileName: selectedFile?.name,
+      });
+
+      if (detected.length > 0) {
+        setEntityIds(detected);
+      }
+    }
+  }, [
+    combinedRows,
+    entityOptions,
+    hasManualEntitySelection,
+    selectedFile?.name,
+    selectedSheets,
+    uploads,
+  ]);
 
   useEffect(() => {
     if (uploads.length > 0 && selectedSheets.length === 0) {
@@ -177,6 +257,24 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setSelectedSheets([0]);
     }
   }, [uploads, selectedSheets.length]);
+
+  const persistHeaderMappings = useCallback(
+    async (map: Record<string, string | null>) => {
+      if (!clientId) {
+        return;
+      }
+
+      const hasExistingMappings = Object.keys(savedHeaderMappings).length > 0;
+      const saved = await saveClientHeaderMappings(
+        clientId,
+        map,
+        hasExistingMappings
+      );
+      setSavedHeaderMappings(toHeaderMappingRecord(saved));
+      setHeaderMappingError(null);
+    },
+    [clientId, savedHeaderMappings, toHeaderMappingRecord]
+  );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -191,8 +289,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
   const processFile = async (file: File) => {
     try {
-      if (!clientId || companyIds.length === 0) {
-        setError('Please select a client and company before uploading.');
+      if (!clientId) {
+        setError('Please select a client before uploading.');
         setSelectedFile(null);
         setSelectedSheets([]);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -211,19 +309,22 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setSelectedSheets([]);  // Will be auto-set by useEffect
       setSelectedFile(file);
       setHeaderMap(null);
+      setHeaderMappingError(null);
       setCombinedRows([]);
       setError(null);
+      setHasManualEntitySelection(false);
     } catch (err) {
       setError((err as Error).message);
       setUploads([]);
       setSelectedSheets([]);
       setSelectedFile(null);
       setHeaderMap(null);
+      setHeaderMappingError(null);
       setCombinedRows([]);
     }
   };
 
-  const handleColumnMatch = (map: Record<string, string | null>) => {
+  const handleColumnMatch = async (map: Record<string, string | null>) => {
     setHeaderMap(map);
 
     const keyMap = Object.entries(map).reduce(
@@ -266,8 +367,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             return null;
           }
 
-          const entityValue = keyMap['Company']
-            ? row[keyMap['Company']]
+          const entityValue = keyMap['Entity']
+            ? row[keyMap['Entity']]
             : '';
           const netChangeValue = keyMap['Net Change']
             ? row[keyMap['Net Change']]
@@ -300,6 +401,21 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     });
 
     setCombinedRows(combined);
+
+    if (clientId) {
+      try {
+        await persistHeaderMappings(map);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Failed to save header mappings for future imports.';
+        setHeaderMappingError(message);
+        throw err instanceof Error
+          ? err
+          : new Error('Failed to save header mappings for future imports.');
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -307,20 +423,44 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     if (
       selectedFile &&
       clientId &&
-      companyIds.length > 0 &&
+      entityIds.length > 0 &&
       combinedRows.length > 0 &&
       headerMap
     ) {
       const glMonths = extractGlMonthsFromRows(combinedRows);
+      const selectedEntities = entityOptions.filter((entity) =>
+        entityIds.includes(entity.id)
+      );
+
+      const sheetSelections: ImportSheet[] = selectedSheets.map((sheetIdx) => {
+        const sheetUpload = uploads[sheetIdx];
+        const trimmedGlMonth = sheetUpload.metadata.glMonth?.trim();
+        const inferredMonth =
+          trimmedGlMonth && trimmedGlMonth.length > 0
+            ? trimmedGlMonth
+            : sheetUpload.metadata.sheetNameDate || undefined;
+
+        return {
+          sheetName: sheetUpload.sheetName,
+          glMonth: inferredMonth,
+          rowCount: sheetUpload.rows.length,
+          isSelected: true,
+          firstDataRowIndex: sheetUpload.firstDataRowIndex,
+        };
+      });
 
       await onImport(
         combinedRows,
         clientId,
-        companyIds,
+        selectedEntities,
         headerMap,
         glMonths,
         selectedFile.name,
-        selectedFile
+        selectedFile,
+        sheetSelections,
+        selectedSheets
+          .map((sheetIdx) => uploads[sheetIdx])
+          .filter((upload): upload is ParsedUpload => Boolean(upload))
       );
     } else {
       setError(
@@ -344,41 +484,49 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-          {clientOptions.length > 1 && (
-            <Select
-              label="Client"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              required
-              disabled={clientOptions.length === 0 || isLoadingClients}
-            >
-              <option value="">Select a client</option>
-              {clientOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          )}
+      {clientOptions.length > 1 && (
+        <Select
+          label="Client"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          required
+          disabled={clientOptions.length === 0 || isLoadingClients}
+        >
+          <option value="">Select a client</option>
+          {clientOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
+      )}
 
-          {!isLoadingClients && clientOptions.length === 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              No clients are currently linked to your account. Please contact an
-              administrator to request access.
-            </div>
-          )}
+      {!isLoadingClients && clientOptions.length === 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          No clients are currently linked to your account. Please contact an
+          administrator to request access.
+        </div>
+      )}
+
+      {entityStoreError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {entityStoreError}
+        </div>
+      )}
 
       <MultiSelect
-        label="Company"
-        options={companyOptions.map((company) => ({
-          value: company.id,
-          label: company.name,
+        label="Entity"
+        options={entityOptions.map((entity) => ({
+          value: entity.id,
+          label: entity.displayName ?? entity.name,
         }))}
-        value={companyIds}
-        onChange={setCompanyIds}
-        disabled={!clientId || isLoadingClients}
+        value={entityIds}
+        onChange={(values) => {
+          setHasManualEntitySelection(true);
+          setEntityIds(values);
+        }}
+        disabled={!clientId || isLoadingClients || isLoadingEntities}
       />
-
 
       <div
         className="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg"
@@ -391,15 +539,16 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               <span className="text-sm text-gray-900">{selectedFile.name}</span>
               <button
                 type="button"
-              onClick={() => {
-                setSelectedFile(null);
-                setUploads([]);
-                setSelectedSheets([]);
-                setHeaderMap(null);
-                setCombinedRows([]);
-                setClientId(singleClientId ?? '');
-                setCompanyIds([]);
-              }}
+                onClick={() => {
+                  setSelectedFile(null);
+                  setUploads([]);
+                  setSelectedSheets([]);
+                  setHeaderMap(null);
+                  setCombinedRows([]);
+                  setClientId(singleClientId ?? '');
+                  setEntityIds([]);
+                  setHasManualEntitySelection(false);
+                }}
                 className="text-gray-500 hover:text-red-500"
               >
                 <X className="h-5 w-5" />
@@ -451,11 +600,23 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       {uploads.length > 0 && selectedSheets.length > 0 && !headerMap && (
         <div className="space-y-6">
           <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <ColumnMatcher
-              sourceHeaders={uploads[selectedSheets[0]].headers}
-              destinationHeaders={templateHeaders}
-              onComplete={handleColumnMatch}
-            />
+            <div className="space-y-3">
+              <ColumnMatcher
+                sourceHeaders={uploads[selectedSheets[0]].headers}
+                destinationHeaders={templateHeaders}
+                initialAssignments={savedHeaderMappings}
+                onComplete={handleColumnMatch}
+              />
+              {(isLoadingHeaderMappings || headerMappingError) && (
+                <p
+                  className={`text-sm ${
+                    headerMappingError ? 'text-amber-700' : 'text-gray-500'
+                  }`}
+                >
+                  {headerMappingError ?? 'Loading saved header preferences…'}
+                </p>
+              )}
+            </div>
 
             <div className="flex flex-col">
               <PreviewTable
@@ -511,7 +672,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             disabled={
               !selectedFile ||
               !clientId ||
-              companyIds.length === 0 ||
+              entityIds.length === 0 ||
               isImporting ||
               uploads.length === 0 ||
               selectedSheets.length === 0 ||

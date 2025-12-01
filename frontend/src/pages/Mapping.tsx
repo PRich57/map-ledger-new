@@ -5,13 +5,19 @@ import StepTabs, { MappingStep } from '../components/mapping/StepTabs';
 import SummaryCards from '../components/mapping/SummaryCards';
 import MappingTable from '../components/mapping/MappingTable';
 import DistributionTable from '../components/mapping/DistributionTable';
+import ReconcilePane from '../components/mapping/ReconcilePane';
 import ReviewPane from '../components/mapping/ReviewPane';
 import MappingMonthHelper from '../components/mapping/MappingMonthHelper';
-import { useMappingStore } from '../store/mappingStore';
+import EntityTabs from '../components/mapping/EntityTabs';
+import {
+  selectActiveEntityId,
+  selectAvailableEntities,
+  useMappingStore,
+} from '../store/mappingStore';
 import scrollPageToTop from '../utils/scroll';
 
 const stepParam = (value: string | null): MappingStep => {
-  if (value === 'distribution' || value === 'review') {
+  if (value === 'reconcile' || value === 'distribution' || value === 'review') {
     return value;
   }
   return 'mapping';
@@ -21,13 +27,54 @@ export default function Mapping() {
   const { uploadId = 'demo' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeClientId = useMappingStore(state => state.activeClientId);
+  const activeUploadId = useMappingStore(state => state.activeUploadId);
+  const activeEntityId = useMappingStore(selectActiveEntityId);
   const activeStep = useMemo(() => stepParam(searchParams.get('stage')), [searchParams]);
+  const setActiveEntityId = useMappingStore(state => state.setActiveEntityId);
+  const availableEntities = useMappingStore(selectAvailableEntities);
+  const fetchFileRecords = useMappingStore(state => state.fetchFileRecords);
+  const normalizedEntityParam = useMemo(() => {
+    const param = searchParams.get('entityId');
+    if (!param) {
+      return null;
+    }
+    const trimmed = param.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }, [searchParams]);
 
   useEffect(() => {
     if (activeStep === 'mapping') {
       scrollPageToTop({ behavior: 'auto' });
     }
   }, [activeStep]);
+
+  useEffect(() => {
+    if (uploadId && uploadId !== activeUploadId) {
+      fetchFileRecords(uploadId);
+    }
+  }, [activeUploadId, fetchFileRecords, uploadId]);
+
+  useEffect(() => {
+    if (normalizedEntityParam !== activeEntityId) {
+      setActiveEntityId(normalizedEntityParam);
+    }
+  }, [activeEntityId, normalizedEntityParam, setActiveEntityId]);
+
+  useEffect(() => {
+    const currentEntityParam = searchParams.get('entityId');
+    const normalizedCurrent = currentEntityParam?.trim() ?? null;
+    if (normalizedCurrent === activeEntityId) {
+      return;
+    }
+
+    const next = new URLSearchParams(searchParams);
+    if (activeEntityId) {
+      next.set('entityId', activeEntityId);
+    } else {
+      next.delete('entityId');
+    }
+    setSearchParams(next, { replace: true });
+  }, [activeEntityId, searchParams, setSearchParams]);
 
   const updateStage = useCallback(
     (step: MappingStep) => {
@@ -45,17 +92,37 @@ export default function Mapping() {
     updateStage(step);
   };
 
+  const handleEntityChange = useCallback(
+    (entityId: string | null) => {
+      const next = new URLSearchParams(searchParams);
+      if (entityId) {
+        next.set('entityId', entityId);
+      } else {
+        next.delete('entityId');
+      }
+      setSearchParams(next, { replace: true });
+      setActiveEntityId(entityId);
+    },
+    [searchParams, setActiveEntityId, setSearchParams],
+  );
+
   return (
     <div data-testid="mapping-page" className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <MappingHeader clientId={activeClientId ?? undefined} glUploadId={uploadId} />
+      <EntityTabs
+        entities={availableEntities}
+        activeEntityId={activeEntityId}
+        onSelect={handleEntityChange}
+      />
       <SummaryCards />
       {activeStep === 'mapping' && <MappingMonthHelper />}
       <StepTabs activeStep={activeStep} onStepChange={handleStepChange} />
       <section
         aria-label="Mapping workspace content"
-        className="w-full rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+        className="w-full rounded-t-none rounded-b-lg border border-gray-200 border-t-0 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       >
         {activeStep === 'mapping' && <MappingTable />}
+        {activeStep === 'reconcile' && <ReconcilePane />}
         {activeStep === 'distribution' && <DistributionTable />}
         {activeStep === 'review' && <ReviewPane />}
       </section>
