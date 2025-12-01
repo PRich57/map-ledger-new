@@ -26,9 +26,9 @@ const toOptionalString = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const validateRecord = (payload: unknown): NewClientFileRecord | null => {
+const validateRecord = (payload: unknown): { record: NewClientFileRecord | null; errors: string[] } => {
   if (!payload || typeof payload !== 'object') {
-    return null;
+    return { record: null, errors: ['Payload is not an object'] };
   }
 
   const bag = payload as Record<string, unknown>;
@@ -38,22 +38,34 @@ const validateRecord = (payload: unknown): NewClientFileRecord | null => {
   const fileStorageUri = toOptionalString(bag.fileStorageUri);
   const fileStatus = toOptionalString(bag.fileStatus ?? bag.status);
 
-  if (!clientId || !sourceFileName || !fileStorageUri || !fileStatus) {
-    return null;
+  const missingFields = [
+    !clientId ? 'clientId is required' : null,
+    !sourceFileName ? 'sourceFileName is required' : null,
+    !fileStorageUri ? 'fileStorageUri is required' : null,
+    !fileStatus ? 'fileStatus is required' : null,
+  ].filter(Boolean) as string[];
+
+  if (missingFields.length > 0) {
+    return { record: null, errors: missingFields };
   }
 
+  const requiredClientId = clientId as string;
+  const requiredSourceFileName = sourceFileName as string;
+  const requiredFileStorageUri = fileStorageUri as string;
+  const requiredFileStatus = fileStatus as string;
+
   const baseRecord: NewClientFileRecord = {
-    clientId,
+    clientId: requiredClientId,
     userId: toOptionalString(bag.userId),
     uploadedBy: toOptionalString(bag.uploadedBy ?? bag.importedBy),
-    sourceFileName,
-    fileStorageUri,
+    sourceFileName: requiredSourceFileName,
+    fileStorageUri: requiredFileStorageUri,
     fileSize:
       typeof bag.fileSize === 'number' && Number.isFinite(bag.fileSize)
         ? bag.fileSize
         : undefined,
     fileType: toOptionalString(bag.fileType),
-    status: fileStatus,
+    status: requiredFileStatus,
     glPeriodStart: toOptionalString(bag.glPeriodStart ?? bag.period),
     glPeriodEnd: toOptionalString(bag.glPeriodEnd ?? bag.period),
     rowCount:
@@ -141,7 +153,7 @@ const validateRecord = (payload: unknown): NewClientFileRecord | null => {
       );
   }
 
-  return baseRecord;
+  return { record: baseRecord, errors: [] };
 };
 
 export const listClientFilesHandler = async (
@@ -169,11 +181,23 @@ export const saveClientFileHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const parsed = await readJson(request);
-    const record = validateRecord(parsed);
+    const { record, errors } = validateRecord(parsed);
 
     if (!record) {
-      return json({ message: 'Invalid client file payload' }, 400);
+      context.warn('Invalid client file payload', {
+        errors,
+        payloadPreview: parsed,
+      });
+      return json({ message: 'Invalid client file payload', errors }, 400);
     }
+
+    context.info('Persisting client file metadata', {
+      clientId: record.clientId,
+      sourceFileName: record.sourceFileName,
+      fileStatus: record.status,
+      sheetCount: record.sheets?.length ?? 0,
+      entityCount: record.entities?.length ?? 0,
+    });
 
     const saved = await saveClientFileMetadata(record);
 
