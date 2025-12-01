@@ -32,7 +32,7 @@ interface IngestSheet {
 }
 
 interface IngestPayload {
-  fileUploadId: string;
+  fileUploadId: number;
   clientId?: string;
   fileName?: string;
   headerMap: HeaderMap;
@@ -252,13 +252,14 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
   }
 
   const payload = body as Record<string, unknown>;
-  const fileUploadId = getFirstStringValue(payload.fileUploadId);
+  const fileUploadIdRaw = getFirstStringValue(payload.fileUploadId);
+  const fileUploadId = fileUploadIdRaw ? Number(fileUploadIdRaw) : NaN;
   const headerMap = payload.headerMap as HeaderMap;
   const sheets = Array.isArray(payload.sheets)
     ? (payload.sheets as unknown[]).filter(Boolean)
     : [];
 
-  if (!fileUploadId || !headerMap || typeof headerMap !== 'object' || sheets.length === 0) {
+  if (!Number.isFinite(fileUploadId) || !headerMap || typeof headerMap !== 'object' || sheets.length === 0) {
     return null;
   }
 
@@ -393,8 +394,9 @@ export const listFileRecordsHandler = async (
   context: InvocationContext,
 ): Promise<HttpResponseInit> => {
   try {
-    const fileUploadId = getFirstStringValue(request.query.get('fileUploadId'));
-    if (!fileUploadId) {
+    const fileUploadIdParam = getFirstStringValue(request.query.get('fileUploadId'));
+    const fileUploadId = fileUploadIdParam ? Number(fileUploadIdParam) : NaN;
+    if (!Number.isFinite(fileUploadId)) {
       return json({ message: 'Missing fileUploadId query parameter' }, 400);
     }
 

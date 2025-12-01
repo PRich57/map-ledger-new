@@ -18,13 +18,13 @@ export interface FileRecordInput {
 
 export interface FileRecordRow extends FileRecordInput {
   recordId: number;
-  fileUploadId: string;
+  fileUploadId: number;
 }
 
 const TABLE_NAME = 'ml.FILE_RECORDS';
 
 export const insertFileRecords = async (
-  fileUploadId: string,
+  fileUploadId: number,
   records: FileRecordInput[],
 ): Promise<FileRecordRow[]> => {
   if (!fileUploadId || records.length === 0) {
@@ -88,14 +88,14 @@ export const insertFileRecords = async (
 };
 
 export const listFileRecords = async (
-  fileUploadId: string,
+  fileUploadId: number,
 ): Promise<FileRecordRow[]> => {
   if (!fileUploadId) {
     return [];
   }
 
   const result = await runQuery<{
-    file_upload_id: string;
+    file_upload_id: number;
     record_id: number;
     source_sheet_name?: string | null;
     entity_id?: string | null;
