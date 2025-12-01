@@ -193,11 +193,19 @@ const deriveRecordsFromSheet = (
     headerLookup.get('amount') ||
     null;
   const entityHeader = headerLookup.get('entity') ?? headerLookup.get('entityname') ?? null;
+  const userDefined1Header = headerLookup.get('userdefined1') ?? null;
+  const userDefined2Header = headerLookup.get('userdefined2') ?? null;
+  const userDefined3Header = headerLookup.get('userdefined3') ?? null;
 
   const firstRowIndex =
     typeof sheet.firstDataRowIndex === 'number' && Number.isFinite(sheet.firstDataRowIndex)
       ? sheet.firstDataRowIndex
       : 1;
+
+  const getOptionalText = (value: unknown): string | null => {
+    const normalized = normalizeText(value);
+    return normalized ? normalized : null;
+  };
 
   return sheet.rows
     .map((row, index) => {
@@ -212,7 +220,12 @@ const deriveRecordsFromSheet = (
 
       const entityValue = normalizeText(getValueFromRow(row, entityHeader));
       const matchedEntity = matchEntity(entityValue, entities);
+      const normalizedEntityId = matchedEntity?.id || undefined;
       const normalizedEntityName = matchedEntity?.name || entityValue || undefined;
+
+      const userDefined1 = getOptionalText(getValueFromRow(row, userDefined1Header));
+      const userDefined2 = getOptionalText(getValueFromRow(row, userDefined2Header));
+      const userDefined3 = getOptionalText(getValueFromRow(row, userDefined3Header));
 
       const glMonth = detectGlMonth(row, sheet, fileName);
 
@@ -220,10 +233,14 @@ const deriveRecordsFromSheet = (
         accountId,
         accountName,
         activityAmount,
+        entityId: normalizedEntityId,
         entityName: normalizedEntityName,
         glMonth,
         sourceSheet: sheet.sheetName,
         sourceRowNumber: firstRowIndex + index,
+        userDefined1,
+        userDefined2,
+        userDefined3,
       } as FileRecordInput;
     })
     .filter((record): record is FileRecordInput => record !== null);
