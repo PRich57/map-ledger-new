@@ -60,10 +60,34 @@ const ensureTable = async () => {
         TEMPLATE_HEADER NVARCHAR(100) NOT NULL,
         MAPPING_METHOD NVARCHAR(100) NOT NULL,
         INSERTED_DTTM DATETIME2 NOT NULL CONSTRAINT DF_CLIENT_HEADER_MAPPING_INSERTED DEFAULT SYSUTCDATETIME(),
-        UPDATED_DTTM DATETIME2 NOT NULL CONSTRAINT DF_CLIENT_HEADER_MAPPING_UPDATED DEFAULT SYSUTCDATETIME(),
+        UPDATED_DTTM DATETIME2 NULL,
         UPDATED_BY NVARCHAR(100) NULL,
         CONSTRAINT UX_CLIENT_HEADER_MAPPING UNIQUE (CLIENT_ID, TEMPLATE_HEADER)
       );
+    END
+    ELSE
+    BEGIN
+      DECLARE @UpdatedDttmConstraint NVARCHAR(200);
+      SELECT @UpdatedDttmConstraint = dc.name
+      FROM sys.default_constraints dc
+      INNER JOIN sys.columns c ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id
+      WHERE dc.parent_object_id = OBJECT_ID('${TABLE_NAME}') AND c.name = 'UPDATED_DTTM';
+
+      IF @UpdatedDttmConstraint IS NOT NULL
+      BEGIN
+        EXEC('ALTER TABLE ${TABLE_NAME} DROP CONSTRAINT ' + QUOTENAME(@UpdatedDttmConstraint));
+      END
+
+      IF EXISTS (
+        SELECT 1
+        FROM sys.columns
+        WHERE object_id = OBJECT_ID('${TABLE_NAME}')
+          AND name = 'UPDATED_DTTM'
+          AND is_nullable = 0
+      )
+      BEGIN
+        ALTER TABLE ${TABLE_NAME} ALTER COLUMN UPDATED_DTTM DATETIME2 NULL;
+      END
     END`
   );
 
@@ -86,7 +110,7 @@ const normalizeMappings = (
     const normalizedTemplate = normalizeHeader(templateHeader);
     const normalizedSource = normalizeHeader(sourceHeader ?? null);
     const normalizedMethod = normalizeHeader(mappingMethod ?? 'manual') ?? 'manual';
-    const normalizedUpdatedBy = normalizeHeader(updatedBy ?? 'system');
+    const normalizedUpdatedBy = normalizeHeader(updatedBy ?? null);
 
     if (!normalizedTemplate) {
       return;
@@ -208,12 +232,16 @@ export const upsertClientHeaderMappings = async (
       const templateKey = `templateHeader${index}`;
       const sourceKey = `sourceHeader${index}`;
       const methodKey = `mappingMethod${index}`;
-      const updatedByKey = `updatedBy${index}`;
       params[templateKey] = mapping.templateHeader;
       params[sourceKey] = mapping.sourceHeader;
       params[methodKey] = mapping.mappingMethod;
-      params[updatedByKey] = mapping.updatedBy;
-      return `(@clientId, @${templateKey}, @${sourceKey}, @${methodKey}, @${updatedByKey})`;
+      if (mapping.updatedBy !== null) {
+        const updatedByKey = `updatedBy${index}`;
+        params[updatedByKey] = mapping.updatedBy;
+        return `(@clientId, @${templateKey}, @${sourceKey}, @${methodKey}, @${updatedByKey})`;
+      }
+
+      return `(@clientId, @${templateKey}, @${sourceKey}, @${methodKey}, NULL)`;
     })
     .join(', ');
 
@@ -233,18 +261,14 @@ export const upsertClientHeaderMappings = async (
         TEMPLATE_HEADER,
         SOURCE_HEADER,
         MAPPING_METHOD,
-        INSERTED_DTTM,
-        UPDATED_DTTM,
-        UPDATED_BY
+        INSERTED_DTTM
       )
       VALUES (
         source.CLIENT_ID,
         source.TEMPLATE_HEADER,
         source.SOURCE_HEADER,
         source.MAPPING_METHOD,
-        SYSUTCDATETIME(),
-        SYSUTCDATETIME(),
-        source.UPDATED_BY
+        SYSUTCDATETIME()
       );`,
     params
   );
@@ -294,7 +318,6 @@ export const replaceClientHeaderMappings = async (
     if (mapping.sourceHeader !== null) {
       params[`sourceHeader${index}`] = mapping.sourceHeader;
       params[`mappingMethod${index}`] = mapping.mappingMethod;
-      params[`updatedBy${index}`] = mapping.updatedBy;
     }
   });
 
@@ -316,7 +339,7 @@ export const replaceClientHeaderMappings = async (
     const valuesClause = inserts
       .map(
         ({ index }) =>
-          `(@clientId, @templateHeader${index}, @sourceHeader${index}, @mappingMethod${index}, SYSUTCDATETIME(), SYSUTCDATETIME(), @updatedBy${index})`
+          `(@clientId, @templateHeader${index}, @sourceHeader${index}, @mappingMethod${index}, SYSUTCDATETIME())`
       )
       .join(', ');
 
@@ -326,9 +349,7 @@ export const replaceClientHeaderMappings = async (
         TEMPLATE_HEADER,
         SOURCE_HEADER,
         MAPPING_METHOD,
-        INSERTED_DTTM,
-        UPDATED_DTTM,
-        UPDATED_BY
+        INSERTED_DTTM
       )
       VALUES ${valuesClause}`,
       params
