@@ -246,9 +246,9 @@ const deriveRecordsFromSheet = (
     .filter((record): record is FileRecordInput => record !== null);
 };
 
-const normalizePayload = (body: unknown): IngestPayload | null => {
+const normalizePayload = (body: unknown): { payload: IngestPayload | null; errors: string[] } => {
   if (!body || typeof body !== 'object') {
-    return null;
+    return { payload: null, errors: ['Payload is not an object'] };
   }
 
   const payload = body as Record<string, unknown>;
@@ -259,8 +259,22 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
     ? (payload.sheets as unknown[]).filter(Boolean)
     : [];
 
-  if (!Number.isFinite(fileUploadId) || !headerMap || typeof headerMap !== 'object' || sheets.length === 0) {
-    return null;
+  const errors: string[] = [];
+
+  if (!Number.isFinite(fileUploadId)) {
+    errors.push('fileUploadId must be a finite number');
+  }
+
+  if (!headerMap || typeof headerMap !== 'object') {
+    errors.push('headerMap is required');
+  }
+
+  if (sheets.length === 0) {
+    errors.push('at least one sheet is required');
+  }
+
+  if (errors.length > 0) {
+    return { payload: null, errors };
   }
 
   const normalizedSheets: IngestSheet[] = sheets
@@ -302,7 +316,7 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
     .filter((sheet): sheet is IngestSheet => !!sheet && sheet.sheetName.length > 0);
 
   if (normalizedSheets.length === 0) {
-    return null;
+    return { payload: null, errors: ['No sheets contained row data'] };
   }
 
   const normalizedEntities: IngestEntity[] = Array.isArray(payload.entities)
@@ -345,12 +359,15 @@ const normalizePayload = (body: unknown): IngestPayload | null => {
     : [];
 
   return {
-    fileUploadId,
-    clientId: getFirstStringValue(payload.clientId),
-    fileName: getFirstStringValue(payload.fileName),
-    headerMap,
-    sheets: normalizedSheets,
-    entities: normalizedEntities,
+    payload: {
+      fileUploadId,
+      clientId: getFirstStringValue(payload.clientId),
+      fileName: getFirstStringValue(payload.fileName),
+      headerMap,
+      sheets: normalizedSheets,
+      entities: normalizedEntities,
+    },
+    errors: [],
   };
 };
 
@@ -369,16 +386,28 @@ export const ingestFileRecordsHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const parsed = await readJson(request);
-    const payload = normalizePayload(parsed);
+    const { payload, errors } = normalizePayload(parsed);
 
     if (!payload) {
-      return json({ message: 'Invalid ingest payload' }, 400);
+      context.warn('Invalid ingest payload', { errors, payloadPreview: parsed });
+      return json({ message: 'Invalid ingest payload', errors }, 400);
     }
 
     const records = buildRecords(payload);
     if (records.length === 0) {
+      context.warn('No valid records found to ingest', {
+        fileUploadId: payload.fileUploadId,
+        sheetCount: payload.sheets.length,
+        headerMapKeys: Object.keys(payload.headerMap ?? {}),
+      });
       return json({ message: 'No valid records found to ingest' }, 400);
     }
+
+    context.info('Persisting file records', {
+      fileUploadId: payload.fileUploadId,
+      recordCount: records.length,
+      sheetCount: payload.sheets.length,
+    });
 
     const inserted = await insertFileRecords(payload.fileUploadId, records);
 

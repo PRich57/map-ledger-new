@@ -26,9 +26,9 @@ const toOptionalString = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const validateRecord = (payload: unknown): NewClientFileRecord | null => {
+const validateRecord = (payload: unknown): { record: NewClientFileRecord | null; errors: string[] } => {
   if (!payload || typeof payload !== 'object') {
-    return null;
+    return { record: null, errors: ['Payload is not an object'] };
   }
 
   const bag = payload as Record<string, unknown>;
@@ -38,8 +38,23 @@ const validateRecord = (payload: unknown): NewClientFileRecord | null => {
   const fileStorageUri = toOptionalString(bag.fileStorageUri);
   const fileStatus = toOptionalString(bag.fileStatus ?? bag.status);
 
-  if (!clientId || !sourceFileName || !fileStorageUri || !fileStatus) {
-    return null;
+  const errors: string[] = [];
+
+  if (!clientId) {
+    errors.push('clientId is required');
+  }
+  if (!sourceFileName) {
+    errors.push('sourceFileName is required');
+  }
+  if (!fileStorageUri) {
+    errors.push('fileStorageUri is required');
+  }
+  if (!fileStatus) {
+    errors.push('fileStatus is required');
+  }
+
+  if (errors.length > 0) {
+    return { record: null, errors };
   }
 
   const baseRecord: NewClientFileRecord = {
@@ -141,7 +156,7 @@ const validateRecord = (payload: unknown): NewClientFileRecord | null => {
       );
   }
 
-  return baseRecord;
+  return { record: baseRecord, errors: [] };
 };
 
 export const listClientFilesHandler = async (
@@ -169,11 +184,23 @@ export const saveClientFileHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const parsed = await readJson(request);
-    const record = validateRecord(parsed);
+    const { record, errors } = validateRecord(parsed);
 
     if (!record) {
-      return json({ message: 'Invalid client file payload' }, 400);
+      context.warn('Invalid client file payload', {
+        errors,
+        payloadPreview: parsed,
+      });
+      return json({ message: 'Invalid client file payload', errors }, 400);
     }
+
+    context.info('Persisting client file metadata', {
+      clientId: record.clientId,
+      sourceFileName: record.sourceFileName,
+      fileStatus: record.status,
+      sheetCount: record.sheets?.length ?? 0,
+      entityCount: record.entities?.length ?? 0,
+    });
 
     const saved = await saveClientFileMetadata(record);
 
