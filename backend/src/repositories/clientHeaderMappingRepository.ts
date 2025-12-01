@@ -20,6 +20,16 @@ export interface ClientHeaderMappingInput {
 
 const TABLE_NAME = 'ml.CLIENT_HEADER_MAPPING';
 let tableEnsured = false;
+const logPrefix = '[clientHeaderMappingRepository]';
+const shouldLog = process.env.NODE_ENV !== 'test';
+
+const logInfo = (...args: unknown[]) => {
+  if (!shouldLog) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.info(logPrefix, ...args);
+};
 
 const normalizeHeader = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
@@ -174,7 +184,16 @@ export const upsertClientHeaderMappings = async (
     (mapping) => mapping.sourceHeader !== null
   );
 
+  logInfo('Preparing to upsert client header mappings', {
+    clientId: normalizedClientId,
+    requestedMappings: mappings.length,
+    normalizedMappings: normalizedMappings.length,
+  });
+
   if (normalizedMappings.length === 0) {
+    logInfo('No normalized mappings to upsert; returning current mappings', {
+      clientId: normalizedClientId,
+    });
     return listClientHeaderMappings(normalizedClientId);
   }
 
@@ -230,6 +249,10 @@ export const upsertClientHeaderMappings = async (
     params
   );
 
+  logInfo('Upsert complete; fetching stored mappings', {
+    clientId: normalizedClientId,
+  });
+
   return listClientHeaderMappings(normalizedClientId);
 };
 
@@ -243,7 +266,15 @@ export const replaceClientHeaderMappings = async (
   }
 
   const normalizedMappings = normalizeMappings(mappings);
+  logInfo('Preparing to replace client header mappings', {
+    clientId: normalizedClientId,
+    requestedMappings: mappings.length,
+    normalizedMappings: normalizedMappings.length,
+  });
   if (normalizedMappings.length === 0) {
+    logInfo('No normalized mappings provided; returning current mappings', {
+      clientId: normalizedClientId,
+    });
     return listClientHeaderMappings(normalizedClientId);
   }
 
@@ -303,6 +334,10 @@ export const replaceClientHeaderMappings = async (
       params
     );
   }
+
+  logInfo('Replace complete; fetching stored mappings', {
+    clientId: normalizedClientId,
+  });
 
   return listClientHeaderMappings(normalizedClientId);
 };
