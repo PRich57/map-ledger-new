@@ -99,10 +99,18 @@ const normalizePayload = (
           ? mapping.mappingMethod
           : undefined;
 
+      const updatedBy =
+        typeof mapping.updatedBy === 'string'
+          ? mapping.updatedBy
+          : mapping.updatedBy === null
+            ? null
+            : undefined;
+
       return {
         templateHeader: mapping.templateHeader,
         ...(sourceHeader !== undefined ? { sourceHeader } : {}),
         ...(mappingMethod !== undefined ? { mappingMethod } : {}),
+        ...(updatedBy !== undefined ? { updatedBy } : {}),
       };
     })
     .filter((entry): entry is ClientHeaderMappingInput => entry !== null);
