@@ -38,6 +38,8 @@ export interface UserDatapointConfiguration
 
 const TABLE_NAME = 'MAPLEDGER_USER_DATAPOINTS';
 
+let ensureTablePromise: Promise<void> | null = null;
+
 const SELECT_COLUMNS = `
   ID AS id,
   USER_EMAIL AS user_email,
@@ -160,6 +162,16 @@ const parseJsonObject = (
   }
 };
 
+const ensureTableExists = async (): Promise<void> => {
+  if (!ensureTablePromise) {
+    ensureTablePromise = runQuery(
+      `IF OBJECT_ID('dbo.${TABLE_NAME}', 'U') IS NULL BEGIN SELECT 1 END;`
+    ).then(() => undefined);
+  }
+
+  return ensureTablePromise;
+};
+
 const mapRowToConfiguration = (
   row: RawDatapointConfigurationRow
 ): UserDatapointConfiguration => ({
@@ -190,6 +202,7 @@ export const listDatapointConfigurations = async (
   clientId?: string
 ): Promise<UserDatapointConfiguration[]> => {
   const normalizedEmail = normalizeEmail(email);
+  await ensureTableExists();
   const filters: string[] = ['USER_EMAIL = @email'];
   const parameters: Record<string, unknown> = { email: normalizedEmail };
 
@@ -215,6 +228,8 @@ export const createDatapointConfiguration = async (
 ): Promise<UserDatapointConfiguration> => {
   const id = crypto.randomUUID();
   const normalizedEmail = normalizeEmail(input.userEmail);
+
+  await ensureTableExists();
 
   await runQuery(
     `INSERT INTO dbo.${TABLE_NAME} (
@@ -287,6 +302,7 @@ export const updateDatapointConfiguration = async (
   input: DatapointConfigurationUpdate
 ): Promise<UserDatapointConfiguration> => {
   const normalizedEmail = normalizeEmail(input.userEmail);
+  await ensureTableExists();
   const result = await runQuery(
     `UPDATE dbo.${TABLE_NAME}
     SET
@@ -345,6 +361,7 @@ export const updateDatapointConfiguration = async (
 export const getDatapointConfigurationById = async (
   id: string
 ): Promise<UserDatapointConfiguration> => {
+  await ensureTableExists();
   const { recordset = [] } = await runQuery<RawDatapointConfigurationRow>(
     `SELECT ${SELECT_COLUMNS}
      FROM dbo.${TABLE_NAME}
@@ -357,4 +374,8 @@ export const getDatapointConfigurationById = async (
   }
 
   return mapRowToConfiguration(recordset[0]);
+};
+
+export const __resetDatapointConfigurationRepositoryForTests = (): void => {
+  ensureTablePromise = null;
 };
