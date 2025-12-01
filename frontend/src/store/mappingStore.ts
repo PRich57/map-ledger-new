@@ -486,7 +486,7 @@ export const buildReconciliationGroups = (
       glAccountId: account.accountId,
       glAccountName: account.accountName,
       entityName: account.entityName,
-      entityName: account.entityName,
+      companyName: account.entityName,
     } satisfies Omit<ReconciliationSourceMapping, 'amount'>;
 
     if (account.mappingType === 'direct') {
