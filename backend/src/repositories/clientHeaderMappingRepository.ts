@@ -42,7 +42,7 @@ const normalizeHeader = (value?: string | null): string | null => {
 type NormalizedMapping = {
   templateHeader: string;
   sourceHeader: string | null;
-  mappingMethod: string;
+  mappingMethod: string | null;
   updatedBy: string | null;
 };
 
@@ -54,7 +54,7 @@ const normalizeMappings = (
   mappings.forEach(({ templateHeader, sourceHeader, mappingMethod, updatedBy }) => {
     const normalizedTemplate = normalizeHeader(templateHeader);
     const normalizedSource = normalizeHeader(sourceHeader ?? null);
-    const normalizedMethod = normalizeHeader(mappingMethod ?? 'manual') ?? 'manual';
+    const normalizedMethod = normalizeHeader(mappingMethod ?? null);
     const normalizedUpdatedBy = normalizeHeader(updatedBy ?? null);
 
     if (!normalizedTemplate) {
@@ -149,12 +149,6 @@ export const upsertClientHeaderMappings = async (
 
   const normalizedMappings = normalizeMappings(mappings);
 
-  logInfo('Preparing to upsert client header mappings', {
-    clientId: normalizedClientId,
-    requestedMappings: mappings.length,
-    normalizedMappings: normalizedMappings.length,
-  });
-
   if (normalizedMappings.length === 0) {
     logInfo('No normalized mappings to upsert; returning current mappings', {
       clientId: normalizedClientId,
@@ -162,11 +156,36 @@ export const upsertClientHeaderMappings = async (
     return listClientHeaderMappings(normalizedClientId);
   }
 
+  const existingMappings = await listClientHeaderMappings(normalizedClientId);
+  const existingByTemplate = new Map(
+    existingMappings.map((mapping) => [mapping.templateHeader, mapping])
+  );
+
+  logInfo('Preparing to upsert client header mappings', {
+    clientId: normalizedClientId,
+    requestedMappings: mappings.length,
+    normalizedMappings: normalizedMappings.length,
+  });
+
+  const resolvedMappings = normalizedMappings.map((mapping) => {
+    const existing = existingByTemplate.get(mapping.templateHeader);
+    const resolvedMethod =
+      mapping.mappingMethod ??
+      (existing && existing.sourceHeader === mapping.sourceHeader
+        ? existing.mappingMethod
+        : 'manual');
+
+    return {
+      ...mapping,
+      mappingMethod: resolvedMethod ?? 'manual',
+    };
+  });
+
   const params: Record<string, unknown> = {
     clientId: normalizedClientId,
   };
 
-  const valuesClause = normalizedMappings
+  const valuesClause = resolvedMappings
     .map((mapping, index) => {
       const templateKey = `templateHeader${index}`;
       const sourceKey = `sourceHeader${index}`;

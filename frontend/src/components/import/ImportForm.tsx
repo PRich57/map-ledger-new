@@ -24,6 +24,7 @@ import PreviewTable from './PreviewTable';
 import type { ClientEntity, ImportSheet, TrialBalanceRow } from '../../types';
 import { normalizeGlMonth, isValidNormalizedMonth } from '../../utils/extractDateFromText';
 import { detectLikelyEntities } from '../../utils/detectClientEntities';
+import { useAuthStore } from '../../store/authStore';
 
 const templateHeaders = [
   'GL ID',
@@ -34,6 +35,11 @@ const templateHeaders = [
   'User Defined 2',
   'User Defined 3',
 ];
+
+type SavedHeaderMapping = {
+  sourceHeader: string;
+  mappingMethod: string;
+};
 
 const extractRowGlMonth = (row: ParsedRow | TrialBalanceRow): string => {
   const normalizeCandidate = (value: unknown): string => {
@@ -105,6 +111,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const entityStoreError = useClientEntityStore((state) => state.error);
   const isLoadingEntities = useClientEntityStore((state) => state.isLoading);
   const entitiesByClient = useClientEntityStore((state) => state.entitiesByClient);
+  const userEmail = useAuthStore((state) => state.user?.email ?? null);
   const [entityIds, setEntityIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -115,7 +122,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     string | null
   > | null>(null);
   const [savedHeaderMappings, setSavedHeaderMappings] = useState<
-    Record<string, string>
+    Record<string, SavedHeaderMapping>
   >({});
   const [isLoadingHeaderMappings, setIsLoadingHeaderMappings] = useState(false);
   const [headerMappingError, setHeaderMappingError] = useState<string | null>(null);
@@ -124,14 +131,29 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const [hasManualEntitySelection, setHasManualEntitySelection] = useState(false);
 
   const toHeaderMappingRecord = useCallback(
-    (items: ClientHeaderMapping[]): Record<string, string> =>
+    (items: ClientHeaderMapping[]): Record<string, SavedHeaderMapping> =>
       items.reduce((acc, mapping) => {
         if (templateHeaders.includes(mapping.templateHeader) && mapping.sourceHeader) {
-          acc[mapping.templateHeader] = mapping.sourceHeader;
+          acc[mapping.templateHeader] = {
+            sourceHeader: mapping.sourceHeader,
+            mappingMethod: mapping.mappingMethod,
+          };
         }
         return acc;
-      }, {} as Record<string, string>),
+      }, {} as Record<string, SavedHeaderMapping>),
     []
+  );
+
+  const savedHeaderAssignments = useMemo(
+    () =>
+      Object.entries(savedHeaderMappings).reduce<Record<string, string>>(
+        (acc, [template, mapping]) => ({
+          ...acc,
+          [template]: mapping.sourceHeader,
+        }),
+        {}
+      ),
+    [savedHeaderMappings]
   );
 
   const previewSampleRows = useMemo(() => {
@@ -277,18 +299,37 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         Object.keys(normalizedMap).length !==
           Object.keys(savedHeaderMappings).length ||
         Object.entries(normalizedMap).some(
-          ([template, source]) => savedHeaderMappings[template] !== source
+          ([template, source]) => savedHeaderMappings[template]?.sourceHeader !== source
         );
 
       if (!hasChanges) {
         return;
       }
 
-      const saved = await saveClientHeaderMappings(clientId, map);
+      const payload = Object.entries(map).map(
+        ([templateHeader, sourceHeader]) => {
+          const normalizedSource = sourceHeader ?? null;
+          const previous = savedHeaderMappings[templateHeader];
+          const mappingMethod = previous
+            ? previous.sourceHeader === normalizedSource
+              ? previous.mappingMethod
+              : 'manual'
+            : 'manual';
+
+          return {
+            templateHeader,
+            sourceHeader: normalizedSource,
+            mappingMethod,
+            updatedBy: userEmail,
+          };
+        }
+      );
+
+      const saved = await saveClientHeaderMappings(clientId, payload);
       setSavedHeaderMappings(toHeaderMappingRecord(saved));
       setHeaderMappingError(null);
     },
-    [clientId, savedHeaderMappings, toHeaderMappingRecord]
+    [clientId, savedHeaderMappings, toHeaderMappingRecord, userEmail]
   );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -619,7 +660,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               <ColumnMatcher
                 sourceHeaders={uploads[selectedSheets[0]].headers}
                 destinationHeaders={templateHeaders}
-                initialAssignments={savedHeaderMappings}
+                initialAssignments={savedHeaderAssignments}
                 onComplete={handleColumnMatch}
               />
               {(isLoadingHeaderMappings || headerMappingError) && (

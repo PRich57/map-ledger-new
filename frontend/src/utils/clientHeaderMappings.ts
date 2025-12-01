@@ -14,6 +14,13 @@ interface ClientHeaderMappingResponse {
   items?: ClientHeaderMapping[];
 }
 
+export interface ClientHeaderMappingSaveInput {
+  templateHeader: string;
+  sourceHeader: string | null;
+  mappingMethod: string;
+  updatedBy?: string | null;
+}
+
 export const fetchClientHeaderMappings = async (
   clientId: string
 ): Promise<ClientHeaderMapping[]> => {
@@ -40,7 +47,7 @@ export const fetchClientHeaderMappings = async (
 
 export const saveClientHeaderMappings = async (
   clientId: string,
-  mappingByTemplate: Record<string, string | null>
+  mappings: ClientHeaderMappingSaveInput[]
 ): Promise<ClientHeaderMapping[]> => {
   const normalizedClientId = clientId.trim();
   if (!normalizedClientId) {
@@ -49,13 +56,7 @@ export const saveClientHeaderMappings = async (
 
   const payload = {
     clientId: normalizedClientId,
-    mappings: Object.entries(mappingByTemplate).map(
-      ([templateHeader, sourceHeader]) => ({
-        templateHeader,
-        sourceHeader: sourceHeader ?? null,
-        mappingMethod: 'manual',
-      })
-    ),
+    mappings,
   };
 
   const requestInit: RequestInit = {

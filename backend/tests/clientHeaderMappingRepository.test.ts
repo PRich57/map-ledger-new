@@ -148,7 +148,7 @@ describe('clientHeaderMappingRepository', () => {
             client_id: 'C1',
             template_header: 'GL ID',
             source_header: 'Account Number',
-            mapping_method: 'manual',
+            mapping_method: 'automated',
             inserted_dttm: new Date('2024-05-01T00:00:00Z'),
             updated_dttm: null,
             updated_by: null,
@@ -169,18 +169,81 @@ describe('clientHeaderMappingRepository', () => {
         clientId: 'C1',
         templateHeader: 'GL ID',
         sourceHeader: 'Account Number',
-        mappingMethod: 'manual',
+        mappingMethod: 'automated',
         insertedAt: '2024-05-01T00:00:00.000Z',
         updatedBy: null,
       },
     ]);
   });
 
-  it('updates timestamps and user when mappings change', async () => {
+  it('retains automated mapping method when entries are unchanged', async () => {
+    mockedRunQuery.mockImplementation((query: string) => {
+      if (query.includes('MERGE')) {
+        return Promise.resolve({ recordset: [] } as any);
+      }
+
+      return Promise.resolve({
+        recordset: [
+          {
+            mapping_id: 4,
+            client_id: 'C1',
+            template_header: 'GL ID',
+            source_header: 'Account Number',
+            mapping_method: 'automated',
+            inserted_dttm: new Date('2024-03-01T00:00:00Z'),
+            updated_dttm: null,
+            updated_by: null,
+          },
+        ],
+      } as any);
+    });
+
+    const result = await upsertClientHeaderMappings('C1', [
+      { templateHeader: 'GL ID', sourceHeader: 'Account Number' },
+    ]);
+
+    const mergeParameters = mockedRunQuery.mock.calls.find(([query]) =>
+      typeof query === 'string' && query.includes('MERGE')
+    )?.[1];
+
+    expect(mergeParameters).toMatchObject({ mappingMethod0: 'automated' });
+    expect(result).toEqual([
+      {
+        mappingId: 4,
+        clientId: 'C1',
+        templateHeader: 'GL ID',
+        sourceHeader: 'Account Number',
+        mappingMethod: 'automated',
+        insertedAt: '2024-03-01T00:00:00.000Z',
+        updatedBy: null,
+      },
+    ]);
+  });
+
+  it('updates timestamps and user when mappings change while preserving insert time', async () => {
+    let selectCall = 0;
     mockedRunQuery.mockImplementation((query: string, parameters?: Record<string, unknown>) => {
       if (query.includes('MERGE')) {
         expect(parameters).toMatchObject({ updatedBy0: 'tester@example.com' });
         return Promise.resolve({ recordset: [] } as any);
+      }
+
+      if (selectCall === 0) {
+        selectCall += 1;
+        return Promise.resolve({
+          recordset: [
+            {
+              mapping_id: 5,
+              client_id: 'C1',
+              template_header: 'GL ID',
+              source_header: 'Account Number',
+              mapping_method: 'automated',
+              inserted_dttm: new Date('2024-05-01T00:00:00Z'),
+              updated_dttm: null,
+              updated_by: null,
+            },
+          ],
+        } as any);
       }
 
       return Promise.resolve({
@@ -190,7 +253,7 @@ describe('clientHeaderMappingRepository', () => {
             client_id: 'C1',
             template_header: 'GL ID',
             source_header: 'Updated Header',
-            mapping_method: 'auto',
+            mapping_method: 'manual',
             inserted_dttm: new Date('2024-05-01T00:00:00Z'),
             updated_dttm: new Date('2024-06-01T12:00:00Z'),
             updated_by: 'tester@example.com',
@@ -203,7 +266,6 @@ describe('clientHeaderMappingRepository', () => {
       {
         templateHeader: 'GL ID',
         sourceHeader: 'Updated Header',
-        mappingMethod: 'auto',
         updatedBy: 'tester@example.com',
       },
     ]);
@@ -214,7 +276,7 @@ describe('clientHeaderMappingRepository', () => {
         clientId: 'C1',
         templateHeader: 'GL ID',
         sourceHeader: 'Updated Header',
-        mappingMethod: 'auto',
+        mappingMethod: 'manual',
         insertedAt: '2024-05-01T00:00:00.000Z',
         updatedAt: '2024-06-01T12:00:00.000Z',
         updatedBy: 'tester@example.com',
