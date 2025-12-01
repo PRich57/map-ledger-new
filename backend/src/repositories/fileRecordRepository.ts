@@ -17,38 +17,6 @@ export interface FileRecordRow extends FileRecordInput {
 }
 
 const TABLE_NAME = 'ml.FILE_RECORDS';
-let tableEnsured = false;
-
-const ensureTable = async () => {
-  if (tableEnsured) {
-    return;
-  }
-
-  await runQuery(
-    `IF NOT EXISTS (
-      SELECT 1
-      FROM sys.tables t
-      JOIN sys.schemas s ON t.schema_id = s.schema_id
-      WHERE t.name = 'FILE_RECORDS' AND s.name = 'ml'
-    )
-    BEGIN
-      CREATE TABLE ${TABLE_NAME} (
-        FILE_UPLOAD_ID NVARCHAR(128) NOT NULL,
-        RECORD_ID NVARCHAR(128) NOT NULL,
-        ACCOUNT_ID NVARCHAR(256) NOT NULL,
-        ACCOUNT_NAME NVARCHAR(512) NOT NULL,
-        ACTIVITY_AMOUNT FLOAT NULL,
-        GL_MONTH NVARCHAR(7) NULL,
-        ENTITY_NAME NVARCHAR(512) NULL,
-        SOURCE_SHEET NVARCHAR(256) NULL,
-        SOURCE_ROW_NUMBER INT NULL,
-        CONSTRAINT PK_FILE_RECORDS PRIMARY KEY (FILE_UPLOAD_ID, RECORD_ID)
-      );
-    END`
-  );
-
-  tableEnsured = true;
-};
 
 export const insertFileRecords = async (
   fileUploadId: string,
@@ -57,8 +25,6 @@ export const insertFileRecords = async (
   if (!fileUploadId || records.length === 0) {
     return [];
   }
-
-  await ensureTable();
 
   const params: Record<string, unknown> = { fileUploadId };
   const valuesClause = records
@@ -106,8 +72,6 @@ export const listFileRecords = async (
   if (!fileUploadId) {
     return [];
   }
-
-  await ensureTable();
 
   const result = await runQuery<{
     file_upload_id: string;
