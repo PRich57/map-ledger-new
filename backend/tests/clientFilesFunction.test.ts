@@ -53,7 +53,7 @@ describe('clientFiles.validateRecord', () => {
     const { record, errors } = validateRecord(payload);
 
     expect(errors).toHaveLength(0);
-    expect(record?.glPeriodStart).toBe('2024-08-01');
-    expect(record?.glPeriodEnd).toBe('2024-08-01');
+    expect(record?.glPeriodStart).toBe('2024-08');
+    expect(record?.glPeriodEnd).toBe('2024-08');
   });
 });

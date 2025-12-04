@@ -135,6 +135,15 @@ const normalizeMonth = (value?: unknown): string | undefined => {
   return `${year}-${month.toString().padStart(2, '0')}`;
 };
 
+const normalizeYearMonthString = (value?: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = normalizeMonth(value);
+  return normalized ?? value.trim();
+};
+
 const buildPeriodLabel = (
   start?: string,
   end?: string
@@ -187,6 +196,8 @@ export const saveClientFileMetadata = async (
       ? record.fileUploadGuid
       : crypto.randomUUID();
   const status = coerceImportStatus(record.status ?? 'uploaded');
+  const glPeriodStart = normalizeYearMonthString(record.glPeriodStart) ?? null;
+  const glPeriodEnd = normalizeYearMonthString(record.glPeriodEnd) ?? null;
 
   const insertResult = await runQuery<{
     file_upload_guid: string;
@@ -223,8 +234,8 @@ export const saveClientFileMetadata = async (
       sourceFileName: record.sourceFileName,
       fileStorageUri: record.fileStorageUri,
       fileStatus: status,
-      glPeriodStart: record.glPeriodStart ?? null,
-      glPeriodEnd: record.glPeriodEnd ?? null,
+      glPeriodStart,
+      glPeriodEnd,
       lastStepCompletedDttm,
     }
   );

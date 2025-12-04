@@ -56,11 +56,8 @@ const normalizeMonthToDate = (value?: string): string | undefined => {
   }
 
   const trimmed = value.trim();
-  const monthMatch = /^\d{4}-(\d{2})(-\d{2})?$/.exec(trimmed);
-  if (monthMatch) {
-    const [year, month] = trimmed.split('-');
-    const day = trimmed.split('-')[2] ?? '01';
-    return `${year}-${month}-${day}`;
+  if (/^\d{4}-\d{2}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
   }
 
   return trimmed;
