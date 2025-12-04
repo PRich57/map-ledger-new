@@ -30,11 +30,11 @@ const seedOrganizationStore = () => {
             id: 'client-1',
             name: 'Client One',
             operations: [
-              { id: 'ops-log', name: 'Logistics' },
-              { id: 'ops-otr', name: 'Over-the-Road' },
-              { id: 'ops-ded', name: 'Dedicated' },
-              { id: 'ops-ltl', name: 'Less-than-Truckload' },
-              { id: 'ops-int', name: 'Intermodal' },
+              { id: 'ops-log', code: 'OP-LOG', name: 'Logistics' },
+              { id: 'ops-otr', code: 'OP-OTR', name: 'Over-the-Road' },
+              { id: 'ops-ded', code: 'OP-DED', name: 'Dedicated' },
+              { id: 'ops-ltl', code: 'OP-LTL', name: 'Less-than-Truckload' },
+              { id: 'ops-int', code: 'OP-INT', name: 'Intermodal' },
             ],
             metadata: {
               sourceAccounts: [],
@@ -97,7 +97,7 @@ describe('DistributionTable', () => {
     const [operationSelect] = within(detailRow as HTMLTableRowElement).getAllByLabelText(
       'Select target operation',
     );
-    fireEvent.change(operationSelect, { target: { value: 'ops-int' } });
+    fireEvent.change(operationSelect, { target: { value: 'OP-INT' } });
 
     const [allocationInput] = within(detailRow as HTMLTableRowElement).getAllByLabelText(
       'Enter allocation percentage',
@@ -107,7 +107,7 @@ describe('DistributionTable', () => {
 
     fireEvent.click(screen.getByText('Save operations'));
 
-    expect(await screen.findByText(/ops-int.*25%/i)).toBeInTheDocument();
+    expect(await screen.findByText(/OP-INT.*25%/i)).toBeInTheDocument();
   });
 
   test('opens dynamic allocation builder for dynamic rows', async () => {

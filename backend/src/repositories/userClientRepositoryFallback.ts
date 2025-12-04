@@ -41,14 +41,16 @@ const createFallbackUserClientAccess = (
           companyId: 'demo-company-1',
           companyName: 'Demo General Hospital',
           operations: [
-            { id: 'demo-op-1', name: 'Inpatient Services' },
-            { id: 'demo-op-2', name: 'Outpatient Services' },
+            { id: 'demo-op-1', code: 'demo-op-1', name: 'Inpatient Services' },
+            { id: 'demo-op-2', code: 'demo-op-2', name: 'Outpatient Services' },
           ],
         },
         {
           companyId: 'demo-company-2',
           companyName: 'Demo Specialty Clinic',
-          operations: [{ id: 'demo-op-3', name: 'Surgical Services' }],
+          operations: [
+            { id: 'demo-op-3', code: 'demo-op-3', name: 'Surgical Services' },
+          ],
         },
       ],
       metadata: buildMetadata({
@@ -63,9 +65,9 @@ const createFallbackUserClientAccess = (
           companyId: 'demo-company-3',
           companyName: 'Demo Advisory Practice',
           operations: [
-            { id: 'demo-op-4', name: 'Audit' },
-            { id: 'demo-op-5', name: 'Tax' },
-            { id: 'demo-op-6', name: 'Consulting' },
+            { id: 'demo-op-4', code: 'demo-op-4', name: 'Audit' },
+            { id: 'demo-op-5', code: 'demo-op-5', name: 'Tax' },
+            { id: 'demo-op-6', code: 'demo-op-6', name: 'Consulting' },
           ],
         },
       ],

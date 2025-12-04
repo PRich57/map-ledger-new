@@ -28,6 +28,7 @@ export interface ClientProfile {
 
 export interface UserClientOperation {
   id: string;
+  code: string;
   name: string;
 }
 
@@ -204,15 +205,22 @@ export interface ImportEntity {
 export interface Import {
   id: string;
   clientId: string;
+  clientName?: string;
   fileName: string;
   fileSize: number;
   fileType: string;
+  fileStorageUri?: string;
+  fileUri?: string;
+  blobUrl?: string;
+  blobUri?: string;
   period: string;
   timestamp: string;
   status: 'completed' | 'failed';
   rowCount?: number;
   importedBy: string;
+  insertedDttm?: string;
   userId: string;
+  uploadContext?: Record<string, unknown>;
   sheets?: ImportSheet[];
   entities?: ImportEntity[];
 }
@@ -476,6 +484,7 @@ export type DistributionType = 'direct' | 'percentage' | 'dynamic';
 export interface DistributionOperationShare {
   id: string;
   name: string;
+  code?: string;
   allocation?: number;
   notes?: string;
 }

@@ -31,6 +31,7 @@ export default function Import() {
   const historyLoading = useImportStore((state) => state.isLoading);
   const historyError = useImportStore((state) => state.error);
   const recordImport = useImportStore((state) => state.recordImport);
+  const deleteImport = useImportStore((state) => state.deleteImport);
   const page = useImportStore((state) => state.page);
   const pageSize = useImportStore((state) => state.pageSize);
   const total = useImportStore((state) => state.total);
@@ -61,6 +62,14 @@ export default function Import() {
     return Array.from(map.values());
   }, [companies]);
 
+  const importsWithClientNames = useMemo(() => {
+    const clientLookup = new Map(clientSummaries.map((client) => [client.id, client.name]));
+    return imports.map((importItem) => ({
+      ...importItem,
+      clientName: importItem.clientName ?? clientLookup.get(importItem.clientId),
+    }));
+  }, [clientSummaries, imports]);
+
   const singleClient = clientSummaries.length === 1 ? clientSummaries[0] : null;
 
   useEffect(() => {
@@ -70,6 +79,28 @@ export default function Import() {
 
     fetchImports({ userId, clientId: singleClient?.id, page, pageSize });
   }, [fetchImports, userId, singleClient?.id, page, pageSize]);
+
+  const handleDeleteImport = async (importId: string) => {
+    if (!importId) {
+      return;
+    }
+
+    const importToDelete = importsWithClientNames.find((item) => item.id === importId);
+    const fileName = importToDelete?.fileName ?? 'Import';
+
+    try {
+      await deleteImport(importId);
+      setError(null);
+      setSuccess(`File '${fileName}' deleted successfully`);
+    } catch (deleteError) {
+      setSuccess(null);
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Unable to delete import. Please try again.'
+      );
+    }
+  };
 
   const handleFileImport = async (
     rows: TrialBalanceRow[],
@@ -377,11 +408,12 @@ export default function Import() {
           <div className="px-6 text-sm text-red-600">{historyError}</div>
         )}
         <ImportHistory
-          imports={imports}
+          imports={importsWithClientNames}
           isLoading={historyLoading}
           page={page}
           pageSize={pageSize}
           total={total}
+          onDelete={handleDeleteImport}
           onPageChange={(nextPage) => {
             setPage(nextPage);
             if (userId) {

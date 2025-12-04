@@ -37,6 +37,7 @@ const logError = (...args: unknown[]) => {
 
 export interface UserClientOperation {
   id: string;
+  code: string;
   name: string;
 }
 
@@ -124,6 +125,11 @@ const extractClientId = createValueExtractor([
   'clientcode',
 ]);
 
+const extractClientScac = createValueExtractor([
+  'client_scac',
+  'clientscac',
+]);
+
 const extractCompanyName = createValueExtractor([
   'company_name',
   'companyname',
@@ -137,10 +143,20 @@ const extractCompanyId = createValueExtractor([
   'companycode',
 ]);
 
+const extractOperationalScac = createValueExtractor([
+  'operational_scac',
+]);
+
 const extractOperationName = createValueExtractor([
   'operation_name',
   'operationname',
   'operation',
+]);
+
+const extractOperationCode = createValueExtractor([
+  'operation_cd',
+  'operation_code',
+  'operationcode',
 ]);
 
 const extractOperationId = createValueExtractor([
@@ -314,31 +330,15 @@ export const fetchUserClientAccess = async (
     const emailVariants = deriveEmailVariants(normalizedEmail);
     logDebug('Derived email variants for lookup', { emailVariants });
 
-    const placeholders: string[] = [];
-    const parameters: Record<string, string> = {};
-
-    emailVariants.forEach((value, index) => {
-      const key = `email${index}`;
-      placeholders.push(`@${key}`);
-      parameters[key] = value;
-    });
-
-    if (placeholders.length === 0) {
-      placeholders.push('@email0');
-      parameters.email0 = normalizedEmail;
-    }
-
-    const placeholderList = placeholders.join(', ');
-
-    logDebug('Executing user client access query', {
-      placeholderCount: placeholders.length,
-      placeholderList,
-      parameters,
-    });
+    logDebug('Executing user client access query', { normalizedEmail });
 
     const { recordset = [] } = await runQuery<RawRow>(
-      `SELECT * FROM dbo.V_USER_CLIENT_COMPANY_OPERATIONS WHERE EMAIL IN (${placeholderList})`,
-      parameters
+      [
+        'SELECT CLIENT_ID, CLIENT_NAME, CLIENT_SCAC, OPERATIONAL_SCAC, OPERATION_CD, OPERATION_NAME',
+        'FROM ML.V_CLIENT_OPERATIONS',
+        'ORDER BY CLIENT_NAME ASC',
+      ].join(' '),
+      {}
     );
 
     logInfo('Successfully executed user client access query', {
@@ -392,36 +392,40 @@ export const fetchUserClientAccess = async (
         aggregate.clientIdGenerated = false;
       }
 
-      const companyName = extractCompanyName(row);
+      const operationalScac = extractOperationalScac(row);
+      const clientScac = extractClientScac(row);
+      const companyName =
+        extractCompanyName(row) || operationalScac || clientScac || clientName;
       const companyId = normalizeIdentifier(
-        extractCompanyId(row),
+        extractCompanyId(row) || operationalScac || clientScac,
         companyName,
         `company-${rowIndex}`
       );
 
-      if (companyName) {
-        if (!aggregate.companies.has(companyId)) {
-          aggregate.companies.set(companyId, {
-            companyId,
-            companyName,
-            operations: new Map(),
-          });
-        }
+      if (!aggregate.companies.has(companyId)) {
+        aggregate.companies.set(companyId, {
+          companyId,
+          companyName,
+          operations: new Map(),
+        });
+      }
 
-        const operationName = extractOperationName(row);
-        if (operationName) {
-          const operationId = normalizeIdentifier(
-            extractOperationId(row),
-            operationName,
-            `operation-${rowIndex}`
-          );
-          const company = aggregate.companies.get(companyId)!;
-          if (!company.operations.has(operationId)) {
-            company.operations.set(operationId, {
-              id: operationId,
-              name: operationName,
-            });
-          }
+      const operationName = extractOperationName(row);
+      const operationCode = extractOperationCode(row);
+      const operationIdentifier = normalizeIdentifier(
+        operationCode || extractOperationId(row),
+        operationName || operationCode,
+        `operation-${rowIndex}`
+      );
+
+      if (operationName || operationCode) {
+        const company = aggregate.companies.get(companyId)!;
+        if (!company.operations.has(operationIdentifier)) {
+          company.operations.set(operationIdentifier, {
+            id: operationIdentifier,
+            code: operationCode || operationIdentifier,
+            name: operationName || operationCode || operationIdentifier,
+          });
         }
       }
 

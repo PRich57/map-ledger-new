@@ -6,6 +6,14 @@ import {
   FileRecordInput,
   FileRecordRow,
 } from '../../repositories/fileRecordRepository';
+import {
+  insertClientFileSheet,
+  NewClientFileSheetInput,
+} from '../../repositories/clientFileSheetRepository';
+import {
+  insertClientFileEntity,
+  NewClientFileEntityInput,
+} from '../../repositories/clientFileEntityRepository';
 import { buildErrorResponse } from '../datapointConfigs/utils';
 import {
   detectGlMonthFromRow,
@@ -21,6 +29,7 @@ interface IngestEntity {
   id?: string;
   name: string;
   aliases?: string[];
+  isSelected?: boolean;
 }
 
 interface IngestSheet {
@@ -32,13 +41,15 @@ interface IngestSheet {
 }
 
 interface IngestPayload {
-  fileUploadId: number;
+  fileUploadGuid?: string;
   clientId?: string;
   fileName?: string;
   headerMap: HeaderMap;
   sheets: IngestSheet[];
   entities?: IngestEntity[];
 }
+
+type ResolvedIngestPayload = IngestPayload & { fileUploadGuid: string };
 
 const normalizeText = (value: unknown): string => {
   if (typeof value === 'string') {
@@ -221,7 +232,6 @@ const deriveRecordsFromSheet = (
       const entityValue = normalizeText(getValueFromRow(row, entityHeader));
       const matchedEntity = matchEntity(entityValue, entities);
       const normalizedEntityId = matchedEntity?.id || undefined;
-      const normalizedEntityName = matchedEntity?.name || entityValue || undefined;
 
       const userDefined1 = getOptionalText(getValueFromRow(row, userDefined1Header));
       const userDefined2 = getOptionalText(getValueFromRow(row, userDefined2Header));
@@ -234,10 +244,8 @@ const deriveRecordsFromSheet = (
         accountName,
         activityAmount,
         entityId: normalizedEntityId,
-        entityName: normalizedEntityName,
         glMonth,
-        sourceSheet: sheet.sheetName,
-        sourceRowNumber: firstRowIndex + index,
+        sourceSheetName: sheet.sheetName,
         userDefined1,
         userDefined2,
         userDefined3,
@@ -252,8 +260,11 @@ const normalizePayload = (body: unknown): { payload: IngestPayload | null; error
   }
 
   const payload = body as Record<string, unknown>;
-  const fileUploadIdRaw = getFirstStringValue(payload.fileUploadId);
-  const fileUploadId = fileUploadIdRaw ? Number(fileUploadIdRaw) : NaN;
+  const fileUploadGuid =
+    getFirstStringValue(payload.fileUploadGuid)?.trim() ??
+    getFirstStringValue(payload.fileUploadId)?.trim();
+
+  const normalizedFileUploadGuid = fileUploadGuid;
   const headerMap = payload.headerMap as HeaderMap;
   const sheets = Array.isArray(payload.sheets)
     ? (payload.sheets as unknown[]).filter(Boolean)
@@ -261,8 +272,12 @@ const normalizePayload = (body: unknown): { payload: IngestPayload | null; error
 
   const errors: string[] = [];
 
-  if (!Number.isFinite(fileUploadId)) {
-    errors.push('fileUploadId must be a finite number');
+  if (!normalizedFileUploadGuid) {
+    errors.push('fileUploadGuid is required');
+  }
+
+  if (normalizedFileUploadGuid && normalizedFileUploadGuid.length !== 36) {
+    errors.push('fileUploadGuid must be a 36-character string');
   }
 
   if (!headerMap || typeof headerMap !== 'object') {
@@ -360,7 +375,7 @@ const normalizePayload = (body: unknown): { payload: IngestPayload | null; error
 
   return {
     payload: {
-      fileUploadId,
+      fileUploadGuid: normalizedFileUploadGuid,
       clientId: getFirstStringValue(payload.clientId),
       fileName: getFirstStringValue(payload.fileName),
       headerMap,
@@ -371,13 +386,73 @@ const normalizePayload = (body: unknown): { payload: IngestPayload | null; error
   };
 };
 
-const buildRecords = (payload: IngestPayload): FileRecordInput[] => {
+const buildRecords = (payload: ResolvedIngestPayload): FileRecordInput[] => {
   const headerLookup = buildHeaderLookup(payload.headerMap);
   const entities = payload.entities ?? [];
 
   return payload.sheets
     .filter((sheet) => sheet.isSelected !== false)
     .flatMap((sheet) => deriveRecordsFromSheet(sheet, headerLookup, entities, payload.fileName));
+};
+
+const buildSheetInserts = (
+  payload: ResolvedIngestPayload,
+): NewClientFileSheetInput[] =>
+  payload.sheets.map((sheet) => ({
+    fileUploadGuid: payload.fileUploadGuid,
+    sheetName: sheet.sheetName,
+    isSelected: sheet.isSelected,
+    firstDataRowIndex:
+      typeof sheet.firstDataRowIndex === 'number' && Number.isFinite(sheet.firstDataRowIndex)
+        ? sheet.firstDataRowIndex
+        : undefined,
+    rowCount: Array.isArray(sheet.rows) ? sheet.rows.length : undefined,
+  }));
+
+const toEntityId = (value?: string | null): number | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildEntityInserts = (
+  payload: ResolvedIngestPayload,
+  records: FileRecordInput[],
+): NewClientFileEntityInput[] => {
+  const entityLookup = new Map<string, IngestEntity>();
+  (payload.entities ?? []).forEach((entity) => {
+    const key = entity.id ?? entity.name;
+    if (key) {
+      entityLookup.set(key, entity);
+    }
+  });
+
+  const aggregated = new Map<number, NewClientFileEntityInput>();
+  const recordEntityKeys = records
+    .map((record) => (record.entityId !== null && record.entityId !== undefined ? String(record.entityId) : null))
+    .filter((key): key is string => key !== null);
+  const candidateKeys = new Set<string>([...recordEntityKeys, ...entityLookup.keys()]);
+
+  candidateKeys.forEach((key) => {
+    const entityId = toEntityId(key);
+    if (entityId === null) {
+      return;
+    }
+
+    const details = entityLookup.get(key);
+    const updated: NewClientFileEntityInput = {
+      fileUploadGuid: payload.fileUploadGuid,
+      entityId,
+      isSelected: details?.isSelected,
+    };
+
+    aggregated.set(entityId, updated);
+  });
+
+  return Array.from(aggregated.values());
 };
 
 export const ingestFileRecordsHandler = async (
@@ -393,10 +468,15 @@ export const ingestFileRecordsHandler = async (
       return json({ message: 'Invalid ingest payload', errors }, 400);
     }
 
-    const records = buildRecords(payload);
+    const resolvedPayload: ResolvedIngestPayload = {
+      ...payload,
+      fileUploadGuid: payload.fileUploadGuid as string,
+    };
+
+    const records = buildRecords(resolvedPayload);
     if (records.length === 0) {
       context.warn('No valid records found to ingest', {
-        fileUploadId: payload.fileUploadId,
+        fileUploadGuid: resolvedPayload.fileUploadGuid,
         sheetCount: payload.sheets.length,
         headerMapKeys: Object.keys(payload.headerMap ?? {}),
       });
@@ -404,12 +484,23 @@ export const ingestFileRecordsHandler = async (
     }
 
     context.info('Persisting file records', {
-      fileUploadId: payload.fileUploadId,
+      fileUploadGuid: resolvedPayload.fileUploadGuid,
       recordCount: records.length,
       sheetCount: payload.sheets.length,
     });
 
-    const inserted = await insertFileRecords(payload.fileUploadId, records);
+    const sheetInserts = buildSheetInserts(resolvedPayload);
+    const entityInserts = buildEntityInserts(resolvedPayload, records);
+
+    if (sheetInserts.length > 0) {
+      await Promise.all(sheetInserts.map((sheet) => insertClientFileSheet(sheet)));
+    }
+
+    if (entityInserts.length > 0) {
+      await Promise.all(entityInserts.map((entity) => insertClientFileEntity(entity)));
+    }
+
+    const inserted = await insertFileRecords(resolvedPayload.fileUploadGuid, records);
 
     return json({ items: inserted }, 201);
   } catch (error) {
@@ -423,15 +514,19 @@ export const listFileRecordsHandler = async (
   context: InvocationContext,
 ): Promise<HttpResponseInit> => {
   try {
-    const fileUploadIdParam = getFirstStringValue(request.query.get('fileUploadId'));
-    const fileUploadId = fileUploadIdParam ? Number(fileUploadIdParam) : NaN;
-    if (!Number.isFinite(fileUploadId)) {
-      return json({ message: 'Missing fileUploadId query parameter' }, 400);
+    const fileUploadGuid = getFirstStringValue(request.query.get('fileUploadGuid'));
+    const normalizedFileUploadGuid = fileUploadGuid?.trim();
+
+    if (!normalizedFileUploadGuid || normalizedFileUploadGuid.length !== 36) {
+      return json({ message: 'fileUploadGuid is required' }, 400);
     }
 
-    const items: FileRecordRow[] = await listFileRecords(fileUploadId);
+    const items: FileRecordRow[] = await listFileRecords(normalizedFileUploadGuid);
 
-    return json({ items, fileUploadId });
+    return json({
+      items,
+      fileUploadGuid: normalizedFileUploadGuid,
+    });
   } catch (error) {
     context.error('Failed to list file records', error);
     return json(buildErrorResponse('Failed to list file records', error), 500);
@@ -453,4 +548,3 @@ app.http('listFileRecords', {
 });
 
 export default ingestFileRecordsHandler;
-

@@ -3,10 +3,34 @@ import { json, readJson } from '../../http';
 import {
   listClientFiles,
   saveClientFileMetadata,
+  ImportStatus,
   NewClientFileRecord,
+  coerceImportStatus,
+  softDeleteClientFile,
 } from '../../repositories/clientFileRepository';
 import { getFirstStringValue } from '../../utils/requestParsers';
 import { buildErrorResponse } from '../datapointConfigs/utils';
+
+export interface ClientFileMetadataPayload {
+  clientId?: string;
+  id?: string;
+  fileUploadGuid?: string;
+  fileUploadId?: string;
+  insertedBy?: string;
+  uploadedBy?: string;
+  importedBy?: string;
+  sourceFileName?: string;
+  fileName?: string;
+  fileStorageUri?: string;
+  status?: ImportStatus;
+  fileStatus?: ImportStatus;
+  glPeriodStart?: string;
+  glPeriodEnd?: string;
+  period?: string;
+  lastStepCompletedDttm?: string;
+}
+
+const PLACEHOLDER_FILE_STORAGE_URI = 'https://storage.invalid/client-file-placeholder';
 
 const parseInteger = (value: string | null, fallback: number): number => {
   if (!value) {
@@ -26,7 +50,25 @@ const toOptionalString = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const validateRecord = (payload: unknown): { record: NewClientFileRecord | null; errors: string[] } => {
+const normalizeMonthToDate = (value?: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  const monthMatch = /^\d{4}-(\d{2})(-\d{2})?$/.exec(trimmed);
+  if (monthMatch) {
+    const [year, month] = trimmed.split('-');
+    const day = trimmed.split('-')[2] ?? '01';
+    return `${year}-${month}-${day}`;
+  }
+
+  return trimmed;
+};
+
+export const validateRecord = (
+  payload: ClientFileMetadataPayload | unknown
+): { record: NewClientFileRecord | null; errors: string[] } => {
   if (!payload || typeof payload !== 'object') {
     return { record: null, errors: ['Payload is not an object'] };
   }
@@ -35,14 +77,20 @@ const validateRecord = (payload: unknown): { record: NewClientFileRecord | null;
 
   const clientId = toOptionalString(bag.clientId);
   const sourceFileName = toOptionalString(bag.sourceFileName ?? bag.fileName);
-  const fileStorageUri = toOptionalString(bag.fileStorageUri);
-  const fileStatus = toOptionalString(bag.fileStatus ?? bag.status);
+  const rawStatus = toOptionalString(bag.fileStatus ?? bag.status);
+  const fileStatus = coerceImportStatus(rawStatus);
+  const fileStorageUri =
+    toOptionalString(bag.fileStorageUri) ?? PLACEHOLDER_FILE_STORAGE_URI;
+  const fileUploadGuid =
+    toOptionalString(bag.fileUploadGuid ?? bag.fileUploadId ?? bag.id) ?? undefined;
+  const insertedBy = toOptionalString(
+    bag.insertedBy ?? bag.uploadedBy ?? bag.importedBy
+  );
 
   const missingFields = [
     !clientId ? 'clientId is required' : null,
     !sourceFileName ? 'sourceFileName is required' : null,
-    !fileStorageUri ? 'fileStorageUri is required' : null,
-    !fileStatus ? 'fileStatus is required' : null,
+    !insertedBy ? 'insertedBy (uploader email) is required' : null,
   ].filter(Boolean) as string[];
 
   if (missingFields.length > 0) {
@@ -52,106 +100,22 @@ const validateRecord = (payload: unknown): { record: NewClientFileRecord | null;
   const requiredClientId = clientId as string;
   const requiredSourceFileName = sourceFileName as string;
   const requiredFileStorageUri = fileStorageUri as string;
-  const requiredFileStatus = fileStatus as string;
 
   const baseRecord: NewClientFileRecord = {
     clientId: requiredClientId,
-    userId: toOptionalString(bag.userId),
-    uploadedBy: toOptionalString(bag.uploadedBy ?? bag.importedBy),
+    fileUploadGuid,
+    insertedBy,
     sourceFileName: requiredSourceFileName,
     fileStorageUri: requiredFileStorageUri,
-    fileSize:
-      typeof bag.fileSize === 'number' && Number.isFinite(bag.fileSize)
-        ? bag.fileSize
-        : undefined,
-    fileType: toOptionalString(bag.fileType),
-    status: requiredFileStatus,
-    glPeriodStart: toOptionalString(bag.glPeriodStart ?? bag.period),
-    glPeriodEnd: toOptionalString(bag.glPeriodEnd ?? bag.period),
-    rowCount:
-      typeof bag.rowCount === 'number' && Number.isFinite(bag.rowCount)
-        ? bag.rowCount
-        : undefined,
-    lastStepCompletedDttm: toOptionalString(bag.lastStepCompletedDttm ?? bag.timestamp),
+    status: fileStatus,
+    glPeriodStart: normalizeMonthToDate(
+      toOptionalString(bag.glPeriodStart ?? bag.period)
+    ),
+    glPeriodEnd: normalizeMonthToDate(
+      toOptionalString(bag.glPeriodEnd ?? bag.period)
+    ),
+    lastStepCompletedDttm: toOptionalString(bag.lastStepCompletedDttm),
   };
-
-  if (Array.isArray(bag.sheets)) {
-    baseRecord.sheets = bag.sheets
-      .filter(Boolean)
-      .map((entry) => {
-        const sheet = entry as Record<string, unknown>;
-        const firstDataRowIndex =
-          typeof sheet.firstDataRowIndex === 'number' &&
-          Number.isFinite(sheet.firstDataRowIndex)
-            ? sheet.firstDataRowIndex
-            : undefined;
-        const isSelected = (() => {
-          if (typeof sheet.isSelected === 'boolean') {
-            return sheet.isSelected;
-          }
-
-          if (typeof sheet.isSelected === 'number') {
-            return sheet.isSelected !== 0;
-          }
-
-          if (typeof sheet.isSelected === 'string') {
-            return sheet.isSelected.trim() !== '0';
-          }
-
-          return true;
-        })();
-        return {
-          sheetName: String(sheet.sheetName ?? '').trim(),
-          glMonth:
-            typeof sheet.glMonth === 'string' && sheet.glMonth.trim()
-              ? sheet.glMonth.trim()
-              : undefined,
-          rowCount: Number(sheet.rowCount ?? 0),
-          isSelected,
-          firstDataRowIndex,
-        };
-      })
-      .filter((entry) => entry.sheetName.length > 0 && Number.isFinite(entry.rowCount));
-  }
-
-  if (Array.isArray(bag.entities)) {
-    baseRecord.entities = bag.entities
-      .filter(Boolean)
-      .map((entry) => {
-        const entity = entry as Record<string, unknown>;
-        const entityId = toOptionalString(entity.entityId ?? entity.id);
-        const displayName = toOptionalString(
-          entity.displayName ?? entity.entityDisplayName ?? entity.entityName ?? entity.name
-        );
-        const entityName =
-          displayName ?? toOptionalString(entity.entityName ?? entity.name) ?? '';
-        const isSelected = (() => {
-          if (typeof entity.isSelected === 'boolean') {
-            return entity.isSelected;
-          }
-
-          if (typeof entity.isSelected === 'number') {
-            return entity.isSelected !== 0;
-          }
-
-          if (typeof entity.isSelected === 'string') {
-            return entity.isSelected.trim() !== '0';
-          }
-
-          return true;
-        })();
-        return {
-          entityId: entityId ?? undefined,
-          entityName,
-          displayName: displayName ?? undefined,
-          rowCount: Number(entity.rowCount ?? 0),
-          isSelected,
-        };
-      })
-      .filter(
-        (entry) => entry.entityName.length > 0 && Number.isFinite(entry.rowCount)
-      );
-  }
 
   return { record: baseRecord, errors: [] };
 };
@@ -161,12 +125,11 @@ export const listClientFilesHandler = async (
   context: InvocationContext
 ): Promise<HttpResponseInit> => {
   try {
-    const userId = getFirstStringValue(request.query.get('userId'));
     const clientId = getFirstStringValue(request.query.get('clientId'));
     const page = parseInteger(request.query.get('page'), 1);
     const pageSize = parseInteger(request.query.get('pageSize'), 10);
 
-    const result = await listClientFiles(userId, clientId, page, pageSize);
+    const result = await listClientFiles(clientId, page, pageSize);
 
     return json(result, 200);
   } catch (error) {
@@ -195,8 +158,6 @@ export const saveClientFileHandler = async (
       clientId: record.clientId,
       sourceFileName: record.sourceFileName,
       fileStatus: record.status,
-      sheetCount: record.sheets?.length ?? 0,
-      entityCount: record.entities?.length ?? 0,
     });
 
     const saved = await saveClientFileMetadata(record);
@@ -208,6 +169,35 @@ export const saveClientFileHandler = async (
       buildErrorResponse('Failed to persist client file metadata', error),
       500
     );
+  }
+};
+
+export const deleteClientFileHandler = async (
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> => {
+  try {
+    const params = request.params as Partial<{ fileUploadGuid?: string }> | undefined;
+    const fileUploadGuid = getFirstStringValue(params?.fileUploadGuid);
+
+    if (!fileUploadGuid) {
+      return json({ message: 'fileUploadGuid is required' }, 400);
+    }
+
+    if (fileUploadGuid.length !== 36) {
+      return json({ message: 'fileUploadGuid must be a 36-character string' }, 400);
+    }
+
+    const deleted = await softDeleteClientFile(fileUploadGuid);
+
+    if (!deleted) {
+      return json({ message: 'Client file not found' }, 404);
+    }
+
+    return json({ message: 'Client file deleted' }, 200);
+  } catch (error) {
+    context.error('Failed to delete client file', error);
+    return json(buildErrorResponse('Failed to delete client file', error), 500);
   }
 };
 
@@ -223,4 +213,11 @@ app.http('saveClientFile', {
   authLevel: 'anonymous',
   route: 'client-files',
   handler: saveClientFileHandler,
+});
+
+app.http('deleteClientFile', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'client-files/{fileUploadGuid}',
+  handler: deleteClientFileHandler,
 });

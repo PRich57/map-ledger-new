@@ -10,7 +10,7 @@ describe('deriveCompaniesFromAccessList', () => {
         companyId: 'company-1',
         companyName: 'Company A',
         operations: [
-          { id: 'op-1', name: 'Operation 1' },
+          { id: 'op-1', code: 'OP-1', name: 'Operation 1' },
         ],
       },
     ],
@@ -34,7 +34,7 @@ describe('deriveCompaniesFromAccessList', () => {
         ...baseAccess,
         metadata: {
           sourceAccounts: [
-            { id: 'acct-2', name: 'Account 2', description: 'Fuel' },
+          { id: 'acct-2', name: 'Account 2', description: 'Fuel' },
           ],
           reportingPeriods: ['2024-Q2'],
           mappingTypes: ['Advanced'],
@@ -48,7 +48,7 @@ describe('deriveCompaniesFromAccessList', () => {
             companyId: 'company-1',
             companyName: 'Company A',
             operations: [
-              { id: 'op-2', name: 'Operation 2' },
+              { id: 'op-2', code: 'OP-2', name: 'Operation 2' },
             ],
           },
         ],
@@ -78,6 +78,7 @@ describe('deriveCompaniesFromAccessList', () => {
     expect(companyA?.clients).toHaveLength(1);
     const [client] = companyA?.clients ?? [];
     expect(client.operations).toHaveLength(2);
+    expect(client.operations[0].code).toBe('OP-1');
     expect(client.metadata.reportingPeriods).toEqual(['2024-Q1', '2024-Q2']);
     expect(client.metadata.mappingTypes).toEqual(['Advanced', 'Standard']);
     expect(client.metadata.sourceAccounts).toHaveLength(2);
@@ -99,7 +100,7 @@ describe('deriveCompaniesFromAccessList', () => {
             companyId: 'company-2',
             companyName: 'Company B',
             operations: [
-              { id: 'op-3', name: 'Operation 3' },
+              { id: 'op-3', code: 'OP-3', name: 'Operation 3' },
             ],
           },
         ],

@@ -4,11 +4,11 @@ jest.mock('../src/utils/sqlClient', () => ({
   
   import { runQuery } from '../src/utils/sqlClient';
   import {
-    __resetDatapointConfigurationRepositoryForTests,
     createDatapointConfiguration,
     getDatapointConfigurationById,
     listDatapointConfigurations,
     updateDatapointConfiguration,
+    __resetDatapointConfigurationRepositoryForTests,
   } from '../src/repositories/datapointConfigurationRepository';
   
   const ORIGINAL_ENV = process.env;

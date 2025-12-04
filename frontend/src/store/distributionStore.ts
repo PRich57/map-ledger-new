@@ -9,6 +9,7 @@ import type {
 
 export interface DistributionOperationCatalogItem {
   id: string;
+  code: string;
   name: string;
 }
 
@@ -74,7 +75,14 @@ const clampOperationsForType = (
   if (type === 'direct') {
     const [primary] = operations;
     return primary
-      ? [{ id: primary.id, name: primary.name, notes: primary.notes }]
+      ? [
+          {
+            id: primary.id,
+            code: primary.code,
+            name: primary.name,
+            notes: primary.notes,
+          },
+        ]
       : [];
   }
 
@@ -87,6 +95,7 @@ const clampOperationsForType = (
 
   return operations.map(operation => ({
     id: operation.id,
+    code: operation.code,
     name: operation.name,
     allocation: operation.allocation,
     notes: operation.notes,
@@ -177,7 +186,11 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
     })),
   setOperationsCatalog: operations =>
     set({
-      operationsCatalog: operations.map(operation => ({ ...operation })),
+      operationsCatalog: operations.map(operation => ({
+        ...operation,
+        code: operation.code || operation.id,
+        id: operation.id || operation.code,
+      })),
     }),
   applyBatchDistribution: (ids, updates) => {
     if (!ids.length) {

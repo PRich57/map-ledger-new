@@ -24,6 +24,7 @@ declare module 'mssql' {
 
   export interface IResult<TRecord> {
     recordset: TRecord[];
+    rowsAffected?: number[];
   }
 
   export interface Request {

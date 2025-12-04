@@ -18,6 +18,7 @@ interface ImportHistoryProps {
   pageSize: number;
   total: number;
   onPageChange: (page: number) => void;
+  onDelete?: (importId: string) => Promise<void>;
 }
 
 type SortField = 'fileName' | 'clientId' | 'period' | 'status' | 'importedBy' | 'timestamp';
@@ -42,16 +43,28 @@ const sortableFields: SortField[] = [
   'timestamp',
 ];
 
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) {
-    return '0 B';
+const formatDateTime = (value?: string): string => {
+  if (!value) {
+    return '—';
   }
 
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const size = bytes / 1024 ** idx;
-  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[idx]}`;
-}
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return '—';
+  }
+
+  return parsed.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    hour12: true,
+  });
+};
+
+const parsePeriodForSort = (value: string) => {
+  const [firstPart] = value.split(/\s+-\s+/);
+  return parsePeriodString(firstPart ?? value);
+};
 
 export default function ImportHistory({
   imports,
@@ -60,12 +73,15 @@ export default function ImportHistory({
   pageSize,
   total,
   onPageChange,
+  onDelete,
 }: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('timestamp');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
-  const columnCount = sortableFields.length + 1;
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const columnCount = sortableFields.length + 2;
 
   const filteredImports = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -74,11 +90,11 @@ export default function ImportHistory({
       ? imports.filter((entry) => {
           const haystack = [
             entry.fileName,
-            entry.clientId,
-            entry.importedBy,
+            entry.clientName ?? entry.clientId,
+            entry.importedBy ?? entry.insertedDttm ?? '',
             entry.period,
             formatPeriodLabel(entry.period),
-            new Date(entry.timestamp).toLocaleString(),
+            formatDateTime(entry.timestamp),
           ]
             .join(' ')
             .toLowerCase();
@@ -94,13 +110,13 @@ export default function ImportHistory({
           case 'fileName':
             return entry.fileName.toLowerCase();
           case 'clientId':
-            return entry.clientId.toLowerCase();
+            return (entry.clientName ?? entry.clientId).toLowerCase();
           case 'status':
             return entry.status;
           case 'importedBy':
-            return entry.importedBy.toLowerCase();
+            return (entry.importedBy ?? '').toLowerCase();
           case 'period': {
-            const parsedPeriod = parsePeriodString(entry.period);
+            const parsedPeriod = parsePeriodForSort(entry.period);
             return parsedPeriod ?? new Date(NaN);
           }
           case 'timestamp':
@@ -161,6 +177,32 @@ export default function ImportHistory({
 
   const closePreview = () => setPreviewImport(null);
 
+  const handleDelete = async (importId: string) => {
+    if (!onDelete) {
+      return;
+    }
+
+    setDeleteError(null);
+    const confirmed = window.confirm(
+      'Are you sure you want to delete this import? This action cannot be undone.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(importId);
+    try {
+      await onDelete(importId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to delete import. Please try again.';
+      setDeleteError(message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   const startRecord = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
@@ -210,6 +252,11 @@ export default function ImportHistory({
             aria-label="Search import history"
           />
         </div>
+        {deleteError && (
+          <p className="text-sm text-red-600" role="alert">
+            {deleteError}
+          </p>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -233,7 +280,7 @@ export default function ImportHistory({
                 </th>
               ))}
               <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                Details
+                Actions
               </th>
             </tr>
           </thead>
@@ -268,14 +315,13 @@ export default function ImportHistory({
                         <div className="text-sm font-medium text-gray-900">
                           {importItem.fileName}
                         </div>
-                        <div className="text-xs text-gray-400">
-                          {formatFileSize(importItem.fileSize)} • {importItem.fileType}
-                        </div>
                       </div>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{importItem.clientId}</div>
+                    <div className="text-sm text-gray-900">
+                      {importItem.clientName ?? importItem.clientId}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
@@ -300,21 +346,33 @@ export default function ImportHistory({
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{importItem.importedBy}</div>
+                    <div className="text-sm text-gray-900">{importItem.importedBy || '—'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
-                      {new Date(importItem.timestamp).toLocaleString()}
+                      {formatDateTime(importItem.timestamp)}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <button
-                      type="button"
-                      onClick={() => setPreviewImport(importItem)}
-                      className="text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"
-                    >
-                      View
-                    </button>
+                    <div className="flex justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImport(importItem)}
+                        className="text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"
+                      >
+                        View
+                      </button>
+                      {onDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(importItem.id)}
+                          disabled={deletingId === importItem.id}
+                          className="text-sm font-medium text-red-600 transition-colors hover:text-red-700 disabled:opacity-60"
+                        >
+                          {deletingId === importItem.id ? 'Deleting…' : 'Delete'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -338,10 +396,7 @@ export default function ImportHistory({
                 <h3 id="import-preview-title" className="text-lg font-semibold text-gray-900">
                   {previewImport.fileName}
                 </h3>
-                <p className="text-sm text-gray-500">
-                  Imported {new Date(previewImport.timestamp).toLocaleString()} •{' '}
-                  {formatFileSize(previewImport.fileSize)}
-                </p>
+                <p className="text-sm text-gray-500">Imported {formatDateTime(previewImport.timestamp)}</p>
               </div>
               <div className="flex gap-2">
                 <button
@@ -357,11 +412,13 @@ export default function ImportHistory({
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <p className="text-xs font-semibold uppercase text-gray-500">Client</p>
-                  <p className="text-sm text-gray-900">{previewImport.clientId}</p>
+                  <p className="text-sm text-gray-900">
+                    {previewImport.clientName ?? previewImport.clientId}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase text-gray-500">Imported By</p>
-                  <p className="text-sm text-gray-900">{previewImport.importedBy}</p>
+                  <p className="text-sm text-gray-900">{previewImport.importedBy || '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase text-gray-500">Period</p>

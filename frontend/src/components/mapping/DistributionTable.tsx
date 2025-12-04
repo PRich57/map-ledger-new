@@ -86,10 +86,11 @@ const statusLabel = (value: DistributionStatus) =>
   STATUS_DEFINITIONS.find(status => status.value === value)?.label ?? value;
 
 const formatOperationLabel = (operation: DistributionOperationShare) => {
-  if (operation.name && operation.name !== operation.id) {
-    return `${operation.id} – ${operation.name}`;
+  const code = operation.code || operation.id;
+  if (operation.name && operation.name !== code) {
+    return `${code} – ${operation.name}`;
   }
-  return operation.id;
+  return code;
 };
 
 const formatOperations = (row: DistributionRow) => {
@@ -122,6 +123,7 @@ const operationsAreEqual = (
 
     return (
       operation.id === comparison.id &&
+      (operation.code ?? null) === (comparison.code ?? null) &&
       operation.name === comparison.name &&
       (operation.allocation ?? null) === (comparison.allocation ?? null) &&
       (operation.notes ?? '') === (comparison.notes ?? '')
@@ -167,12 +169,12 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
           return;
         }
         client.operations.forEach(operation => {
-          const code = operation.id?.trim();
+          const code = (operation.code || operation.id || '').trim();
           if (!code) {
             return;
           }
           const name = operation.name?.trim() || code;
-          map.set(code, { id: code, name });
+          map.set(code, { id: code, code, name });
         });
       });
     });
@@ -220,9 +222,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       clientOperations.map(operation => ({
         id: operation.id,
         label:
-          operation.name && operation.name !== operation.id
-            ? `${operation.id} – ${operation.name}`
-            : operation.id,
+          operation.name && operation.name !== operation.code
+            ? `${operation.code} – ${operation.name}`
+            : operation.code,
       })),
     [clientOperations],
   );
@@ -244,6 +246,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       if (!id) {
         return acc;
       }
+      const code = operation.code?.trim() || id;
       const allocation =
         typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
           ? operation.allocation
@@ -251,7 +254,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       const notes = operation.notes?.trim();
       acc.push({
         id,
-        name: operation.name?.trim() || id,
+        code,
+        name: operation.name?.trim() || code,
         allocation,
         notes: notes || undefined,
       });
@@ -434,7 +438,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       updateRowOperations(row.id, []);
       return;
     }
-    updateRowOperations(row.id, [{ id: catalogItem.id, name: catalogItem.name }]);
+    updateRowOperations(row.id, [
+      { id: catalogItem.id, code: catalogItem.code, name: catalogItem.name },
+    ]);
   };
 
   const getAriaSort = (columnKey: SortKey): 'ascending' | 'descending' | 'none' => {
