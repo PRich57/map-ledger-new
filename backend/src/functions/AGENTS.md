@@ -1,6 +1,6 @@
 # Client File Persistence Guidelines
 
-Use these schemas when handling client-file, client-file-entities, client-file-sheets, client-header-mapping, and file-records related payloads and database writes. The tables automatically stamp `INSERTED_DTTM` and default `IS_DELETED` to `0`; do not populate `UPDATED_DTTM`, `UPDATED_BY`, `IS_DELETED`, or `DELETED_DTTM` when inserting new rows.
+Use these schemas when handling client-file, client-file-entities, client-file-sheets, client-header-mapping, file-records, and entity-mapping/distribution related payloads and database writes. The tables automatically stamp `INSERTED_DTTM` and default `IS_DELETED` to `0`; do not populate `UPDATED_DTTM`, `UPDATED_BY`, `IS_DELETED`, or `DELETED_DTTM` when inserting new rows. For the tables below, omit `INSERTED_DTTM` from insert statements so the timestamp is generated automatically.
 
 ## ml.CLIENT_FILES
 ```sql
@@ -137,3 +137,192 @@ VALUES (
     NULL
 );
 ```
+
+## ml.ENTITY_ACCOUNT_MAPPING
+```sql
+INSERT INTO ml.ENTITY_ACCOUNT_MAPPING (
+    ENTITY_ID,
+    ENTITY_ACCOUNT_ID,
+    POLARITY,
+    MAPPING_TYPE,
+    PRESET_ID,
+    MAPPING_STATUS,
+    EXCLUSION_PCT,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_ACCOUNTS
+```sql
+INSERT INTO ml.ENTITY_ACCOUNTS (
+    ENTITY_ID,
+    ACCOUNT_ID,
+    ACCOUNT_NAME,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_DISTRIBUTION_PRESETS
+```sql
+INSERT INTO ml.ENTITY_DISTRIBUTION_PRESETS (
+    ENTITY_ID,
+    PRESET_TYPE,
+    PRESET_DESCRIPTION,
+    SCOA_ACCOUNT_ID,
+    METRIC,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_DISTRIBUTION_PRESET_DETAIL
+```sql
+INSERT INTO ml.ENTITY_DISTRIBUTION_PRESET_DETAIL (
+    PRESET_ID,
+    OPERATION_CD,
+    IS_CALCULATED,
+    SPECIFIED_PCT,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_MAPPING_PRESETS
+```sql
+INSERT INTO ml.ENTITY_MAPPING_PRESETS (
+    ENTITY_ID,
+    PRESET_TYPE,
+    PRESET_DESCRIPTION
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_MAPPING_PRESET_DETAIL
+```sql
+INSERT INTO ml.ENTITY_MAPPING_PRESET_DETAIL (
+    PRESET_ID,
+    BASIS_DATAPOINT,
+    TARGET_DATAPOINT,
+    IS_CALCULATED,
+    SPECIFIED_PCT,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_SCOA_ACTIVITY
+```sql
+INSERT INTO ml.ENTITY_SCOA_ACTIVITY (
+    ENTITY_ID,
+    SCOA_ACCOUNT_ID,
+    ACTIVITY_MONTH,
+    ACTIVITY_VALUE,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.ENTITY_SCOA_DISTRIBUTION
+```sql
+INSERT INTO ml.ENTITY_SCOA_DISTRIBUTION (
+    ENTITY_ID,
+    SCOA_ACCOUNT_ID,
+    DISTRIBUTION_TYPE,
+    PRESET_ID,
+    DISTRIBUTION_STATUS,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## ml.OPERATION_SCOA_ACTIVITY
+```sql
+INSERT INTO ml.OPERATION_SCOA_ACTIVITY (
+    OPERATION_CD,
+    SCOA_ACCOUNT_ID,
+    ACTIVITY_MONTH,
+    ACTIVITY_VALUE,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
+);
+```
+
+## Notes for Entity / Mapping / Distribution Tables
+For all of the new ml.ENTITY_* and ml.OPERATION_SCOA_ACTIVITY tables, leave UPDATED_DTTM and UPDATED_BY as NULL on insert. These fields are only to be populated when records are updated.
+
+Do not include INSERTED_DTTM in insert statements for these tables. Each table automatically generates an INSERTED_DTTM timestamp when a record is inserted.
