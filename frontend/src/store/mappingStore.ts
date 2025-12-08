@@ -913,7 +913,7 @@ interface MappingState {
     rows: TrialBalanceRow[];
   }) => void;
   fetchFileRecords: (
-    uploadId: string,
+    uploadGuid: string,
     options?: {
       clientId?: string | null;
       entities?: EntitySummary[];
@@ -1624,15 +1624,15 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
     syncDynamicAllocationState(resolvedAccounts, rows, normalizedPeriod);
   },
-  fetchFileRecords: async (uploadId, options) => {
-    if (!uploadId) {
+  fetchFileRecords: async (uploadGuid, options) => {
+    if (!uploadGuid) {
       return;
     }
 
     set({ isLoadingFromApi: true, apiError: null });
 
     try {
-      const params = new URLSearchParams({ fileUploadId: uploadId });
+      const params = new URLSearchParams({ fileUploadGuid: uploadGuid });
       const response = await fetch(`${API_BASE_URL}/file-records?${params.toString()}`);
       if (!response.ok) {
         throw new Error(`Failed to load file records (${response.status})`);
@@ -1640,7 +1640,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
       const payload = (await response.json()) as { items?: FileRecord[] };
       const records = payload.items ?? [];
-      logDebug('Fetched file records', { count: records.length, uploadId });
+      logDebug('Fetched file records', { count: records.length, uploadGuid });
 
       const rows: TrialBalanceRow[] = records.map((record) => ({
         entity: record.entityName ?? 'Imported Entity',
@@ -1654,7 +1654,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         options?.period ?? rows.find((row) => row.glMonth)?.glMonth ?? null;
 
       get().loadImportedAccounts({
-        uploadId,
+        uploadId: uploadGuid,
         clientId: options?.clientId ?? null,
         entityIds: options?.entityIds,
         entities: options?.entities,
