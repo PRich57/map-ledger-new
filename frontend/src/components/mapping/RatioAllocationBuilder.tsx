@@ -162,7 +162,7 @@ const RatioAllocationBuilder = ({
             canonicalUsers.has(dropdownKey)
           );
         })
-        .map(account => ({ value: account.id, label: account.name }));
+        .map(account => ({ id: account.id, value: account.id, label: account.name }));
     },
     [basisAccounts, newPresetDynamicUsage, newPresetCanonicalUsage],
   );
@@ -183,17 +183,17 @@ const RatioAllocationBuilder = ({
           canonicalUsers.has(dropdownKey)
         );
       })
-        .map(option => ({ value: option.id, label: option.label }));
+        .map(option => ({ id: option.id, value: option.id, label: option.label }));
     },
     [canonicalTargetResolver, newPresetCanonicalUsage, preparedTargetCatalog],
   );
 
   const getPresetTargetOptions = useCallback(
-    (presetId: string, rowIndex?: number) => {
-      const preset = presets.find(item => item.id === presetId);
-      if (!preset) {
-        return preparedTargetCatalog.map(option => ({ id: option.id, label: option.label }));
-      }
+      (presetId: string, rowIndex?: number) => {
+        const preset = presets.find(item => item.id === presetId);
+        if (!preset) {
+          return preparedTargetCatalog.map(option => ({ id: option.id, value: option.id, label: option.label }));
+        }
 
       const canonicalUsage = new Map<string, Set<string>>();
 
@@ -237,7 +237,7 @@ const RatioAllocationBuilder = ({
             canonicalUsers.has(dropdownKey)
           );
         })
-        .map(option => ({ id: option.id, label: option.label }));
+        .map(option => ({ id: option.id, value: option.id, label: option.label }));
     },
     [basisAccounts, canonicalTargetResolver, preparedTargetCatalog, presets],
   );
