@@ -19,6 +19,7 @@ import './clientEntities';
 import './clientHeaderMappings';
 import './fileRecords';
 import './entityDistributionPresetDetails';
+import './entityAccountMappings';
 import './entityMappingPresetDetails';
 import './entityMappingPresets';
 import './entityScoaActivity';
