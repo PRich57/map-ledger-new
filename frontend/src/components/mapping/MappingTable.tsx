@@ -44,6 +44,7 @@ import RatioAllocationManager from './RatioAllocationManager';
 import { getGroupTotal } from '../../utils/dynamicAllocation';
 import { formatCurrencyAmount } from '../../utils/currency';
 import { computeDynamicExclusionSummaries } from '../../utils/dynamicExclusions';
+import SearchableSelect from '../ui/SearchableSelect';
 
 type SortKey =
   | 'accountId'
@@ -640,24 +641,15 @@ export default function MappingTable() {
                           >
                             Select target SCoA for {account.accountName}
                           </label>
-                          <select
-                          id={`scoa-${account.id}`}
-                          value={targetScoa}
-                          onChange={(event) =>
-                            updateTarget(account.id, event.target.value)
-                          }
-                          title={
-                            targetScoaLabel || 'Select a target Statement of Accounts value'
-                          }
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        >
-                          <option value="">Select target</option>
-                            {coaOptions.map((option) => (
-                              <option key={option.id} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
+                          <SearchableSelect
+                            id={`scoa-${account.id}`}
+                            value={targetScoa}
+                            options={coaOptions}
+                            placeholder="Search target"
+                            onChange={nextValue => updateTarget(account.id, nextValue)}
+                            noOptionsMessage="No matching accounts"
+                            className="w-full"
+                          />
                         </>
                       )}
                     </td>
