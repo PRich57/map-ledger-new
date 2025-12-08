@@ -8,9 +8,13 @@ import {
   updateEntityMappingPreset,
 } from '../../repositories/entityMappingPresetRepository';
 
-const parsePresetId = (value: unknown): number | undefined => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+const parsePresetGuid = (value: unknown): string | undefined => {
+  const guid = getFirstStringValue(value);
+  if (!guid) {
+    return undefined;
+  }
+  const trimmed = guid.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 };
 
 const normalizeOptionalText = (value: unknown): string | null => {
@@ -76,16 +80,16 @@ const updateHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const body = await readJson(request);
-    const presetId = parsePresetId(body?.presetId);
+    const presetGuid = parsePresetGuid(body?.presetGuid);
     const presetType = getFirstStringValue(body?.presetType);
     const presetDescription = normalizeOptionalText(body?.presetDescription);
     const updatedBy = normalizeOptionalText(body?.updatedBy);
 
-    if (!presetId) {
-      return json({ message: 'presetId is required' }, 400);
+    if (!presetGuid) {
+      return json({ message: 'presetGuid is required' }, 400);
     }
 
-    const updated = await updateEntityMappingPreset(presetId, {
+    const updated = await updateEntityMappingPreset(presetGuid, {
       presetType: presetType ?? undefined,
       presetDescription: presetDescription ?? undefined,
       updatedBy,
