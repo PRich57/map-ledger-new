@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
+import crypto from 'node:crypto';
 import { json, readJson } from '../../http';
 import { buildErrorResponse } from '../datapointConfigs/utils';
 import { getFirstStringValue } from '../../utils/requestParsers';
@@ -37,6 +38,7 @@ const createHandler = async (
     const entityId = getFirstStringValue(body?.entityId);
     const presetType = getFirstStringValue(body?.presetType);
     const presetDescription = normalizeOptionalText(body?.presetDescription);
+    const presetGuid = parsePresetGuid(body?.presetGuid) ?? crypto.randomUUID();
 
     if (!entityId || !presetType) {
       return json({ message: 'entityId and presetType are required' }, 400);
@@ -46,6 +48,7 @@ const createHandler = async (
       entityId,
       presetType,
       presetDescription,
+      presetGuid,
     });
 
     if (!created) {
