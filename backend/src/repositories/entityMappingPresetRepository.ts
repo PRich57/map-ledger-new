@@ -4,9 +4,11 @@ export interface EntityMappingPresetInput {
   entityId: string;
   presetType: string;
   presetDescription?: string | null;
+  presetGuid?: string;
 }
 
-export interface EntityMappingPresetRow extends EntityMappingPresetInput {
+export interface EntityMappingPresetRow
+  extends Omit<EntityMappingPresetInput, 'presetGuid'> {
   presetGuid: string;
   insertedDttm?: string | null;
   updatedDttm?: string | null;
@@ -16,6 +18,14 @@ export interface EntityMappingPresetRow extends EntityMappingPresetInput {
 const TABLE_NAME = 'ml.ENTITY_MAPPING_PRESETS';
 
 const normalizeText = (value?: string | null): string | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizePresetGuid = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
     return null;
   }
@@ -83,7 +93,22 @@ export const createEntityMappingPreset = async (
     return null;
   }
 
+  const presetGuid = normalizePresetGuid(input.presetGuid);
   const presetDescription = normalizeText(input.presetDescription);
+
+  const columns = [
+    'ENTITY_ID',
+    'PRESET_TYPE',
+    'PRESET_DESCRIPTION',
+    ...(presetGuid ? ['PRESET_GUID'] : []),
+  ];
+
+  const values = [
+    '@entityId',
+    '@presetType',
+    '@presetDescription',
+    ...(presetGuid ? ['@presetGuid'] : []),
+  ];
   const result = await runQuery<{
     preset_guid: string;
     entity_id: string;
@@ -92,9 +117,7 @@ export const createEntityMappingPreset = async (
     inserted_dttm?: Date | string | null;
   }>(
     `INSERT INTO ${TABLE_NAME} (
-      ENTITY_ID,
-      PRESET_TYPE,
-      PRESET_DESCRIPTION
+      ${columns.join(',\n      ')}
     )
     OUTPUT
       INSERTED.PRESET_GUID as preset_guid,
@@ -103,14 +126,13 @@ export const createEntityMappingPreset = async (
       INSERTED.PRESET_DESCRIPTION as preset_description,
       INSERTED.INSERTED_DTTM as inserted_dttm
     VALUES (
-      @entityId,
-      @presetType,
-      @presetDescription
+      ${values.join(',\n      ')}
     )`,
     {
       entityId: input.entityId,
       presetType: input.presetType,
       presetDescription,
+      ...(presetGuid ? { presetGuid } : {}),
     }
   );
 
@@ -135,7 +157,9 @@ export const createEntityMappingPreset = async (
 
 export const updateEntityMappingPreset = async (
   presetGuid: string,
-  updates: Partial<EntityMappingPresetInput> & { updatedBy?: string | null }
+  updates: Partial<Omit<EntityMappingPresetInput, 'presetGuid'>> & {
+    updatedBy?: string | null;
+  }
 ): Promise<EntityMappingPresetRow | null> => {
   const normalizedPresetGuid = normalizeText(presetGuid);
   if (!normalizedPresetGuid) {
