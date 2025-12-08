@@ -84,25 +84,26 @@ const mapSplitDefinitionsToPresetDetails = (
     return [];
   }
 
-  return splits
-    .map((split) => {
-      const targetDatapoint = normalizeText(split.targetId);
-      if (!targetDatapoint) {
-        return null;
-      }
+  return splits.reduce<EntityMappingPresetDetailInput[]>((results, split) => {
+    const targetDatapoint = normalizeText(split.targetId);
+    if (!targetDatapoint) {
+      return results;
+    }
 
-      const isCalculated = split.isCalculated ?? mappingType === 'dynamic';
+    const basisDatapoint = normalizeText(split.basisDatapoint);
+    const isCalculated = split.isCalculated ?? mappingType === 'dynamic';
 
-      return {
-        presetGuid,
-        basisDatapoint: normalizeText(split.basisDatapoint),
-        targetDatapoint,
-        isCalculated,
-        specifiedPct: normalizeNumber(split.allocationValue),
-        updatedBy,
-      } satisfies EntityMappingPresetDetailInput;
-    })
-    .filter((input): input is EntityMappingPresetDetailInput => Boolean(input));
+    results.push({
+      presetGuid,
+      basisDatapoint: basisDatapoint ?? null,
+      targetDatapoint,
+      isCalculated,
+      specifiedPct: normalizeNumber(split.allocationValue),
+      updatedBy: updatedBy ?? null,
+    });
+
+    return results;
+  }, []);
 };
 
 const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
@@ -110,27 +111,36 @@ const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
     return [];
   }
 
-  const rawItems = Array.isArray((payload as Record<string, unknown>)?.items)
-    ? (payload as Record<string, unknown>).items
+  const payloadRecord = payload as Record<string, unknown>;
+  const candidateItems = payloadRecord?.items;
+  const rawItems: unknown[] = Array.isArray(candidateItems)
+    ? candidateItems
     : Array.isArray(payload)
       ? payload
       : [payload];
 
-  return rawItems
-    .map((entry) => ({
-      entityId: getFirstStringValue((entry as Record<string, unknown>)?.entityId),
-      entityAccountId: getFirstStringValue((entry as Record<string, unknown>)?.entityAccountId),
-      polarity: normalizeText((entry as Record<string, unknown>)?.polarity),
-      mappingType: normalizeMappingType((entry as Record<string, unknown>)?.mappingType),
-      mappingStatus: normalizeText((entry as Record<string, unknown>)?.mappingStatus),
-      presetId: normalizeText((entry as Record<string, unknown>)?.presetId),
-      exclusionPct: normalizeNumber((entry as Record<string, unknown>)?.exclusionPct),
-      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      splitDefinitions: (entry as Record<string, unknown>)?.splitDefinitions as
-        | IncomingSplitDefinition[]
-        | undefined,
-    }))
-    .filter((item) => item.entityId && item.entityAccountId) as MappingSaveInput[];
+  const inputs = rawItems
+    .map((entry): MappingSaveInput => {
+      const entryRecord = entry as Record<string, unknown>;
+      const splitDefinitions = Array.isArray(entryRecord?.splitDefinitions)
+        ? (entryRecord.splitDefinitions as IncomingSplitDefinition[])
+        : undefined;
+
+      return {
+        entityId: getFirstStringValue(entryRecord?.entityId),
+        entityAccountId: getFirstStringValue(entryRecord?.entityAccountId),
+        polarity: normalizeText(entryRecord?.polarity),
+        mappingType: normalizeMappingType(entryRecord?.mappingType),
+        mappingStatus: normalizeText(entryRecord?.mappingStatus),
+        presetId: normalizeText(entryRecord?.presetId),
+        exclusionPct: normalizeNumber(entryRecord?.exclusionPct),
+        updatedBy: normalizeText(entryRecord?.updatedBy),
+        splitDefinitions,
+      };
+    })
+    .filter((item): item is MappingSaveInput => Boolean(item.entityId && item.entityAccountId));
+
+  return inputs;
 };
 
 const syncPresetDetails = async (
