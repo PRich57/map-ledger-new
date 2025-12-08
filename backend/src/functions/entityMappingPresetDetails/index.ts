@@ -52,26 +52,28 @@ const buildInputs = (payload: unknown): EntityMappingPresetDetailInput[] => {
     return [];
   }
 
-  return payload
-    .map((entry) => {
-      const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
-      const basisDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.basisDatapoint);
-      const targetDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.targetDatapoint);
+  const inputs: EntityMappingPresetDetailInput[] = [];
 
-      if (!presetId || !basisDatapoint || !targetDatapoint) {
-        return null;
-      }
+  for (const entry of payload) {
+    const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
+    const basisDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.basisDatapoint);
+    const targetDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.targetDatapoint);
 
-      return {
-        presetId,
-        basisDatapoint,
-        targetDatapoint,
-        isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated),
-        specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
-        updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      } satisfies EntityMappingPresetDetailInput;
-    })
-    .filter((value): value is EntityMappingPresetDetailInput => value !== null);
+    if (!presetId || !basisDatapoint || !targetDatapoint) {
+      continue;
+    }
+
+    inputs.push({
+      presetId,
+      basisDatapoint,
+      targetDatapoint,
+      isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated) ?? null,
+      specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
+      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
+    });
+  }
+
+  return inputs;
 };
 
 const listHandler = async (
