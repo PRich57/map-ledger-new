@@ -648,7 +648,7 @@ export default function MappingTable() {
                             placeholder="Search target"
                             onChange={nextValue => updateTarget(account.id, nextValue)}
                             noOptionsMessage="No matching accounts"
-                            className="min-w-[14rem]"
+                            className="w-full"
                           />
                         </>
                       )}
