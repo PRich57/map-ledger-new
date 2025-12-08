@@ -9,11 +9,6 @@ import {
   EntityMappingPresetDetailInput,
 } from '../../repositories/entityMappingPresetDetailRepository';
 
-const parseNumber = (value: unknown): number | undefined => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
-
 const normalizeBool = (value: unknown): boolean | null => {
   if (value === null) {
     return null;
@@ -47,6 +42,21 @@ const normalizeText = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const parseNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const parsePresetGuid = (value: unknown): string | null => {
+  const text = normalizeText(value);
+
+  if (!text || /^\d+$/.test(text)) {
+    return null;
+  }
+
+  return text;
+};
+
 const buildInputs = (payload: unknown): EntityMappingPresetDetailInput[] => {
   if (!Array.isArray(payload)) {
     return [];
@@ -55,20 +65,33 @@ const buildInputs = (payload: unknown): EntityMappingPresetDetailInput[] => {
   const inputs: EntityMappingPresetDetailInput[] = [];
 
   for (const entry of payload) {
-    const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
-    const basisDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.basisDatapoint);
-    const targetDatapoint = getFirstStringValue((entry as Record<string, unknown>)?.targetDatapoint);
+    const presetGuid =
+      parsePresetGuid((entry as Record<string, unknown>)?.presetGuid) ??
+      parsePresetGuid((entry as Record<string, unknown>)?.presetId);
+    const basisDatapoint = normalizeText(
+      getFirstStringValue((entry as Record<string, unknown>)?.basisDatapoint)
+    );
+    const targetDatapoint = normalizeText(
+      getFirstStringValue((entry as Record<string, unknown>)?.targetDatapoint)
+    );
 
-    if (!presetId || !basisDatapoint || !targetDatapoint) {
+    const isCalculated = normalizeBool((entry as Record<string, unknown>)?.isCalculated);
+    const specifiedPct = parseNumber((entry as Record<string, unknown>)?.specifiedPct);
+
+    if (!presetGuid || !targetDatapoint) {
+      continue;
+    }
+
+    if (isCalculated === true && !basisDatapoint) {
       continue;
     }
 
     inputs.push({
-      presetId,
+      presetGuid,
       basisDatapoint,
       targetDatapoint,
-      isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated) ?? null,
-      specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
+      isCalculated: isCalculated ?? null,
+      specifiedPct: specifiedPct ?? null,
       updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
     });
   }
@@ -81,8 +104,17 @@ const listHandler = async (
   context: InvocationContext
 ): Promise<HttpResponseInit> => {
   try {
-    const presetId = parseNumber(request.query.get('presetId'));
-    const items = await listEntityMappingPresetDetails(presetId);
+    const presetGuid = parsePresetGuid(
+      getFirstStringValue(request.query.get('presetGuid') ?? request.query.get('presetId'))
+    );
+
+    if (request.query.has('presetGuid') || request.query.has('presetId')) {
+      if (!presetGuid) {
+        return json({ message: 'presetGuid must be a non-numeric string' }, 400);
+      }
+    }
+
+    const items = await listEntityMappingPresetDetails(presetGuid ?? undefined);
     return json({ items });
   } catch (error) {
     context.error('Failed to list entity mapping preset details', error);
@@ -116,21 +148,27 @@ const updateHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const body = await readJson(request);
-    const presetId = parseNumber(body?.presetId);
-    const basisDatapoint = getFirstStringValue(body?.basisDatapoint);
-    const targetDatapoint = getFirstStringValue(body?.targetDatapoint);
+    const presetGuid = parsePresetGuid(body?.presetGuid ?? body?.presetId);
+    const basisDatapoint = normalizeText(getFirstStringValue(body?.basisDatapoint));
+    const targetDatapoint = normalizeText(getFirstStringValue(body?.targetDatapoint));
+    const isCalculated = normalizeBool(body?.isCalculated);
+    const specifiedPct = parseNumber(body?.specifiedPct);
 
-    if (!presetId || !basisDatapoint || !targetDatapoint) {
-      return json({ message: 'presetId, basisDatapoint, and targetDatapoint are required' }, 400);
+    if (!presetGuid || !targetDatapoint) {
+      return json({ message: 'presetGuid and targetDatapoint are required' }, 400);
+    }
+
+    if (isCalculated === true && !basisDatapoint) {
+      return json({ message: 'basisDatapoint is required for calculated mappings' }, 400);
     }
 
     const updated = await updateEntityMappingPresetDetail(
-      presetId,
+      presetGuid,
       basisDatapoint,
       targetDatapoint,
       {
-        isCalculated: normalizeBool(body?.isCalculated) ?? undefined,
-        specifiedPct: parseNumber(body?.specifiedPct),
+        isCalculated: isCalculated ?? undefined,
+        specifiedPct: specifiedPct,
         updatedBy: normalizeText(body?.updatedBy),
       }
     );
