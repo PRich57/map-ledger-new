@@ -1,8 +1,8 @@
 import { runQuery } from '../utils/sqlClient';
 
 export interface EntityMappingPresetDetailInput {
-  presetId: number;
-  basisDatapoint: string;
+  presetGuid: string;
+  basisDatapoint?: string | null;
   targetDatapoint: string;
   isCalculated?: boolean | null;
   specifiedPct?: number | null;
@@ -33,8 +33,8 @@ const normalizeText = (value?: string | null): string | null => {
 };
 
 const mapRow = (row: {
-  preset_id: number;
-  basis_datapoint: string;
+  preset_guid: string;
+  basis_datapoint: string | null;
   target_datapoint: string;
   is_calculated?: number | boolean | null;
   specified_pct?: number | null;
@@ -42,7 +42,7 @@ const mapRow = (row: {
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
 }): EntityMappingPresetDetailRow => ({
-  presetId: row.preset_id,
+  presetGuid: row.preset_guid,
   basisDatapoint: row.basis_datapoint,
   targetDatapoint: row.target_datapoint,
   isCalculated: typeof row.is_calculated === 'boolean'
@@ -63,21 +63,23 @@ const mapRow = (row: {
 });
 
 export const listEntityMappingPresetDetails = async (
-  presetId?: number
+  presetGuid?: string
 ): Promise<EntityMappingPresetDetailRow[]> => {
   const params: Record<string, unknown> = {};
   const filters: string[] = [];
 
-  if (presetId) {
-    params.presetId = presetId;
-    filters.push('PRESET_ID = @presetId');
+  const normalizedPresetGuid = normalizeText(presetGuid);
+
+  if (normalizedPresetGuid) {
+    params.presetGuid = normalizedPresetGuid;
+    filters.push('PRESET_GUID = @presetGuid');
   }
 
   const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   const result = await runQuery<{
-    preset_id: number;
-    basis_datapoint: string;
+    preset_guid: string;
+    basis_datapoint: string | null;
     target_datapoint: string;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
@@ -86,7 +88,7 @@ export const listEntityMappingPresetDetails = async (
     updated_by?: string | null;
   }>(
     `SELECT
-      PRESET_ID as preset_id,
+      PRESET_GUID as preset_guid,
       BASIS_DATAPOINT as basis_datapoint,
       TARGET_DATAPOINT as target_datapoint,
       IS_CALCULATED as is_calculated,
@@ -96,7 +98,7 @@ export const listEntityMappingPresetDetails = async (
       UPDATED_BY as updated_by
     FROM ${TABLE_NAME}
     ${whereClause}
-    ORDER BY PRESET_ID DESC`,
+    ORDER BY PRESET_GUID DESC`,
     params
   );
 
@@ -113,20 +115,20 @@ export const createEntityMappingPresetDetails = async (
   const params: Record<string, unknown> = {};
   const valuesClause = inputs
     .map((input, index) => {
-      params[`presetId${index}`] = input.presetId;
+      params[`presetGuid${index}`] = normalizeText(input.presetGuid);
       params[`basisDatapoint${index}`] = normalizeText(input.basisDatapoint);
       params[`targetDatapoint${index}`] = normalizeText(input.targetDatapoint);
       params[`isCalculated${index}`] = toBit(input.isCalculated);
       params[`specifiedPct${index}`] = input.specifiedPct ?? null;
       params[`updatedBy${index}`] = normalizeText(input.updatedBy);
 
-      return `(@presetId${index}, @basisDatapoint${index}, @targetDatapoint${index}, @isCalculated${index}, @specifiedPct${index}, NULL, @updatedBy${index})`;
+      return `(@presetGuid${index}, @basisDatapoint${index}, @targetDatapoint${index}, @isCalculated${index}, @specifiedPct${index}, @updatedBy${index})`;
     })
     .join(', ');
 
   const result = await runQuery<{
-    preset_id: number;
-    basis_datapoint: string;
+    preset_guid: string;
+    basis_datapoint: string | null;
     target_datapoint: string;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
@@ -135,16 +137,15 @@ export const createEntityMappingPresetDetails = async (
     updated_by?: string | null;
   }>(
     `INSERT INTO ${TABLE_NAME} (
-      PRESET_ID,
+      PRESET_GUID,
       BASIS_DATAPOINT,
       TARGET_DATAPOINT,
       IS_CALCULATED,
       SPECIFIED_PCT,
-      UPDATED_DTTM,
       UPDATED_BY
     )
     OUTPUT
-      INSERTED.PRESET_ID as preset_id,
+      INSERTED.PRESET_GUID as preset_guid,
       INSERTED.BASIS_DATAPOINT as basis_datapoint,
       INSERTED.TARGET_DATAPOINT as target_datapoint,
       INSERTED.IS_CALCULATED as is_calculated,
@@ -160,12 +161,12 @@ export const createEntityMappingPresetDetails = async (
 };
 
 export const updateEntityMappingPresetDetail = async (
-  presetId: number,
-  basisDatapoint: string,
+  presetGuid: string,
+  basisDatapoint: string | null,
   targetDatapoint: string,
-  updates: Partial<Omit<EntityMappingPresetDetailInput, 'presetId' | 'basisDatapoint' | 'targetDatapoint'>>
+  updates: Partial<Omit<EntityMappingPresetDetailInput, 'presetGuid' | 'basisDatapoint' | 'targetDatapoint'>>
 ): Promise<EntityMappingPresetDetailRow | null> => {
-  if (!Number.isFinite(presetId) || !basisDatapoint || !targetDatapoint) {
+  if (!presetGuid || !targetDatapoint || (!basisDatapoint && updates.isCalculated)) {
     return null;
   }
 
@@ -174,14 +175,13 @@ export const updateEntityMappingPresetDetail = async (
     SET
       IS_CALCULATED = ISNULL(@isCalculated, IS_CALCULATED),
       SPECIFIED_PCT = ISNULL(@specifiedPct, SPECIFIED_PCT),
-      UPDATED_BY = @updatedBy,
-      UPDATED_DTTM = SYSUTCDATETIME()
-    WHERE PRESET_ID = @presetId
-      AND BASIS_DATAPOINT = @basisDatapoint
+      UPDATED_BY = @updatedBy
+    WHERE PRESET_GUID = @presetGuid
+      AND ((BASIS_DATAPOINT IS NULL AND @basisDatapoint IS NULL) OR BASIS_DATAPOINT = @basisDatapoint)
       AND TARGET_DATAPOINT = @targetDatapoint`,
     {
-      presetId,
-      basisDatapoint,
+      presetGuid,
+      basisDatapoint: normalizeText(basisDatapoint),
       targetDatapoint,
       isCalculated: toBit(updates.isCalculated ?? null),
       specifiedPct: updates.specifiedPct ?? null,
@@ -189,10 +189,11 @@ export const updateEntityMappingPresetDetail = async (
     }
   );
 
-  const updatedRows = await listEntityMappingPresetDetails(presetId);
+  const updatedRows = await listEntityMappingPresetDetails(presetGuid);
   return updatedRows.find(
     (row) =>
-      row.basisDatapoint === basisDatapoint && row.targetDatapoint === targetDatapoint
+      row.basisDatapoint === normalizeText(basisDatapoint) &&
+      row.targetDatapoint === targetDatapoint
   ) ?? null;
 };
 
