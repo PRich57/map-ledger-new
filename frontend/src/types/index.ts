@@ -226,7 +226,8 @@ export interface Import {
 }
 
 export interface FileRecord {
-  fileUploadId: string;
+  fileUploadGuid: string;
+  fileUploadId?: string;
   recordId: string;
   accountId: string;
   accountName: string;
