@@ -7,7 +7,7 @@ export interface EntityMappingPresetInput {
 }
 
 export interface EntityMappingPresetRow extends EntityMappingPresetInput {
-  presetId: number;
+  presetGuid: string;
   insertedDttm?: string | null;
   updatedDttm?: string | null;
   updatedBy?: string | null;
@@ -37,7 +37,7 @@ export const listEntityMappingPresets = async (
   const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
 
   const result = await runQuery<{
-    preset_id: number;
+    preset_guid: string;
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
@@ -46,7 +46,7 @@ export const listEntityMappingPresets = async (
     updated_by?: string | null;
   }>(
     `SELECT
-      PRESET_ID as preset_id,
+      PRESET_GUID as preset_guid,
       ENTITY_ID as entity_id,
       PRESET_TYPE as preset_type,
       PRESET_DESCRIPTION as preset_description,
@@ -55,12 +55,12 @@ export const listEntityMappingPresets = async (
       UPDATED_BY as updated_by
     FROM ${TABLE_NAME}
     ${whereClause}
-    ORDER BY PRESET_ID DESC`,
+    ORDER BY INSERTED_DTTM DESC`,
     params
   );
 
   return (result.recordset ?? []).map((row) => ({
-    presetId: row.preset_id,
+    presetGuid: row.preset_guid,
     entityId: row.entity_id,
     presetType: row.preset_type,
     presetDescription: row.preset_description ?? null,
@@ -85,7 +85,7 @@ export const createEntityMappingPreset = async (
 
   const presetDescription = normalizeText(input.presetDescription);
   const result = await runQuery<{
-    preset_id: number;
+    preset_guid: string;
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
@@ -97,7 +97,7 @@ export const createEntityMappingPreset = async (
       PRESET_DESCRIPTION
     )
     OUTPUT
-      INSERTED.PRESET_ID as preset_id,
+      INSERTED.PRESET_GUID as preset_guid,
       INSERTED.ENTITY_ID as entity_id,
       INSERTED.PRESET_TYPE as preset_type,
       INSERTED.PRESET_DESCRIPTION as preset_description,
@@ -120,7 +120,7 @@ export const createEntityMappingPreset = async (
   }
 
   return {
-    presetId: row.preset_id,
+    presetGuid: row.preset_guid,
     entityId: row.entity_id,
     presetType: row.preset_type,
     presetDescription: row.preset_description ?? null,
@@ -134,10 +134,11 @@ export const createEntityMappingPreset = async (
 };
 
 export const updateEntityMappingPreset = async (
-  presetId: number,
+  presetGuid: string,
   updates: Partial<EntityMappingPresetInput> & { updatedBy?: string | null }
 ): Promise<EntityMappingPresetRow | null> => {
-  if (!Number.isFinite(presetId)) {
+  const normalizedPresetGuid = normalizeText(presetGuid);
+  if (!normalizedPresetGuid) {
     return null;
   }
 
@@ -150,9 +151,9 @@ export const updateEntityMappingPreset = async (
       PRESET_DESCRIPTION = ISNULL(@presetDescription, PRESET_DESCRIPTION),
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
-    WHERE PRESET_ID = @presetId`,
+    WHERE PRESET_GUID = @presetGuid`,
     {
-      presetId,
+      presetGuid: normalizedPresetGuid,
       presetType: updates.presetType,
       presetDescription,
       updatedBy: updates.updatedBy ?? null,
@@ -160,7 +161,7 @@ export const updateEntityMappingPreset = async (
   );
 
   const updatedRows = await listEntityMappingPresets();
-  return updatedRows.find((preset) => preset.presetId === presetId) ?? null;
+  return updatedRows.find((preset) => preset.presetGuid === normalizedPresetGuid) ?? null;
 };
 
 export default listEntityMappingPresets;
