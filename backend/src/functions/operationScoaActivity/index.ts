@@ -30,26 +30,28 @@ const buildInputs = (payload: unknown): OperationScoaActivityInput[] => {
     return [];
   }
 
-  return payload
-    .map((entry) => {
-      const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
-      const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
-      const activityMonth = getFirstStringValue((entry as Record<string, unknown>)?.activityMonth);
-      const activityValue = parseNumber((entry as Record<string, unknown>)?.activityValue);
+  const inputs: OperationScoaActivityInput[] = [];
 
-      if (!operationCd || !scoaAccountId || !activityMonth || activityValue === undefined) {
-        return null;
-      }
+  for (const entry of payload) {
+    const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
+    const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
+    const activityMonth = getFirstStringValue((entry as Record<string, unknown>)?.activityMonth);
+    const activityValue = parseNumber((entry as Record<string, unknown>)?.activityValue);
 
-      return {
-        operationCd,
-        scoaAccountId,
-        activityMonth,
-        activityValue,
-        updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      } satisfies OperationScoaActivityInput;
-    })
-    .filter((value): value is OperationScoaActivityInput => value !== null);
+    if (!operationCd || !scoaAccountId || !activityMonth || activityValue === undefined) {
+      continue;
+    }
+
+    inputs.push({
+      operationCd,
+      scoaAccountId,
+      activityMonth,
+      activityValue,
+      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
+    });
+  }
+
+  return inputs;
 };
 
 const listHandler = async (

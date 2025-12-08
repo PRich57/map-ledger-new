@@ -30,26 +30,28 @@ const buildInputs = (payload: unknown): EntityScoaActivityInput[] => {
     return [];
   }
 
-  return payload
-    .map((entry) => {
-      const entityId = getFirstStringValue((entry as Record<string, unknown>)?.entityId);
-      const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
-      const activityMonth = getFirstStringValue((entry as Record<string, unknown>)?.activityMonth);
-      const activityValue = parseNumber((entry as Record<string, unknown>)?.activityValue);
+  const inputs: EntityScoaActivityInput[] = [];
 
-      if (!entityId || !scoaAccountId || !activityMonth || activityValue === undefined) {
-        return null;
-      }
+  for (const entry of payload) {
+    const entityId = getFirstStringValue((entry as Record<string, unknown>)?.entityId);
+    const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
+    const activityMonth = getFirstStringValue((entry as Record<string, unknown>)?.activityMonth);
+    const activityValue = parseNumber((entry as Record<string, unknown>)?.activityValue);
 
-      return {
-        entityId,
-        scoaAccountId,
-        activityMonth,
-        activityValue,
-        updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      } satisfies EntityScoaActivityInput;
-    })
-    .filter((value): value is EntityScoaActivityInput => value !== null);
+    if (!entityId || !scoaAccountId || !activityMonth || activityValue === undefined) {
+      continue;
+    }
+
+    inputs.push({
+      entityId,
+      scoaAccountId,
+      activityMonth,
+      activityValue,
+      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
+    });
+  }
+
+  return inputs;
 };
 
 const listHandler = async (

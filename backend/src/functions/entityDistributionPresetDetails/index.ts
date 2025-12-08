@@ -52,24 +52,26 @@ const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] =>
     return [];
   }
 
-  return payload
-    .map((entry) => {
-      const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
-      const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
+  const inputs: EntityDistributionPresetDetailInput[] = [];
 
-      if (!presetId || !operationCd) {
-        return null;
-      }
+  for (const entry of payload) {
+    const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
+    const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
 
-      return {
-        presetId,
-        operationCd,
-        isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated),
-        specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
-        updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      } satisfies EntityDistributionPresetDetailInput;
-    })
-    .filter((value): value is EntityDistributionPresetDetailInput => value !== null);
+    if (!presetId || !operationCd) {
+      continue;
+    }
+
+    inputs.push({
+      presetId,
+      operationCd,
+      isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated) ?? null,
+      specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
+      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
+    });
+  }
+
+  return inputs;
 };
 
 const listHandler = async (

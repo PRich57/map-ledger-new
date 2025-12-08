@@ -30,26 +30,28 @@ const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
     return [];
   }
 
-  return payload
-    .map((entry) => {
-      const entityId = getFirstStringValue((entry as Record<string, unknown>)?.entityId);
-      const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
-      const distributionType = getFirstStringValue((entry as Record<string, unknown>)?.distributionType);
+  const inputs: EntityScoaDistributionInput[] = [];
 
-      if (!entityId || !scoaAccountId || !distributionType) {
-        return null;
-      }
+  for (const entry of payload) {
+    const entityId = getFirstStringValue((entry as Record<string, unknown>)?.entityId);
+    const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
+    const distributionType = getFirstStringValue((entry as Record<string, unknown>)?.distributionType);
 
-      return {
-        entityId,
-        scoaAccountId,
-        distributionType,
-        presetId: parseNumber((entry as Record<string, unknown>)?.presetId) ?? null,
-        distributionStatus: normalizeText((entry as Record<string, unknown>)?.distributionStatus),
-        updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
-      } satisfies EntityScoaDistributionInput;
-    })
-    .filter((value): value is EntityScoaDistributionInput => value !== null);
+    if (!entityId || !scoaAccountId || !distributionType) {
+      continue;
+    }
+
+    inputs.push({
+      entityId,
+      scoaAccountId,
+      distributionType,
+      presetId: parseNumber((entry as Record<string, unknown>)?.presetId) ?? null,
+      distributionStatus: normalizeText((entry as Record<string, unknown>)?.distributionStatus),
+      updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
+    });
+  }
+
+  return inputs;
 };
 
 const listHandler = async (
