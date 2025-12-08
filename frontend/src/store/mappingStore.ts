@@ -1661,7 +1661,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
       const rows: TrialBalanceRow[] = records.map((record) => ({
-        entity: record.entityName ?? undefined,
+        entity: record.entityName ?? '',
         accountId: record.accountId,
         description: record.accountName,
         netChange: record.activityAmount ?? 0,
