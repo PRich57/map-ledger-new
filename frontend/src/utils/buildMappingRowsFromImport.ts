@@ -55,10 +55,8 @@ const matchSelectedEntity = (
 
 const normalizeEntity = (
   entity: string | undefined,
-  fallbackId: string,
-  fallbackName: string,
   selectedEntities?: EntitySummary[],
-): { id: string; name: string } => {
+): { id: string | null; name: string | null } => {
   const matchedEntity = matchSelectedEntity(entity, selectedEntities);
   if (matchedEntity) {
     return { id: matchedEntity.id, name: matchedEntity.name };
@@ -68,17 +66,12 @@ const normalizeEntity = (
   if (trimmed && trimmed.length > 0) {
     const normalizedId = slugify(trimmed);
     return {
-      id: normalizedId.length > 0 ? normalizedId : fallbackId,
+      id: normalizedId.length > 0 ? normalizedId : null,
       name: trimmed,
     };
   }
 
-  if (selectedEntities && selectedEntities.length === 1) {
-    const [singleEntity] = selectedEntities;
-    return { id: singleEntity.id, name: singleEntity.name };
-  }
-
-  return { id: fallbackId, name: fallbackName };
+  return { id: null, name: null };
 };
 
 const resolveOperation = (row: TrialBalanceRow, fallback: string): string => {
@@ -105,17 +98,11 @@ export const buildMappingRowsFromImport = (
   options: BuildMappingRowsFromImportOptions,
 ): GLAccountMappingRow[] => {
   return rows.map((row, index) => {
-    const fallbackEntityId = `${options.uploadId}-entity-${index}`;
-    const fallbackName = options.clientId ? `Client ${options.clientId}` : 'Imported Entity';
-    const normalized = normalizeEntity(
-      row.entity,
-      fallbackEntityId,
-      fallbackName,
-      options.selectedEntities,
-    );
+    const normalized = normalizeEntity(row.entity, options.selectedEntities);
     const rawAccountId = (row.accountId ?? '').toString().trim();
     const accountId = rawAccountId.length > 0 ? rawAccountId : `account-${index + 1}`;
-    const compositeKey = `${normalized.id}__${accountId}${row.glMonth ? `__${row.glMonth}` : ''}__${index}`;
+    const compositeEntityKey = normalized.id ?? 'no-entity';
+    const compositeKey = `${compositeEntityKey}__${accountId}${row.glMonth ? `__${row.glMonth}` : ''}__${index}`;
     const rowId = options.uploadId ? `${options.uploadId}-${compositeKey}` : compositeKey;
     const rawNetChange = Number(row.netChange ?? 0);
     const netChange = Number.isFinite(rawNetChange) ? rawNetChange : 0;
@@ -135,15 +122,18 @@ export const buildMappingRowsFromImport = (
       operation,
       polarity,
       splitDefinitions: [],
-      entities: [
-        {
-          id: normalized.id,
-          entity: normalized.name,
-          balance: netChange,
-        },
-      ],
+      entities:
+        normalized.id && normalized.name
+          ? [
+              {
+                id: normalized.id,
+                entity: normalized.name,
+                balance: netChange,
+              },
+            ]
+          : [],
       glMonth: row.glMonth, // Preserve GL month from import
-      requiresEntityAssignment: false,
+      requiresEntityAssignment: !normalized.id && !normalized.name,
     };
   });
 };

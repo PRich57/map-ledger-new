@@ -485,7 +485,7 @@ export const buildReconciliationGroups = (
     const sourceBase = {
       glAccountId: account.accountId,
       glAccountName: account.accountName,
-      companyName: account.entityName,
+      companyName: account.entityName ?? '',
     } satisfies Omit<ReconciliationSourceMapping, 'amount'>;
 
     if (account.mappingType === 'direct') {
@@ -749,9 +749,13 @@ const syncDynamicAllocationState = (
 
 const ensureEntityBreakdown = (
   account: GLAccountMappingRow,
-  entityId: string,
-  entityName: string,
+  entityId: string | null,
+  entityName: string | null,
 ) => {
+  if (!entityId || !entityName) {
+    return account.entities ?? [];
+  }
+
   if (!account.entities || account.entities.length === 0) {
     return [
       {
@@ -780,18 +784,26 @@ const resolveEntityConflicts = (
 ): GLAccountMappingRow[] => {
   const normalized = accounts.map(account => {
     const trimmedName = account.entityName?.trim() ?? '';
-    const normalizedId =
-      trimmedName.length > 0
-        ? account.entityId && account.entityId.length > 0
-          ? account.entityId
-          : slugify(trimmedName) || `unassigned-${account.id}`
-        : `unassigned-${account.id}`;
+    const trimmedId = account.entityId?.trim() ?? '';
+    const hasEntityMetadata = trimmedName.length > 0 || trimmedId.length > 0;
+    if (!hasEntityMetadata) {
+      return {
+        ...account,
+        entityId: null,
+        entityName: null,
+        entities: account.entities ?? [],
+        requiresEntityAssignment: true,
+      };
+    }
+
+    const normalizedId = trimmedId.length > 0 ? trimmedId : slugify(trimmedName) || null;
+    const normalizedName = trimmedName.length > 0 ? trimmedName : trimmedId;
 
     return {
       ...account,
       entityId: normalizedId,
-      entityName: trimmedName,
-      entities: ensureEntityBreakdown(account, normalizedId, trimmedName),
+      entityName: normalizedName,
+      entities: ensureEntityBreakdown(account, normalizedId, normalizedName),
       requiresEntityAssignment: trimmedName.length === 0,
     };
   });
@@ -816,12 +828,18 @@ const resolveEntityConflicts = (
 
     const nameCounts = new Map<string, number>();
     group.forEach(account => {
-      const key = account.entityName.length > 0 ? account.entityName.toLowerCase() : '__blank__';
+      const key =
+        account.entityName && account.entityName.length > 0
+          ? account.entityName.toLowerCase()
+          : '__blank__';
       nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
     });
 
     group.forEach(account => {
-      const key = account.entityName.length > 0 ? account.entityName.toLowerCase() : '__blank__';
+      const key =
+        account.entityName && account.entityName.length > 0
+          ? account.entityName.toLowerCase()
+          : '__blank__';
       if ((nameCounts.get(key) ?? 0) > 1) {
         account.requiresEntityAssignment = true;
       }
@@ -1643,7 +1661,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
       const rows: TrialBalanceRow[] = records.map((record) => ({
-        entity: record.entityName ?? 'Imported Entity',
+        entity: record.entityName ?? undefined,
         accountId: record.accountId,
         description: record.accountName,
         netChange: record.activityAmount ?? 0,

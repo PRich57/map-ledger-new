@@ -507,8 +507,8 @@ export interface DistributionRow {
 
 export interface GLAccountMappingRow {
   id: string;
-  entityId: string;
-  entityName: string;
+  entityId: string | null;
+  entityName: string | null;
   accountId: string;
   accountName: string;
   activity: number;
