@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { MappingPolarity, MappingStatus, MappingType, TargetScoaOption } from '../../types';
 import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import SearchableSelect from '../ui/SearchableSelect';
 
 interface BatchMapModalProps {
   open: boolean;
@@ -127,18 +128,14 @@ export default function BatchMapModal({
           <div className="grid gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
               Target SCoA
-              <select
+              <SearchableSelect
                 value={target}
-                onChange={event => setTarget(event.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              >
-                <option value="">Leave unchanged</option>
-                {targetOptions.map(option => (
-                  <option key={option.id} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                options={targetOptions}
+                placeholder="Search target account"
+                onChange={setTarget}
+                className="min-w-[12rem]"
+                noOptionsMessage="No matching accounts"
+              />
             </label>
 
             <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">

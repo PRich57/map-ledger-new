@@ -6,6 +6,7 @@ import type {
   TargetScoaOption,
 } from '../../types';
 import { calculateSplitAmount, calculateSplitPercentage } from '../../store/mappingStore';
+import SearchableSelect from '../ui/SearchableSelect';
 
 interface MappingSplitRowProps {
   account: GLAccountMappingRow;
@@ -276,19 +277,15 @@ export default function MappingSplitRow({
                             <label className="sr-only" htmlFor={`split-target-${split.id}`}>
                               Select target datapoint
                             </label>
-                            <select
+                            <SearchableSelect
                               id={`split-target-${split.id}`}
                               value={split.targetId}
-                              onChange={event => handleTargetChange(split.id, event.target.value)}
-                              className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                            >
-                              <option value="">Select target</option>
-                              {targetOptions.map(option => (
-                                <option key={option.id} value={option.id}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                              options={targetOptions}
+                              getOptionValue={option => option.id}
+                              placeholder="Search target"
+                              onChange={value => handleTargetChange(split.id, value)}
+                              noOptionsMessage="No matching accounts"
+                            />
                           </>
                         )}
                       </td>

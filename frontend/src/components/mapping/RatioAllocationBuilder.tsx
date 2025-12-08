@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
+import SearchableSelect from '../ui/SearchableSelect';
 import { useChartOfAccountsStore } from '../../store/chartOfAccountsStore';
 import { resolveTargetAccountId, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import type { DynamicAllocationPresetRow } from '../../types';
@@ -610,12 +611,12 @@ const RatioAllocationBuilder = ({
                             <label htmlFor={targetSelectId} className="sr-only">
                               {targetLabel}
                             </label>
-                            <select
+                            <SearchableSelect
                               id={targetSelectId}
-                              aria-labelledby={newPresetTargetHeaderId}
                               value={row.targetAccountId}
-                              onChange={event => {
-                                const value = event.target.value;
+                              options={targetOptions}
+                              placeholder={targetOptions.length === 0 ? targetEmptyLabel : targetPlaceholder}
+                              onChange={value => {
                                 setNewPresetRows(previous =>
                                   previous.map((current, currentIndex) =>
                                     currentIndex === index
@@ -624,20 +625,10 @@ const RatioAllocationBuilder = ({
                                   ),
                                 );
                               }}
-                              className="w-full min-w-[12rem] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                               disabled={targetOptions.length === 0}
-                            >
-                              <option value="">
-                                {targetOptions.length === 0
-                                  ? targetEmptyLabel
-                                  : targetPlaceholder}
-                              </option>
-                              {targetOptions.map(option => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                              className="min-w-[12rem]"
+                              noOptionsMessage="No matching accounts"
+                            />
                           </td>
                           <td className="border-y border-l border-slate-200 bg-white px-3 py-3 align-top text-sm dark:border-slate-700 dark:bg-slate-950">
                             <div aria-labelledby={newPresetAmountHeaderId} className="text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -824,26 +815,23 @@ const RatioAllocationBuilder = ({
                                     </select>
                                   </td>
                                   <td className="px-4 py-3 text-sm text-slate-800 dark:text-slate-100">
-                                    <select
+                                    <SearchableSelect
                                       value={row.targetAccountId}
-                                      onChange={event =>
+                                      options={targetOptions}
+                                      getOptionValue={option => option.id}
+                                      placeholder={
+                                        targetOptions.length === 0
+                                          ? targetEmptyLabel
+                                          : targetPlaceholder
+                                      }
+                                      onChange={value =>
                                         updatePresetRow(preset.id, index, {
-                                          targetAccountId: event.target.value,
+                                          targetAccountId: value,
                                         })
                                       }
-                                      className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                                      aria-label={targetLabel}
-                                    >
-                                      {targetOptions.length === 0 ? (
-                                        <option value="">{targetEmptyLabel}</option>
-                                      ) : (
-                                        targetOptions.map(option => (
-                                          <option key={option.id} value={option.id}>
-                                            {option.label}
-                                          </option>
-                                        ))
-                                      )}
-                                    </select>
+                                      className="min-w-[12rem]"
+                                      noOptionsMessage="No matching accounts"
+                                    />
                                   </td>
                                   <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{basisValue}</td>
                                   <td className="px-4 py-3 text-sm">
