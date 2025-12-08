@@ -953,7 +953,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
           ? null
           : availableEntities.some(entity => entity.id === normalized)
             ? normalized
-            : availableEntities[0]?.id ?? null;
+            : null;
 
       const resolvedPeriod = resolveActivePeriod(
         state.accounts,

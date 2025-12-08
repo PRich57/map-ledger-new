@@ -16,6 +16,14 @@ import {
 } from '../store/mappingStore';
 import scrollPageToTop from '../utils/scroll';
 
+const normalizeEntityId = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const stepParam = (value: string | null): MappingStep => {
   if (value === 'reconcile' || value === 'distribution' || value === 'review') {
     return value;
@@ -35,11 +43,7 @@ export default function Mapping() {
   const fetchFileRecords = useMappingStore(state => state.fetchFileRecords);
   const normalizedEntityParam = useMemo(() => {
     const param = searchParams.get('entityId');
-    if (!param) {
-      return null;
-    }
-    const trimmed = param.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return normalizeEntityId(param);
   }, [searchParams]);
 
   useEffect(() => {
@@ -61,8 +65,7 @@ export default function Mapping() {
   }, [activeEntityId, normalizedEntityParam, setActiveEntityId]);
 
   useEffect(() => {
-    const currentEntityParam = searchParams.get('entityId');
-    const normalizedCurrent = currentEntityParam?.trim() ?? null;
+    const normalizedCurrent = normalizeEntityId(searchParams.get('entityId'));
     if (normalizedCurrent === activeEntityId) {
       return;
     }
