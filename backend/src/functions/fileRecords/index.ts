@@ -537,10 +537,7 @@ export const listFileRecordsHandler = async (
       return json({ message: 'fileUploadGuid is required' }, 400);
     }
 
-    const [items, metadata] = await Promise.all<[
-      FileRecordRow[],
-      Awaited<ReturnType<typeof getClientFileByGuid>>,
-    ]>([
+    const [items, metadata] = await Promise.all([
       listFileRecords(normalizedFileUploadGuid),
       getClientFileByGuid(normalizedFileUploadGuid),
     ]);

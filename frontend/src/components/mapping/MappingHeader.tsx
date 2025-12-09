@@ -24,7 +24,8 @@ export const formatUploadLabel = ({
   timeZone?: string;
 }): string => {
   const resolvedName = fileName?.trim();
-  const resolvedTimeZone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const resolvedTimeZone =
+    timeZone ?? process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   if (resolvedName && uploadedAt) {
     const parsed = new Date(uploadedAt);
@@ -70,6 +71,7 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   const activePeriod = useMappingStore(selectActivePeriod);
   const setActivePeriod = useMappingStore(state => state.setActivePeriod);
   const activeUploadMetadata = useMappingStore(state => state.activeUploadMetadata);
+  const userTimeZone = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const activeClient = useMemo(() => {
     if (clients.length === 0) {
@@ -128,6 +130,7 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
                   uploadId: glUploadId ?? resolvedUploadMetadata?.uploadId,
                   fileName: resolvedUploadMetadata?.fileName,
                   uploadedAt: resolvedUploadMetadata?.uploadedAt,
+                  timeZone: userTimeZone,
                 })}
               </p>
             </div>

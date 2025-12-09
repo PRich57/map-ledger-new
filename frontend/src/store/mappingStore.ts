@@ -25,11 +25,14 @@ import {
   isKnownChartOfAccount,
 } from './chartOfAccountsStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const env = ((globalThis as unknown as { importMetaEnv?: Partial<ImportMetaEnv> }).importMetaEnv ??
+  process.env) as Partial<ImportMetaEnv> & NodeJS.ProcessEnv;
+
+const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
 const shouldLog =
-  import.meta.env.DEV ||
-  (typeof import.meta.env.VITE_ENABLE_DEBUG_LOGGING === 'string' &&
-    import.meta.env.VITE_ENABLE_DEBUG_LOGGING.toLowerCase() === 'true');
+  env.DEV === true ||
+  (typeof env.VITE_ENABLE_DEBUG_LOGGING === 'string' &&
+    env.VITE_ENABLE_DEBUG_LOGGING.toLowerCase() === 'true');
 
 const logPrefix = '[MappingStore]';
 
@@ -1880,8 +1883,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       uploadedAt: uploadMetadata?.uploadedAt ?? null,
     };
 
-    const entityIdSummaries = (entityIds ?? []).map(id => ({ id, name: id }));
-    const selectedEntities = dedupeEntities([...(entities ?? []), ...entityIdSummaries]);
+    const entityIdSummaries = (entityIds ?? []).map(id => {
+      const knownEntity = entities?.find(entity => entity.id === id);
+      return knownEntity ?? { id, name: id };
+    });
+    const selectedEntities = dedupeEntities([...entityIdSummaries, ...(entities ?? [])]);
 
     const accountsFromImport = buildMappingRowsFromImport(rows, {
       uploadId,

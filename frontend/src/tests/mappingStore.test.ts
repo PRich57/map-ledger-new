@@ -363,14 +363,14 @@ describe('mappingStore selectors', () => {
       {
         accountId: '1000',
         description: 'Cash',
-        entity: 'HQ',
+        entity: 'Entity One',
         netChange: 1250,
         glMonth: '2024-01',
       },
       {
         accountId: '2000',
         description: 'Revenue',
-        entity: 'HQ',
+        entity: 'Entity One',
         netChange: -1250,
         glMonth: '2024-01',
       },
