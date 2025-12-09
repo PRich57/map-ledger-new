@@ -101,11 +101,19 @@ export const updateClientEntityHandler = async (
       updatedBy: resolveUpdatedBy(request),
     });
 
-    if (!updated) {
-      return json({ message: 'Client entity not found' }, 404);
+    if (!updated.record) {
+      if (updated.rowsAffected === 0) {
+        return json({ message: 'Client entity not found' }, 404);
+      }
+
+      context.error('Client entity updated without returning a record', {
+        entityId,
+        clientId,
+      });
+      return json({ message: 'Failed to update client entity' }, 500);
     }
 
-    return json({ item: updated }, 200);
+    return json({ item: updated.record }, 200);
   } catch (error) {
     context.error('Failed to update client entity', error);
     return json(buildErrorResponse('Failed to update client entity', error), 500);
