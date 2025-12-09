@@ -25,6 +25,9 @@ if (typeof globalThis !== 'undefined') {
     DEV: false,
     VITE_ENABLE_DEBUG_LOGGING: 'false',
   };
+  if (!(globalThis as { fetch?: typeof fetch }).fetch) {
+    (globalThis as { fetch: typeof fetch }).fetch = jest.fn();
+  }
 }
 
 afterEach(() => {
@@ -66,9 +69,54 @@ const toHaveTextContent = (received: HTMLElement | null, expected: TextMatcher):
   };
 };
 
+const toHaveClass = (received: HTMLElement | null, expected: string): MatcherResult => {
+  if (!received) {
+    return {
+      pass: false,
+      message: () => 'Element is not present in the document.',
+    };
+  }
+  const classes = (received.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  const expectedClasses = expected.split(/\s+/).filter(Boolean);
+  const pass = expectedClasses.every(cls => classes.includes(cls));
+  return {
+    pass,
+    message: () =>
+      pass
+        ? `Expected element not to include classes: ${expected}`
+        : `Expected element to include classes: ${expected}`,
+  };
+};
+
+const toHaveAttribute = (
+  received: HTMLElement | null,
+  attribute: string,
+  expected?: string,
+): MatcherResult => {
+  if (!received) {
+    return {
+      pass: false,
+      message: () => 'Element is not present in the document.',
+    };
+  }
+  const actual = received.getAttribute(attribute);
+  const pass = expected === undefined ? actual !== null : actual === expected;
+  return {
+    pass,
+    message: () =>
+      pass
+        ? `Expected element not to have attribute ${attribute}`
+        : `Expected element to have attribute ${attribute}${
+            expected !== undefined ? `="${expected}"` : ''
+          }`,
+  };
+};
+
 expect.extend({
   toBeInTheDocument,
   toHaveTextContent,
+  toHaveClass,
+  toHaveAttribute,
 });
 
 declare global {
@@ -76,6 +124,10 @@ declare global {
     interface Matchers<R> {
       toBeInTheDocument(): R;
       toHaveTextContent(expected: TextMatcher): R;
+      toHaveClass(expected: string): R;
+      toHaveAttribute(attribute: string, value?: string): R;
     }
   }
 }
+
+export { waitFor };

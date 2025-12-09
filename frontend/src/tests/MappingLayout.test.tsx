@@ -1,4 +1,22 @@
-import { render, screen } from './testUtils';
+jest.mock('exceljs', () => ({
+  Workbook: jest.fn(() => ({
+    addWorksheet: jest.fn(),
+    getWorksheet: jest.fn(),
+    xlsx: { read: jest.fn() },
+  })),
+}));
+jest.mock('react', () => {
+  const actual = jest.requireActual('react');
+  return { __esModule: true, ...actual, default: actual };
+});
+jest.mock('../store/organizationStore', () => ({
+  useOrganizationStore: (selector: any) =>
+    selector({ clientAccess: [], fetchForUser: jest.fn(), hydrateFromAccessList: jest.fn() }),
+}));
+
+(globalThis as any).scrollTo = jest.fn();
+
+import { render, screen, waitFor } from './testUtils';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Mapping from '../pages/Mapping';
 import { useClientStore } from '../store/clientStore';
@@ -196,5 +214,61 @@ describe('Mapping page layout', () => {
       'aria-current',
       'page',
     );
+  });
+
+  it('hydrates entity tabs from fetched upload metadata', async () => {
+    const uploadGuid = '12345678-1234-1234-1234-1234567890ab';
+    const fetchMock = jest
+      .spyOn(globalThis as { fetch: typeof fetch }, 'fetch')
+      .mockImplementation((url: RequestInfo | URL) => {
+      const target = typeof url === 'string' ? url : url.toString();
+
+      if (target.includes('/file-records')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            fileUploadGuid: uploadGuid,
+            upload: { fileName: 'import.xlsx', uploadedAt: '2024-01-01T00:00:00Z' },
+            entities: [
+              { id: 'north', name: 'North Division', isSelected: true },
+              { id: 'south', name: 'South Division', isSelected: false },
+            ],
+            items: [
+              {
+                fileUploadGuid: uploadGuid,
+                recordId: '1',
+                accountId: '1000',
+                accountName: 'Revenue',
+                activityAmount: 1500,
+                entityId: 'north',
+              },
+            ],
+          }),
+        } as any);
+      }
+
+      if (target.includes('/mapping/suggest')) {
+        return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+      }
+
+      return Promise.reject(new Error(`Unexpected fetch: ${target}`));
+    });
+
+    try {
+      render(
+        <MemoryRouter initialEntries={[`/gl/mapping/${uploadGuid}`]}>
+          <Routes>
+            <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+      await waitFor(() => expect(screen.getByRole('tab', { name: 'North Division' })).toBeInTheDocument());
+      expect(screen.getByRole('tab', { name: 'South Division' })).toBeInTheDocument();
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 });

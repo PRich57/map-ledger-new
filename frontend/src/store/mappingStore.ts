@@ -1001,6 +1001,7 @@ type UploadMetadata = {
 type FileRecordsResponse = {
   items?: FileRecord[];
   fileUploadGuid?: string;
+  entities?: EntitySummary[];
   upload?: {
     fileName?: string | null;
     uploadedAt?: string | null;
@@ -1953,6 +1954,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
       const payload = (await response.json()) as FileRecordsResponse;
       const records = payload.items ?? [];
+      const entities = payload.entities ?? options?.entities ?? [];
       const uploadMetadata =
         payload.upload ??
         (payload.fileName || payload.uploadedAt
@@ -1960,9 +1962,12 @@ export const useMappingStore = create<MappingState>((set, get) => ({
           : null);
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
+      const entityNameLookup = new Map(entities.map((entity) => [entity.id, entity.name]));
+
       const rows: TrialBalanceRow[] = records.map((record) => {
         const entityId = record.entityId ?? null;
-        const entityName = record.entityName ?? null;
+        const entityName =
+          record.entityName ?? (entityId ? entityNameLookup.get(entityId) ?? null : null);
         return {
           entity: entityName ?? entityId ?? '',
           entityId,
@@ -1982,8 +1987,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       get().loadImportedAccounts({
         uploadId: uploadGuid,
         clientId: normalizedClientId,
-        entityIds: options?.entityIds,
-        entities: options?.entities,
+        entityIds: options?.entityIds ?? (entities.length > 0 ? entities.map((entity) => entity.id) : undefined),
+        entities,
         period: preferredPeriod,
         rows,
         uploadMetadata: uploadMetadata
