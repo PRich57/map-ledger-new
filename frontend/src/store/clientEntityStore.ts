@@ -31,7 +31,21 @@ interface ClientEntityState {
   entitiesByClient: Record<string, ClientEntity[]>;
   isLoading: boolean;
   error: string | null;
-  fetchForClient: (clientId: string) => Promise<ClientEntity[]>;
+  fetchForClient: (clientId: string, options?: { force?: boolean }) => Promise<ClientEntity[]>;
+  createEntity: (payload: {
+    clientId: string;
+    entityName: string;
+    entityDisplayName?: string;
+    entityStatus?: 'ACTIVE' | 'INACTIVE';
+  }) => Promise<ClientEntity | null>;
+  updateEntity: (payload: {
+    entityId: string;
+    clientId: string;
+    entityName: string;
+    entityDisplayName?: string;
+    entityStatus?: 'ACTIVE' | 'INACTIVE';
+  }) => Promise<ClientEntity | null>;
+  deleteEntity: (clientId: string, entityId: string) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -39,6 +53,8 @@ interface ClientEntityResponseItem {
   entityId?: string;
   entityName?: string;
   entityDisplayName?: string;
+  entityStatus?: string;
+  isDeleted?: boolean;
   aliases?: string[] | string | null;
 }
 
@@ -73,6 +89,7 @@ const toClientEntity = (item: ClientEntityResponseItem): ClientEntity => {
     name,
     displayName: displayName || undefined,
     entityName: entityName || undefined,
+    status: item.entityStatus?.toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
     aliases: Array.from(aliasSet).filter(Boolean),
   };
 };
@@ -81,13 +98,13 @@ export const useClientEntityStore = create<ClientEntityState>((set, get) => ({
   entitiesByClient: {},
   isLoading: false,
   error: null,
-  async fetchForClient(clientId) {
+  async fetchForClient(clientId, options) {
     if (!clientId) {
       return [];
     }
 
     const cached = get().entitiesByClient[clientId];
-    if (cached && cached.length > 0) {
+    if (!options?.force && cached && cached.length > 0) {
       logDebug('Using cached entities for client', clientId);
       return cached;
     }
@@ -107,7 +124,9 @@ export const useClientEntityStore = create<ClientEntityState>((set, get) => ({
       }
 
       const payload = (await response.json()) as ClientEntityResponse;
-      const entities = (payload.items ?? []).map(toClientEntity);
+      const entities = (payload.items ?? [])
+        .filter((item) => !item.isDeleted)
+        .map(toClientEntity);
 
       set((state) => ({
         entitiesByClient: { ...state.entitiesByClient, [clientId]: entities },
@@ -124,6 +143,126 @@ export const useClientEntityStore = create<ClientEntityState>((set, get) => ({
         error: error instanceof Error ? error.message : 'Failed to load entities',
       });
       return [];
+    }
+  },
+  async createEntity(payload) {
+    if (!payload.clientId || !payload.entityName) {
+      return null;
+    }
+
+    set({ isLoading: true, error: null });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/client-entities`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientId: payload.clientId,
+          entityName: payload.entityName,
+          entityDisplayName: payload.entityDisplayName,
+          entityStatus: payload.entityStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to create entity (${response.status})`);
+      }
+
+      await get().fetchForClient(payload.clientId, { force: true });
+
+      const result = (await response.json()) as { item?: ClientEntityResponseItem };
+      const entity = result.item ? toClientEntity(result.item) : null;
+      logDebug('Created client entity', entity);
+      return entity;
+    } catch (error) {
+      logError('Unable to create entity', error);
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to create entity',
+      });
+      return null;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+  async updateEntity(payload) {
+    if (!payload.clientId || !payload.entityId || !payload.entityName) {
+      return null;
+    }
+
+    set({ isLoading: true, error: null });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/client-entities/${payload.entityId}`, {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientId: payload.clientId,
+          entityName: payload.entityName,
+          entityDisplayName: payload.entityDisplayName,
+          entityStatus: payload.entityStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to update entity (${response.status})`);
+      }
+
+      await get().fetchForClient(payload.clientId, { force: true });
+
+      const result = (await response.json()) as { item?: ClientEntityResponseItem };
+      const entity = result.item ? toClientEntity(result.item) : null;
+      logDebug('Updated client entity', entity);
+      return entity;
+    } catch (error) {
+      logError('Unable to update entity', error);
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to update entity',
+      });
+      return null;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+  async deleteEntity(clientId, entityId) {
+    if (!clientId || !entityId) {
+      return false;
+    }
+
+    set({ isLoading: true, error: null });
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/client-entities/${encodeURIComponent(entityId)}?clientId=${encodeURIComponent(clientId)}`,
+        {
+          method: 'DELETE',
+          headers: { Accept: 'application/json' },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to delete entity (${response.status})`);
+      }
+
+      await get().fetchForClient(clientId, { force: true });
+      logDebug('Deleted client entity', { clientId, entityId });
+      return true;
+    } catch (error) {
+      logError('Unable to delete entity', error);
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to delete entity',
+      });
+      return false;
+    } finally {
+      set({ isLoading: false });
     }
   },
   reset: () => set({ entitiesByClient: {}, isLoading: false, error: null }),
