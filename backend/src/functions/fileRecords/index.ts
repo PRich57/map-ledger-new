@@ -421,6 +421,7 @@ const toEntityId = (value?: string | null): number | null => {
 const buildEntityInserts = (
   payload: ResolvedIngestPayload,
   records: FileRecordInput[],
+  existingRecords: FileRecordRow[],
 ): NewClientFileEntityInput[] => {
   const entityLookup = new Map<string, IngestEntity>();
   (payload.entities ?? []).forEach((entity) => {
@@ -431,10 +432,18 @@ const buildEntityInserts = (
   });
 
   const aggregated = new Map<number, NewClientFileEntityInput>();
-  const recordEntityKeys = records
-    .map((record) => (record.entityId !== null && record.entityId !== undefined ? String(record.entityId) : null))
+  const recordEntityKeys = [...records, ...existingRecords]
+    .map((record) =>
+      record.entityId !== null && record.entityId !== undefined
+        ? String(record.entityId)
+        : null
+    )
     .filter((key): key is string => key !== null);
-  const candidateKeys = new Set<string>([...recordEntityKeys, ...entityLookup.keys()]);
+
+  const candidateKeys = new Set<string>([
+    ...recordEntityKeys,
+    ...Array.from(entityLookup.keys()),
+  ]);
 
   candidateKeys.forEach((key) => {
     const entityId = toEntityId(key);
@@ -443,13 +452,14 @@ const buildEntityInserts = (
     }
 
     const details = entityLookup.get(key);
-    const updated: NewClientFileEntityInput = {
+    const existing = aggregated.get(entityId);
+    const isSelected = details?.isSelected === true || existing?.isSelected === true;
+
+    aggregated.set(entityId, {
       fileUploadGuid: payload.fileUploadGuid,
       entityId,
-      isSelected: details?.isSelected,
-    };
-
-    aggregated.set(entityId, updated);
+      isSelected,
+    });
   });
 
   return Array.from(aggregated.values());
@@ -490,7 +500,12 @@ export const ingestFileRecordsHandler = async (
     });
 
     const sheetInserts = buildSheetInserts(resolvedPayload);
-    const entityInserts = buildEntityInserts(resolvedPayload, records);
+    const existingFileRecords = await listFileRecords(resolvedPayload.fileUploadGuid);
+    const entityInserts = buildEntityInserts(
+      resolvedPayload,
+      records,
+      existingFileRecords,
+    );
 
     if (sheetInserts.length > 0) {
       await Promise.all(sheetInserts.map((sheet) => insertClientFileSheet(sheet)));

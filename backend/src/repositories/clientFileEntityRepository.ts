@@ -56,26 +56,55 @@ export const insertClientFileEntity = async (
     entityId: number;
     isSelected: number | null;
     insertedDttm: string | Date | null;
+    updatedDttm?: string | Date | null;
+    updatedBy?: string | null;
   }>(
-    `INSERT INTO ml.CLIENT_FILE_ENTITIES (
-      FILE_UPLOAD_GUID,
-      ENTITY_ID,
-      IS_SELECTED
-    )
-    OUTPUT
-      INSERTED.FILE_UPLOAD_GUID as fileUploadGuid,
-      INSERTED.ENTITY_ID as entityId,
-      INSERTED.IS_SELECTED as isSelected,
-      INSERTED.INSERTED_DTTM as insertedDttm
-    VALUES (
-      @fileUploadGuid,
-      @entityId,
-      @isSelected
-    )`,
+    `DECLARE @isAlreadyPresent BIT = (
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM ml.CLIENT_FILE_ENTITIES
+        WHERE FILE_UPLOAD_GUID = @fileUploadGuid
+          AND ENTITY_ID = @entityId
+          AND IS_DELETED = 0
+      ) THEN 1 ELSE 0 END
+    );
+
+    IF @isAlreadyPresent = 1
+    BEGIN
+      SELECT
+        FILE_UPLOAD_GUID as fileUploadGuid,
+        ENTITY_ID as entityId,
+        IS_SELECTED as isSelected,
+        INSERTED_DTTM as insertedDttm,
+        UPDATED_DTTM as updatedDttm,
+        UPDATED_BY as updatedBy
+      FROM ml.CLIENT_FILE_ENTITIES
+      WHERE FILE_UPLOAD_GUID = @fileUploadGuid
+        AND ENTITY_ID = @entityId
+        AND IS_DELETED = 0;
+    END
+    ELSE
+    BEGIN
+      INSERT INTO ml.CLIENT_FILE_ENTITIES (
+        FILE_UPLOAD_GUID,
+        ENTITY_ID,
+        IS_SELECTED
+      )
+      OUTPUT
+        INSERTED.FILE_UPLOAD_GUID as fileUploadGuid,
+        INSERTED.ENTITY_ID as entityId,
+        INSERTED.IS_SELECTED as isSelected,
+        INSERTED.INSERTED_DTTM as insertedDttm
+      VALUES (
+        @fileUploadGuid,
+        @entityId,
+        @isSelected
+      );
+    END`,
     {
       fileUploadGuid: input.fileUploadGuid,
       entityId: input.entityId,
-      isSelected: input.isSelected ?? null,
+      isSelected: input.isSelected === true ? 1 : 0,
     }
   );
 
@@ -85,7 +114,7 @@ export const insertClientFileEntity = async (
     inserted ?? {
       fileUploadGuid: input.fileUploadGuid,
       entityId: input.entityId,
-      isSelected: input.isSelected ?? null,
+      isSelected: input.isSelected === true ? 1 : 0,
       insertedDttm: null,
     }
   );
@@ -127,7 +156,7 @@ export const updateClientFileEntity = async (
     {
       fileUploadGuid: input.fileUploadGuid,
       entityId: input.entityId,
-      isSelected: input.isSelected ?? null,
+      isSelected: input.isSelected === true ? 1 : 0,
       updatedBy: input.updatedBy ?? null,
     }
   );
