@@ -23,27 +23,38 @@ const determinePolarity = (value: number): MappingPolarity => {
 };
 
 const matchSelectedEntity = (
-  entity: string | undefined,
+  entityId: string | null,
+  entityName: string | null,
   selectedEntities?: EntitySummary[],
 ): EntitySummary | null => {
-  if (!entity || !selectedEntities || selectedEntities.length === 0) {
+  if (!selectedEntities || selectedEntities.length === 0) {
     return null;
   }
 
-  const trimmed = entity.trim();
-  if (trimmed.length === 0) {
+  const normalizedId = entityId?.trim();
+  if (normalizedId) {
+    const byId = selectedEntities.find(entity => entity.id === normalizedId);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const normalizedName = entityName?.trim();
+  if (!normalizedName) {
     return null;
   }
 
-  const normalized = trimmed.toLowerCase();
-  const slug = slugify(trimmed);
+  const normalizedSlug = slugify(normalizedName);
 
   for (const selected of selectedEntities) {
     const candidates = [selected.id, selected.name, slugify(selected.name)];
     if (
       candidates.some((candidate) => {
         const comparison = candidate.trim().toLowerCase();
-        return comparison === normalized || comparison === slug;
+        return (
+          comparison === normalizedName.toLowerCase() ||
+          comparison === normalizedSlug
+        );
       })
     ) {
       return selected;
@@ -54,20 +65,26 @@ const matchSelectedEntity = (
 };
 
 const normalizeEntity = (
-  entity: string | undefined,
+  row: TrialBalanceRow,
   selectedEntities?: EntitySummary[],
 ): { id: string | null; name: string | null } => {
-  const matchedEntity = matchSelectedEntity(entity, selectedEntities);
+  const providedId = row.entityId?.trim() ?? null;
+  const providedName = row.entityName?.trim() ?? row.entity?.trim() ?? null;
+
+  const matchedEntity = matchSelectedEntity(providedId, providedName, selectedEntities);
   if (matchedEntity) {
     return { id: matchedEntity.id, name: matchedEntity.name };
   }
 
-  const trimmed = entity?.trim();
-  if (trimmed && trimmed.length > 0) {
-    const normalizedId = slugify(trimmed);
+  if (providedId) {
+    return { id: providedId, name: providedName ?? providedId };
+  }
+
+  if (providedName) {
+    const normalizedId = slugify(providedName);
     return {
       id: normalizedId.length > 0 ? normalizedId : null,
-      name: trimmed,
+      name: providedName,
     };
   }
 
@@ -98,7 +115,7 @@ export const buildMappingRowsFromImport = (
   options: BuildMappingRowsFromImportOptions,
 ): GLAccountMappingRow[] => {
   return rows.map((row, index) => {
-    const normalized = normalizeEntity(row.entity, options.selectedEntities);
+    const normalized = normalizeEntity(row, options.selectedEntities);
     const rawAccountId = (row.accountId ?? '').toString().trim();
     const accountId = rawAccountId.length > 0 ? rawAccountId : `account-${index + 1}`;
     const compositeEntityKey = normalized.id ?? 'no-entity';

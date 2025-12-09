@@ -176,6 +176,8 @@ export interface ImportPreviewRow {
 
 export interface TrialBalanceRow {
   entity: string;
+  entityId?: string | null;
+  entityName?: string | null;
   accountId: string;
   description: string;
   netChange: number;
@@ -229,6 +231,7 @@ export interface FileRecord {
   fileUploadGuid: string;
   fileUploadId?: string;
   recordId: string;
+  entityId?: string | null;
   accountId: string;
   accountName: string;
   activityAmount: number;
