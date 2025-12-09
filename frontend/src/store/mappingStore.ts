@@ -702,7 +702,8 @@ const calculateExclusionPctFromAccount = (
 const buildSaveInputFromAccount = (
   account: GLAccountMappingRow,
 ): MappingSaveInput | null => {
-  if (!account.entityId) {
+  const entityId = account.entityId ?? slugify(account.entityName ?? '');
+  if (!entityId) {
     return null;
   }
 
@@ -716,7 +717,7 @@ const buildSaveInputFromAccount = (
       : account.mappingType;
 
   const payload: MappingSaveInput = {
-    entityId: account.entityId,
+    entityId,
     entityAccountId: account.accountId,
     accountName: account.accountName,
     polarity: account.polarity,
@@ -1736,13 +1737,26 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     const { accounts } = get();
     const scope = Array.isArray(accountIds) && accountIds.length > 0 ? accountIds : null;
 
-    const payload = accounts
-      .filter(account => (scope ? scope.includes(account.id) : true))
+    const scopedAccounts = accounts.filter(account => (scope ? scope.includes(account.id) : true));
+
+    const payload = scopedAccounts
       .map(buildSaveInputFromAccount)
       .filter((entry): entry is MappingSaveInput => Boolean(entry));
 
     if (!payload.length) {
-      set({ saveError: 'No mapped or excluded rows are ready to save.', lastSavedCount: 0 });
+      const missingEntities = scopedAccounts.filter(
+        account =>
+          (account.status === 'Mapped' || account.status === 'Excluded') &&
+          !account.entityId &&
+          !account.entityName,
+      );
+
+      set({
+        saveError: missingEntities.length
+          ? 'Assign an entity to mapped rows before saving.'
+          : 'No mapped or excluded rows are ready to save.',
+        lastSavedCount: 0,
+      });
       return 0;
     }
 
