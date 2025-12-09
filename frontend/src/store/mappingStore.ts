@@ -26,7 +26,9 @@ import {
 } from './chartOfAccountsStore';
 
 const env = ((globalThis as unknown as { importMetaEnv?: Partial<ImportMetaEnv> }).importMetaEnv ??
-  process.env) as Partial<ImportMetaEnv> & NodeJS.ProcessEnv;
+  (typeof process !== 'undefined' ? process.env : undefined) ?? {}) as
+  | Partial<ImportMetaEnv>
+  | NodeJS.ProcessEnv;
 
 const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
 const shouldLog =
