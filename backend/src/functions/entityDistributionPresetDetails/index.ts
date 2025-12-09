@@ -47,6 +47,11 @@ const normalizeText = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const parseNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
 const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] => {
   if (!Array.isArray(payload)) {
     return [];
