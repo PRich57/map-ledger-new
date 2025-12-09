@@ -1,10 +1,18 @@
 module.exports = {
   testEnvironment: 'jsdom',
+  extensionsToTreatAsEsm: ['.ts', '.tsx'],
   transform: {
-    '^.+\\.(ts|tsx)$': 'ts-jest'
+    '^.+\\.(ts|tsx)$': [
+      'ts-jest',
+      {
+        useESM: true,
+        tsconfig: '<rootDir>/tsconfig.app.json'
+      }
+    ]
   },
   globals: {
     'ts-jest': {
+      useESM: true,
       tsconfig: '<rootDir>/tsconfig.app.json'
     }
   },

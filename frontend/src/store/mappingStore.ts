@@ -25,11 +25,14 @@ import {
   isKnownChartOfAccount,
 } from './chartOfAccountsStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const env = ((globalThis as unknown as { importMetaEnv?: Partial<ImportMetaEnv> }).importMetaEnv ??
+  process.env) as Partial<ImportMetaEnv> & NodeJS.ProcessEnv;
+
+const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
 const shouldLog =
-  import.meta.env.DEV ||
-  (typeof import.meta.env.VITE_ENABLE_DEBUG_LOGGING === 'string' &&
-    import.meta.env.VITE_ENABLE_DEBUG_LOGGING.toLowerCase() === 'true');
+  env.DEV === true ||
+  (typeof env.VITE_ENABLE_DEBUG_LOGGING === 'string' &&
+    env.VITE_ENABLE_DEBUG_LOGGING.toLowerCase() === 'true');
 
 const logPrefix = '[MappingStore]';
 
@@ -989,11 +992,29 @@ type SummarySelector = {
   netTotal: number;
 };
 
+type UploadMetadata = {
+  uploadId: string;
+  fileName?: string | null;
+  uploadedAt?: string | null;
+};
+
+type FileRecordsResponse = {
+  items?: FileRecord[];
+  fileUploadGuid?: string;
+  upload?: {
+    fileName?: string | null;
+    uploadedAt?: string | null;
+  };
+  fileName?: string;
+  uploadedAt?: string;
+};
+
 interface MappingState {
   accounts: GLAccountMappingRow[];
   searchTerm: string;
   activeStatuses: MappingStatus[];
   activeUploadId: string | null;
+  activeUploadMetadata: UploadMetadata | null;
   activeClientId: string | null;
   activeEntityId: string | null;
   activeEntityIds: string[];
@@ -1064,6 +1085,7 @@ interface MappingState {
     entities?: EntitySummary[];
     period?: string | null;
     rows: TrialBalanceRow[];
+    uploadMetadata?: UploadMetadata | null;
   }) => void;
   fetchFileRecords: (
     uploadGuid: string,
@@ -1122,6 +1144,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   searchTerm: '',
   activeStatuses: [],
   activeUploadId: null,
+  activeUploadMetadata: null,
   activeClientId: null,
   activeEntityId: null,
   activeEntityIds: initialEntities.map(entity => entity.id),
@@ -1849,12 +1872,22 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     entities,
     period,
     rows,
+    uploadMetadata,
   }) => {
     const normalizedClientId = normalizeClientId(clientId);
     const normalizedPeriod = period && period.trim().length > 0 ? period : null;
 
-    const entityIdSummaries = (entityIds ?? []).map(id => ({ id, name: id }));
-    const selectedEntities = dedupeEntities([...(entities ?? []), ...entityIdSummaries]);
+    const resolvedUploadMetadata: UploadMetadata = {
+      uploadId,
+      fileName: uploadMetadata?.fileName ?? null,
+      uploadedAt: uploadMetadata?.uploadedAt ?? null,
+    };
+
+    const entityIdSummaries = (entityIds ?? []).map(id => {
+      const knownEntity = entities?.find(entity => entity.id === id);
+      return knownEntity ?? { id, name: id };
+    });
+    const selectedEntities = dedupeEntities([...entityIdSummaries, ...(entities ?? [])]);
 
     const accountsFromImport = buildMappingRowsFromImport(rows, {
       uploadId,
@@ -1894,6 +1927,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       searchTerm: '',
       activeStatuses: [],
       activeUploadId: uploadId,
+      activeUploadMetadata: resolvedUploadMetadata,
       activeClientId: normalizedClientId,
       activeEntityId: resolvedActiveEntityId,
       activeEntityIds: resolvedEntityIds,
@@ -1917,8 +1951,13 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         throw new Error(`Failed to load file records (${response.status})`);
       }
 
-      const payload = (await response.json()) as { items?: FileRecord[] };
+      const payload = (await response.json()) as FileRecordsResponse;
       const records = payload.items ?? [];
+      const uploadMetadata =
+        payload.upload ??
+        (payload.fileName || payload.uploadedAt
+          ? { fileName: payload.fileName, uploadedAt: payload.uploadedAt }
+          : null);
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
       const rows: TrialBalanceRow[] = records.map((record) => {
@@ -1947,6 +1986,13 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         entities: options?.entities,
         period: preferredPeriod,
         rows,
+        uploadMetadata: uploadMetadata
+          ? {
+              uploadId: uploadGuid,
+              fileName: uploadMetadata.fileName ?? null,
+              uploadedAt: uploadMetadata.uploadedAt ?? null,
+            }
+          : undefined,
       });
 
       const hydrateMode: HydrationMode = options?.hydrateMode ?? 'resume';
