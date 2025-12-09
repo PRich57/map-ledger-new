@@ -20,15 +20,24 @@ const getLinkClasses = (isActive: boolean) =>
       : 'text-gray-600 hover:bg-primary-50 hover:text-primary-600 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
   }`;
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+}
+
+export default function Sidebar({ isOpen }: SidebarProps) {
   const { user } = useAuthStore();
   const isSuperUser = user?.role === 'super';
   const location = useLocation();
   const isMappingRoute = location.pathname.startsWith('/gl/mapping');
 
   return (
-    <aside className="w-64 border-r border-gray-200 bg-gradient-sidebar shadow-soft transition-colors duration-300 dark:border-slate-800">
-      <div className="flex h-full flex-col px-3 py-4">
+    <aside
+      className={`relative border-r border-gray-200 bg-gradient-sidebar shadow-soft transition-all duration-300 dark:border-slate-800 ${
+        isOpen ? 'w-64' : 'w-0 md:w-16'
+      } overflow-hidden`}
+      aria-hidden={!isOpen}
+    >
+      <div className={`flex h-full flex-col px-3 py-4 ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
         <div className="space-y-1.5">
           {isSuperUser && (
             <NavLink to="/users" className={({ isActive }) => getLinkClasses(isActive)}>

@@ -4,7 +4,7 @@ export interface EntityScoaDistributionInput {
   entityId: string;
   scoaAccountId: string;
   distributionType: string;
-  presetId?: number | null;
+  presetId?: string | null;
   distributionStatus?: string | null;
   updatedBy?: string | null;
 }
@@ -24,11 +24,13 @@ const normalizeText = (value?: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeGuid = (value?: string | null): string | null => normalizeText(value);
+
 const mapRow = (row: {
   entity_id: string;
   scoa_account_id: string;
   distribution_type: string;
-  preset_id?: number | null;
+  preset_id?: string | null;
   distribution_status?: string | null;
   inserted_dttm?: Date | string | null;
   updated_dttm?: Date | string | null;
@@ -61,7 +63,7 @@ export const listEntityScoaDistributions = async (
     entity_id: string;
     scoa_account_id: string;
     distribution_type: string;
-    preset_id?: number | null;
+    preset_id?: string | null;
     distribution_status?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
@@ -71,7 +73,7 @@ export const listEntityScoaDistributions = async (
       ENTITY_ID as entity_id,
       SCOA_ACCOUNT_ID as scoa_account_id,
       DISTRIBUTION_TYPE as distribution_type,
-      PRESET_ID as preset_id,
+      PRESET_GUID as preset_id,
       DISTRIBUTION_STATUS as distribution_status,
       INSERTED_DTTM as inserted_dttm,
       UPDATED_DTTM as updated_dttm,
@@ -98,7 +100,7 @@ export const insertEntityScoaDistributions = async (
       params[`entityId${index}`] = input.entityId;
       params[`scoaAccountId${index}`] = normalizeText(input.scoaAccountId);
       params[`distributionType${index}`] = normalizeText(input.distributionType);
-      params[`presetId${index}`] = input.presetId ?? null;
+      params[`presetId${index}`] = normalizeGuid(input.presetId ?? null);
       params[`distributionStatus${index}`] = normalizeText(input.distributionStatus);
       params[`updatedBy${index}`] = normalizeText(input.updatedBy);
 
@@ -110,7 +112,7 @@ export const insertEntityScoaDistributions = async (
     entity_id: string;
     scoa_account_id: string;
     distribution_type: string;
-    preset_id?: number | null;
+    preset_id?: string | null;
     distribution_status?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
@@ -120,7 +122,7 @@ export const insertEntityScoaDistributions = async (
       ENTITY_ID,
       SCOA_ACCOUNT_ID,
       DISTRIBUTION_TYPE,
-      PRESET_ID,
+      PRESET_GUID,
       DISTRIBUTION_STATUS,
       UPDATED_DTTM,
       UPDATED_BY
@@ -129,7 +131,7 @@ export const insertEntityScoaDistributions = async (
       INSERTED.ENTITY_ID as entity_id,
       INSERTED.SCOA_ACCOUNT_ID as scoa_account_id,
       INSERTED.DISTRIBUTION_TYPE as distribution_type,
-      INSERTED.PRESET_ID as preset_id,
+      INSERTED.PRESET_GUID as preset_id,
       INSERTED.DISTRIBUTION_STATUS as distribution_status,
       INSERTED.INSERTED_DTTM as inserted_dttm,
       INSERTED.UPDATED_DTTM as updated_dttm,
@@ -154,7 +156,7 @@ export const updateEntityScoaDistribution = async (
   await runQuery(
     `UPDATE ${TABLE_NAME}
     SET
-      PRESET_ID = ISNULL(@presetId, PRESET_ID),
+      PRESET_GUID = ISNULL(@presetId, PRESET_GUID),
       DISTRIBUTION_STATUS = ISNULL(@distributionStatus, DISTRIBUTION_STATUS),
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
@@ -165,7 +167,7 @@ export const updateEntityScoaDistribution = async (
       entityId,
       scoaAccountId: normalizeText(scoaAccountId),
       distributionType: normalizeText(distributionType),
-      presetId: updates.presetId ?? null,
+      presetId: normalizeGuid(updates.presetId ?? null),
       distributionStatus: normalizeText(updates.distributionStatus),
       updatedBy: normalizeText(updates.updatedBy),
     }
