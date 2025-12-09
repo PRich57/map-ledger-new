@@ -187,6 +187,37 @@ const mapClientFileRow = (row: RawClientFileRow): ClientFileRecord => {
   };
 };
 
+export const getClientFileByGuid = async (
+  fileUploadGuid: string,
+): Promise<ClientFileRecord | null> => {
+  if (!fileUploadGuid) {
+    return null;
+  }
+
+  const result = await runQuery<RawClientFileRow>(
+    `SELECT
+      cf.FILE_UPLOAD_GUID as fileUploadGuid,
+      cf.CLIENT_ID as clientId,
+      client.CLIENT_NAME as clientName,
+      cf.INSERTED_BY as insertedBy,
+      cf.INSERTED_DTTM as insertedDttm,
+      cf.SOURCE_FILE_NAME as sourceFileName,
+      cf.FILE_STORAGE_URI as fileStorageUri,
+      cf.FILE_STATUS as fileStatus,
+      cf.GL_PERIOD_START as glPeriodStart,
+      cf.GL_PERIOD_END as glPeriodEnd,
+      cf.LAST_STEP_COMPLETED_DTTM as lastStepCompletedDttm
+    FROM ml.CLIENT_FILES cf
+    LEFT JOIN ML.V_CLIENT_OPERATIONS client ON client.CLIENT_ID = cf.CLIENT_ID
+    WHERE cf.FILE_UPLOAD_GUID = @fileUploadGuid
+      AND cf.IS_DELETED = 0`,
+    { fileUploadGuid }
+  );
+
+  const row = result.recordset?.[0];
+  return row ? mapClientFileRow(row) : null;
+};
+
 export const saveClientFileMetadata = async (
   record: NewClientFileRecord
 ): Promise<ClientFileRecord> => {

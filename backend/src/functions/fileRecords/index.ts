@@ -6,6 +6,7 @@ import {
   FileRecordInput,
   FileRecordRow,
 } from '../../repositories/fileRecordRepository';
+import { getClientFileByGuid } from '../../repositories/clientFileRepository';
 import {
   insertClientFileSheet,
   NewClientFileSheetInput,
@@ -536,11 +537,23 @@ export const listFileRecordsHandler = async (
       return json({ message: 'fileUploadGuid is required' }, 400);
     }
 
-    const items: FileRecordRow[] = await listFileRecords(normalizedFileUploadGuid);
+    const [items, metadata] = await Promise.all<[
+      FileRecordRow[],
+      Awaited<ReturnType<typeof getClientFileByGuid>>,
+    ]>([
+      listFileRecords(normalizedFileUploadGuid),
+      getClientFileByGuid(normalizedFileUploadGuid),
+    ]);
 
     return json({
       items,
       fileUploadGuid: normalizedFileUploadGuid,
+      upload:
+        metadata && metadata.timestamp
+          ? { fileName: metadata.fileName, uploadedAt: metadata.timestamp }
+          : metadata
+            ? { fileName: metadata.fileName, uploadedAt: metadata.insertedDttm }
+            : undefined,
     });
   } catch (error) {
     context.error('Failed to list file records', error);
