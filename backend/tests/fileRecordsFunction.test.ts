@@ -10,7 +10,7 @@ jest.mock('../src/repositories/clientFileEntityRepository', () => ({
 }));
 
 import { ingestFileRecordsHandler } from '../src/functions/fileRecords';
-import { insertFileRecords } from '../src/repositories/fileRecordRepository';
+import { insertFileRecords, listFileRecords } from '../src/repositories/fileRecordRepository';
 import { insertClientFileSheet } from '../src/repositories/clientFileSheetRepository';
 import { insertClientFileEntity } from '../src/repositories/clientFileEntityRepository';
 
@@ -37,6 +37,7 @@ const basePayload = {
 
 describe('fileRecords.ingestFileRecordsHandler', () => {
   const mockInsertFileRecords = insertFileRecords as jest.MockedFunction<typeof insertFileRecords>;
+  const mockListFileRecords = listFileRecords as jest.MockedFunction<typeof listFileRecords>;
   const mockInsertClientFileSheet =
     insertClientFileSheet as jest.MockedFunction<typeof insertClientFileSheet>;
   const mockInsertClientFileEntity =
@@ -44,6 +45,7 @@ describe('fileRecords.ingestFileRecordsHandler', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockListFileRecords.mockResolvedValue([] as any);
     mockInsertClientFileSheet.mockResolvedValue({
       fileUploadGuid: basePayload.fileUploadGuid,
       sheetName: basePayload.sheets[0].sheetName,

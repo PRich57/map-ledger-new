@@ -165,14 +165,19 @@ export const createClientEntity = async (
   return row ? mapRow(row) : null;
 };
 
+export interface ClientEntityUpdateResult {
+  record: ClientEntityRecord | null;
+  rowsAffected: number;
+}
+
 export const updateClientEntity = async (
   input: ClientEntityUpdateInput,
-): Promise<ClientEntityRecord | null> => {
+): Promise<ClientEntityUpdateResult> => {
   const clientId = normalizeText(input.clientId);
   const entityId = normalizeText(input.entityId);
   const entityName = normalizeText(input.entityName);
   if (!clientId || !entityId || !entityName) {
-    return null;
+    return { record: null, rowsAffected: 0 };
   }
 
   const entityDisplayName = normalizeText(input.entityDisplayName) ?? entityName;
@@ -209,8 +214,37 @@ export const updateClientEntity = async (
     },
   );
 
+  const rowsAffected = result.rowsAffected?.[0] ?? 0;
   const row = result.recordset?.[0];
-  return row ? mapRow(row) : null;
+  if (row) {
+    return { record: mapRow(row), rowsAffected };
+  }
+
+  if (rowsAffected > 0) {
+    const fetched = await runQuery<RawClientEntityRow>(
+      `SELECT
+        ENTITY_ID as entity_id,
+        CLIENT_ID as client_id,
+        ENTITY_NAME as entity_name,
+        ENTITY_DISPLAY_NAME as entity_display_name,
+        ENTITY_STATUS as entity_status,
+        IS_DELETED as is_deleted,
+        UPDATED_DTTM as updated_dttm,
+        UPDATED_BY as updated_by,
+        DELETED_DTTM as deleted_dttm,
+        DELETED_BY as deleted_by
+      FROM ml.CLIENT_ENTITIES
+      WHERE ENTITY_ID = @entityId
+        AND CLIENT_ID = @clientId
+        AND ISNULL(IS_DELETED, 0) = 0`,
+      { entityId, clientId },
+    );
+
+    const fetchedRow = fetched.recordset?.[0];
+    return { record: fetchedRow ? mapRow(fetchedRow) : null, rowsAffected };
+  }
+
+  return { record: null, rowsAffected };
 };
 
 export const softDeleteClientEntity = async (
