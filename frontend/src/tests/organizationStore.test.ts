@@ -5,6 +5,7 @@ describe('deriveCompaniesFromAccessList', () => {
   const baseAccess: UserClientAccess = {
     clientId: 'client-1',
     clientName: 'Client One',
+    clientScac: null,
     companies: [
       {
         companyId: 'company-1',
@@ -56,6 +57,7 @@ describe('deriveCompaniesFromAccessList', () => {
       {
         clientId: 'client-2',
         clientName: 'Client Two',
+        clientScac: null,
         companies: [],
         metadata: {
           sourceAccounts: [],

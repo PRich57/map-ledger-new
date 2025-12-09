@@ -66,6 +66,7 @@ export interface UserClientMetadata {
 export interface UserClientAccess {
   clientId: string;
   clientName: string;
+  clientScac: string | null;
   companies: UserClientCompany[];
   metadata: UserClientMetadata;
 }
@@ -302,6 +303,7 @@ type ClientAggregate = {
   clientId: string;
   clientIdGenerated: boolean;
   clientName: string;
+  clientScac: string | null;
   companies: Map<string, CompanyAggregate>;
   metadata: {
     sourceAccounts: Map<string, UserClientSourceAccount>;
@@ -359,6 +361,7 @@ export const fetchUserClientAccess = async (
         return;
       }
 
+      const clientScac = extractClientScac(row);
       const rawClientId = extractClientId(row);
       const clientId = normalizeIdentifier(
         rawClientId,
@@ -372,6 +375,7 @@ export const fetchUserClientAccess = async (
           clientId,
           clientIdGenerated: !rawClientId,
           clientName,
+          clientScac: clientScac || null,
           companies: new Map(),
           metadata: {
             sourceAccounts: new Map(),
@@ -392,8 +396,11 @@ export const fetchUserClientAccess = async (
         aggregate.clientIdGenerated = false;
       }
 
+      if (!aggregate.clientScac && clientScac) {
+        aggregate.clientScac = clientScac;
+      }
+
       const operationalScac = extractOperationalScac(row);
-      const clientScac = extractClientScac(row);
       const companyName =
         extractCompanyName(row) || operationalScac || clientScac || clientName;
       const companyId = normalizeIdentifier(
@@ -485,6 +492,7 @@ export const fetchUserClientAccess = async (
       (aggregate) => ({
         clientId: aggregate.clientId,
         clientName: aggregate.clientName,
+        clientScac: aggregate.clientScac,
         companies: Array.from(aggregate.companies.values()).map((company) => ({
           companyId: company.companyId,
           companyName: company.companyName,

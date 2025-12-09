@@ -61,7 +61,7 @@ export interface UserClientMetadata {
 export interface UserClientAccess {
   clientId: string;
   clientName: string;
-  clientScac?: string | null;
+  clientScac: string | null;
   operations?: UserClientOperation[];
   companies: UserClientCompany[];
   metadata: UserClientMetadata;
