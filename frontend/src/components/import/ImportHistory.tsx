@@ -7,6 +7,8 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  ArrowRight,
+  RotateCcw,
 } from 'lucide-react';
 import { Import } from '../../types';
 import { formatPeriodLabel, parsePeriodString } from '../../utils/period';
@@ -520,9 +522,10 @@ export default function ImportHistory({
                     setWorkflowImport(null);
                   }}
                   className="flex w-full items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                  aria-label="Resume mapping workflow"
                 >
-                  <span>Continue where I left off</span>
-                  <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                  <span>Resume</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
@@ -530,10 +533,11 @@ export default function ImportHistory({
                     onStartMapping(workflowImport, 'restart');
                     setWorkflowImport(null);
                   }}
-                  className="flex w-full items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
+                  className="flex w-full items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                  aria-label="Restart mapping workflow"
                 >
-                  <span>Start over with suggestions</span>
-                  <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                  <span>Restart</span>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
