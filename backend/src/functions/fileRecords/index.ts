@@ -558,14 +558,34 @@ export const listFileRecordsHandler = async (
             16,
           )}-${normalizedFileUploadGuid.slice(16, 20)}-${normalizedFileUploadGuid.slice(20)}`;
 
-    const [items, metadata, fileEntities] = await Promise.all([
+    const [itemsResult, metadataResult, fileEntitiesResult] = await Promise.allSettled([
       listFileRecords(formattedFileUploadGuid),
       getClientFileByGuid(formattedFileUploadGuid),
       listClientFileEntities(formattedFileUploadGuid),
     ]);
 
+    if (itemsResult.status === 'rejected') {
+      context.error('Failed to fetch file records', itemsResult.reason);
+      throw itemsResult.reason;
+    }
+
+    const items = itemsResult.value;
+
+    if (metadataResult.status === 'rejected') {
+      context.warn('Failed to fetch file metadata; continuing without it', metadataResult.reason);
+    }
+    const metadata = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
+
+    if (fileEntitiesResult.status === 'rejected') {
+      context.warn('Failed to fetch file entities; continuing without selections', fileEntitiesResult.reason);
+    }
+    const fileEntities = fileEntitiesResult.status === 'fulfilled' ? fileEntitiesResult.value : [];
+
     const clientEntities = metadata?.clientId
-      ? await listClientEntities(metadata.clientId)
+      ? await listClientEntities(metadata.clientId).catch((error) => {
+          context.warn('Failed to fetch client entities; continuing without names', error);
+          return [];
+        })
       : [];
 
     const entityNameLookup = new Map(
