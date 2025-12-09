@@ -163,7 +163,9 @@ const buildScoaActivities = (
     input.mappingType?.toLowerCase() === 'exclude' ||
     input.mappingStatus?.toLowerCase() === 'excluded';
 
-  if (!input.entityId || !input.glMonth || isExcluded) {
+  const { entityId, glMonth } = input;
+
+  if (!entityId || !glMonth || isExcluded) {
     return [];
   }
 
@@ -191,9 +193,9 @@ const buildScoaActivities = (
         : baseAmount * (allocationValue / 100);
 
     results.push({
-      entityId: input.entityId,
+      entityId,
       scoaAccountId,
-      activityMonth: input.glMonth,
+      activityMonth: glMonth,
       activityValue: calculatedValue,
       updatedBy: input.updatedBy ?? null,
     });
