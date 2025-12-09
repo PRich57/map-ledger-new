@@ -19,6 +19,7 @@ import { useMappingStore } from '../store/mappingStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import scrollPageToTop from '../utils/scroll';
 import { slugify } from '../utils/slugify';
+import { useClientStore } from '../store/clientStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -44,6 +45,7 @@ export default function Import() {
   const orgLoading = useOrganizationStore((state) => state.isLoading);
   const orgError = useOrganizationStore((state) => state.error);
   const fetchFileRecords = useMappingStore((state) => state.fetchFileRecords);
+  const activeClientId = useClientStore((state) => state.activeClientId);
 
   useEffect(() => {
     if (user?.email) {
@@ -72,14 +74,15 @@ export default function Import() {
   }, [clientSummaries, imports]);
 
   const singleClient = clientSummaries.length === 1 ? clientSummaries[0] : null;
+  const resolvedClientId = activeClientId ?? singleClient?.id;
 
   useEffect(() => {
     if (!userId) {
       return;
     }
 
-    fetchImports({ userId, clientId: singleClient?.id, page, pageSize });
-  }, [fetchImports, userId, singleClient?.id, page, pageSize]);
+    fetchImports({ userId, clientId: resolvedClientId, page, pageSize });
+  }, [fetchImports, userId, resolvedClientId, page, pageSize]);
 
   const handleDeleteImport = async (importId: string) => {
     if (!importId) {
@@ -451,7 +454,7 @@ export default function Import() {
             if (userId) {
               fetchImports({
                 userId,
-                clientId: singleClient?.id,
+                clientId: resolvedClientId,
                 page: nextPage,
                 pageSize,
               });
