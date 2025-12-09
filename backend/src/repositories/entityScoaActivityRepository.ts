@@ -141,6 +141,79 @@ export const insertEntityScoaActivity = async (
   return (result.recordset ?? []).map(mapRow);
 };
 
+export const upsertEntityScoaActivity = async (
+  activities: EntityScoaActivityInput[],
+): Promise<EntityScoaActivityRow[]> => {
+  if (!activities.length) {
+    return [];
+  }
+
+  const params: Record<string, unknown> = {};
+  const valuesClause = activities
+    .map((activity, index) => {
+      params[`entityId${index}`] = activity.entityId;
+      params[`scoaAccountId${index}`] = normalizeText(activity.scoaAccountId);
+      params[`activityMonth${index}`] = toSqlMonth(activity.activityMonth);
+      params[`activityValue${index}`] = activity.activityValue;
+      params[`updatedBy${index}`] = normalizeText(activity.updatedBy);
+
+      return `(@entityId${index}, @scoaAccountId${index}, @activityMonth${index}, @activityValue${index}, @updatedBy${index})`;
+    })
+    .join(', ');
+
+  const result = await runQuery<{
+    entity_id: string;
+    scoa_account_id: string;
+    activity_month?: string | null;
+    activity_value?: number | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+  }>(
+    `MERGE ${TABLE_NAME} AS target
+    USING (VALUES ${valuesClause}) AS source(
+      entity_id,
+      scoa_account_id,
+      activity_month,
+      activity_value,
+      updated_by
+    )
+    ON target.ENTITY_ID = source.entity_id AND target.SCOA_ACCOUNT_ID = source.scoa_account_id AND target.ACTIVITY_MONTH = source.activity_month
+    WHEN MATCHED THEN
+      UPDATE SET
+        ACTIVITY_VALUE = source.activity_value,
+        UPDATED_BY = source.updated_by,
+        UPDATED_DTTM = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN
+      INSERT (
+        ENTITY_ID,
+        SCOA_ACCOUNT_ID,
+        ACTIVITY_MONTH,
+        ACTIVITY_VALUE,
+        UPDATED_DTTM,
+        UPDATED_BY
+      ) VALUES (
+        source.entity_id,
+        source.scoa_account_id,
+        source.activity_month,
+        source.activity_value,
+        NULL,
+        source.updated_by
+      )
+    OUTPUT
+      inserted.ENTITY_ID as entity_id,
+      inserted.SCOA_ACCOUNT_ID as scoa_account_id,
+      inserted.ACTIVITY_MONTH as activity_month,
+      inserted.ACTIVITY_VALUE as activity_value,
+      inserted.INSERTED_DTTM as inserted_dttm,
+      inserted.UPDATED_DTTM as updated_dttm,
+      inserted.UPDATED_BY as updated_by;`,
+    params,
+  );
+
+  return (result.recordset ?? []).map(mapRow);
+};
+
 export const updateEntityScoaActivity = async (
   entityId: string,
   scoaAccountId: string,

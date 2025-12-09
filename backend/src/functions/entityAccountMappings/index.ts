@@ -19,6 +19,8 @@ import {
   listEntityMappingPresetDetails,
   updateEntityMappingPresetDetail,
 } from '../../repositories/entityMappingPresetDetailRepository';
+import { EntityAccountInput, upsertEntityAccounts } from '../../repositories/entityAccountRepository';
+import { EntityScoaActivityInput, upsertEntityScoaActivity } from '../../repositories/entityScoaActivityRepository';
 
 interface IncomingSplitDefinition {
   targetId?: string | null;
@@ -31,11 +33,14 @@ interface IncomingSplitDefinition {
 interface MappingSaveInput {
   entityId?: string;
   entityAccountId?: string;
+  accountName?: string | null;
   polarity?: string | null;
   mappingType?: string | null;
   mappingStatus?: string | null;
   presetId?: string | null;
   exclusionPct?: number | null;
+  netChange?: number | null;
+  glMonth?: string | null;
   updatedBy?: string | null;
   splitDefinitions?: IncomingSplitDefinition[];
 }
@@ -55,6 +60,11 @@ const normalizeNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) {
     return null;
   }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseNumber = (value: unknown): number | null => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -129,11 +139,14 @@ const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
       return {
         entityId: getFirstStringValue(entryRecord?.entityId),
         entityAccountId: getFirstStringValue(entryRecord?.entityAccountId),
+        accountName: getFirstStringValue(entryRecord?.accountName),
         polarity: normalizeText(entryRecord?.polarity),
         mappingType: normalizeMappingType(entryRecord?.mappingType),
         mappingStatus: normalizeText(entryRecord?.mappingStatus),
         presetId: normalizeText(entryRecord?.presetId),
         exclusionPct: normalizeNumber(entryRecord?.exclusionPct),
+        netChange: parseNumber(entryRecord?.netChange),
+        glMonth: getFirstStringValue(entryRecord?.glMonth),
         updatedBy: normalizeText(entryRecord?.updatedBy),
         splitDefinitions,
       };
@@ -141,6 +154,52 @@ const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
     .filter((item): item is MappingSaveInput => Boolean(item.entityId && item.entityAccountId));
 
   return inputs;
+};
+
+const buildScoaActivities = (
+  input: MappingSaveInput,
+): EntityScoaActivityInput[] => {
+  const isExcluded =
+    input.mappingType?.toLowerCase() === 'exclude' ||
+    input.mappingStatus?.toLowerCase() === 'excluded';
+
+  if (!input.entityId || !input.glMonth || isExcluded) {
+    return [];
+  }
+
+  const splits = input.splitDefinitions ?? [];
+  if (!splits.length) {
+    return [];
+  }
+
+  const baseAmount = input.netChange ?? null;
+  if (baseAmount === null) {
+    return [];
+  }
+
+  return splits.reduce<EntityScoaActivityInput[]>((results, split) => {
+    const scoaAccountId = normalizeText(split.targetId);
+    if (!scoaAccountId) {
+      return results;
+    }
+
+    const allocationValue = parseNumber(split.allocationValue) ?? 0;
+    const allocationType = split.allocationType ?? 'percentage';
+    const calculatedValue =
+      allocationType === 'amount'
+        ? allocationValue
+        : baseAmount * (allocationValue / 100);
+
+    results.push({
+      entityId: input.entityId,
+      scoaAccountId,
+      activityMonth: input.glMonth,
+      activityValue: calculatedValue,
+      updatedBy: input.updatedBy ?? null,
+    });
+
+    return results;
+  }, []);
 };
 
 const syncPresetDetails = async (
@@ -237,6 +296,8 @@ const saveHandler = async (
     }
 
     const upserts: EntityAccountMappingUpsertInput[] = [];
+    const entityAccounts: EntityAccountInput[] = [];
+    const scoaActivityLookup = new Map<string, EntityScoaActivityInput>();
 
     for (const input of inputs) {
       const presetGuid = await ensurePreset(
@@ -266,11 +327,39 @@ const saveHandler = async (
         exclusionPct: input.exclusionPct,
         updatedBy: input.updatedBy,
       });
+
+      entityAccounts.push({
+        entityId: input.entityId as string,
+        accountId: input.entityAccountId as string,
+        accountName: input.accountName ?? null,
+        updatedBy: input.updatedBy ?? null,
+      });
+
+      const activities = buildScoaActivities(input);
+      activities.forEach((activity) => {
+        const key = `${activity.entityId}|${activity.scoaAccountId}|${activity.activityMonth}`;
+        const existing = scoaActivityLookup.get(key);
+        if (existing) {
+          existing.activityValue += activity.activityValue;
+          return;
+        }
+        scoaActivityLookup.set(key, activity);
+      });
     }
 
-    const items = await upsertEntityAccountMappings(upserts);
-    context.log('Saved entity account mappings', { count: items.length });
-    return json({ items });
+    const [mappings] = await Promise.all([
+      upsertEntityAccountMappings(upserts),
+      upsertEntityAccounts(entityAccounts),
+      upsertEntityScoaActivity(Array.from(scoaActivityLookup.values())),
+    ]);
+
+    context.log('Saved entity account mappings', {
+      mappings: mappings.length,
+      accounts: entityAccounts.length,
+      scoaActivities: scoaActivityLookup.size,
+    });
+
+    return json({ items: mappings });
   } catch (error) {
     context.error('Failed to save entity account mappings', error);
     return json(buildErrorResponse('Failed to save entity account mappings', error), 500);
