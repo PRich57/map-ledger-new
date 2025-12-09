@@ -25,6 +25,7 @@ import { normalizeGlMonth, isValidNormalizedMonth } from '../../utils/extractDat
 import { detectLikelyEntities } from '../../utils/detectClientEntities';
 import { useAuthStore } from '../../store/authStore';
 import { slugify } from '../../utils/slugify';
+import MultiSelect from '../ui/MultiSelect';
 
 const templateHeaders = [
   'GL ID',
@@ -1010,8 +1011,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             label: u.sheetName,
           }))}
           value={selectedSheets.map(idx => idx.toString())}
-          onChange={(values) => {
-            setSelectedSheets(values.map(v => parseInt(v, 10)));
+          onChange={(values: string[]) => {
+            setSelectedSheets(values.map((v: string) => parseInt(v, 10)));
           }}
         />
       )}
