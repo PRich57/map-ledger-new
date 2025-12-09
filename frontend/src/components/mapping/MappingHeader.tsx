@@ -12,11 +12,64 @@ interface MappingHeaderProps {
   glUploadId?: string;
 }
 
+export const formatUploadLabel = ({
+  uploadId,
+  fileName,
+  uploadedAt,
+  timeZone,
+}: {
+  uploadId?: string | null;
+  fileName?: string | null;
+  uploadedAt?: string | null;
+  timeZone?: string;
+}): string => {
+  const resolvedName = fileName?.trim();
+  const resolvedTimeZone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (resolvedName && uploadedAt) {
+    const parsed = new Date(uploadedAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: resolvedTimeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZoneName: 'short',
+      })
+        .formatToParts(parsed)
+        .reduce<Record<string, string>>((acc, part) => {
+          acc[part.type] = part.value;
+          return acc;
+        }, {});
+
+      const { year, month, day, hour, minute, dayPeriod, timeZoneName } = parts;
+      const formattedTimestamp =
+        year && month && day && hour && minute && dayPeriod && timeZoneName
+          ? `${year}-${month}-${day} ${hour}:${minute} ${dayPeriod.toUpperCase()} ${timeZoneName}`
+          : null;
+
+      if (formattedTimestamp) {
+        return `Upload '${resolvedName}' - ${formattedTimestamp}`;
+      }
+    }
+  }
+
+  if (resolvedName) {
+    return `Upload '${resolvedName}'`;
+  }
+
+  return uploadId ? `Upload ${uploadId}` : 'Latest general ledger import';
+};
+
 const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   const clients = useClientStore(state => state.clients);
   const availablePeriods = useMappingStore(selectAvailablePeriods);
   const activePeriod = useMappingStore(selectActivePeriod);
   const setActivePeriod = useMappingStore(state => state.setActivePeriod);
+  const activeUploadMetadata = useMappingStore(state => state.activeUploadMetadata);
 
   const activeClient = useMemo(() => {
     if (clients.length === 0) {
@@ -41,6 +94,18 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
     });
   }, [activeClient?.operations]);
 
+  const resolvedUploadMetadata = useMemo(() => {
+    if (!activeUploadMetadata) {
+      return null;
+    }
+
+    if (!glUploadId || activeUploadMetadata.uploadId === glUploadId) {
+      return activeUploadMetadata;
+    }
+
+    return null;
+  }, [activeUploadMetadata, glUploadId]);
+
   const hasAvailablePeriods = availablePeriods.length > 0;
 
   return (
@@ -59,7 +124,11 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
                 {activeClient?.name ?? 'Mapping Workspace'}
               </h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {glUploadId ? `Upload ${glUploadId}` : 'Latest general ledger import'}
+                {formatUploadLabel({
+                  uploadId: glUploadId ?? resolvedUploadMetadata?.uploadId,
+                  fileName: resolvedUploadMetadata?.fileName,
+                  uploadedAt: resolvedUploadMetadata?.uploadedAt,
+                })}
               </p>
             </div>
           </div>
