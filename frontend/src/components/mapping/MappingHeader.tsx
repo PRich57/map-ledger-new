@@ -5,7 +5,6 @@ import {
   useMappingStore,
   selectAvailablePeriods,
   selectActivePeriod,
-  selectAccounts,
 } from '../../store/mappingStore';
 
 interface MappingHeaderProps {
@@ -15,9 +14,6 @@ interface MappingHeaderProps {
 
 const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   const clients = useClientStore(state => state.clients);
-  const operations = useMappingStore(state =>
-    selectAccounts(state).map(account => account.operation)
-  );
   const availablePeriods = useMappingStore(selectAvailablePeriods);
   const activePeriod = useMappingStore(selectActivePeriod);
   const setActivePeriod = useMappingStore(state => state.setActivePeriod);
@@ -30,8 +26,20 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   }, [clients, clientId]);
 
   const uniqueOperations = useMemo(() => {
-    return Array.from(new Set(operations)).filter(Boolean);
-  }, [operations]);
+    if (!activeClient?.operations || activeClient.operations.length === 0) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    return activeClient.operations.filter(operation => {
+      const key = operation.code || operation.id || operation.name;
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }, [activeClient?.operations]);
 
   const hasAvailablePeriods = availablePeriods.length > 0;
 
@@ -43,7 +51,7 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
             {activeClient && (
               <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/60 dark:text-blue-100">
                 <Building2 className="mr-2 h-4 w-4" />
-                {activeClient.clientId}
+                {activeClient.scac ?? activeClient.clientId}
               </span>
             )}
             <div>
@@ -60,10 +68,10 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
               <span className="font-medium">Operations:</span>
               {uniqueOperations.map(operation => (
                 <span
-                  key={operation}
+                  key={operation.code || operation.id}
                   className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 dark:bg-slate-800"
                 >
-                  {operation}
+                  {operation.code || operation.name}
                 </span>
               ))}
             </div>

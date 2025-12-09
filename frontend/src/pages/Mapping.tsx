@@ -15,6 +15,9 @@ import {
   type HydrationMode,
   useMappingStore,
 } from '../store/mappingStore';
+import { useOrganizationStore } from '../store/organizationStore';
+import { useClientStore } from '../store/clientStore';
+import { useAuthStore } from '../store/authStore';
 import scrollPageToTop from '../utils/scroll';
 
 const normalizeEntityId = (value: string | null): string | null => {
@@ -42,6 +45,10 @@ const resolveHydrationMode = (value: string | null): HydrationMode => {
 export default function Mapping() {
   const { uploadId = 'demo' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const userEmail = useAuthStore(state => state.user?.email ?? null);
+  const hydrateClients = useClientStore(state => state.hydrateFromAccessList);
+  const clientAccess = useOrganizationStore(state => state.clientAccess);
+  const fetchOrganizations = useOrganizationStore(state => state.fetchForUser);
   const activeClientId = useMappingStore(state => state.activeClientId);
   const activeUploadId = useMappingStore(state => state.activeUploadId);
   const availableEntities = useMappingStore(selectAvailableEntities);
@@ -63,6 +70,26 @@ export default function Mapping() {
     () => new Set(availableEntities.map(entity => entity.id)),
     [availableEntities],
   );
+
+  useEffect(() => {
+    if (!userEmail) {
+      return;
+    }
+
+    if (clientAccess.length > 0) {
+      return;
+    }
+
+    fetchOrganizations(userEmail);
+  }, [clientAccess.length, fetchOrganizations, userEmail]);
+
+  useEffect(() => {
+    if (clientAccess.length === 0) {
+      return;
+    }
+
+    hydrateClients(clientAccess, activeClientId);
+  }, [activeClientId, clientAccess, hydrateClients]);
   const normalizedEntityParam = useMemo(() => {
     const param = searchParams.get('entityId');
     const normalized = normalizeEntityId(param);
