@@ -18,12 +18,14 @@ export interface User {
 export interface ClientProfile {
   id: string;
   clientId: string;
-  industry: string;
   name: string;
-  contactFirstName: string;
-  contactLastName: string;
-  contactEmail: string;
-  accountingSystem: string;
+  scac?: string | null;
+  industry?: string;
+  contactFirstName?: string;
+  contactLastName?: string;
+  contactEmail?: string;
+  accountingSystem?: string;
+  operations?: UserClientOperation[];
 }
 
 export interface UserClientOperation {
@@ -35,6 +37,8 @@ export interface UserClientOperation {
 export interface UserClientCompany {
   companyId: string;
   companyName: string;
+  companyScac?: string | null;
+  operationalScac?: string | null;
   operations: UserClientOperation[];
 }
 
@@ -55,6 +59,7 @@ export interface UserClientMetadata {
 export interface UserClientAccess {
   clientId: string;
   clientName: string;
+  clientScac?: string | null;
   companies: UserClientCompany[];
   metadata: UserClientMetadata;
 }
