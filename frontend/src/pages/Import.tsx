@@ -10,6 +10,7 @@ import TemplateGuide from '../components/import/TemplateGuide';
 import type {
   ClientEntity,
   EntitySummary,
+  Import,
   ImportSheet,
   TrialBalanceRow,
 } from '../types';
@@ -100,6 +101,37 @@ export default function Import() {
           : 'Unable to delete import. Please try again.'
       );
     }
+  };
+
+  const handleStartMapping = (
+    importItem: Import,
+    mode: 'resume' | 'restart',
+  ) => {
+    const entitiesFromImport: EntitySummary[] = (importItem.entities ?? [])
+      .map((entity) => {
+        const normalizedId = entity.entityId ?? slugify(entity.entityName);
+        const name = entity.displayName ?? entity.entityName ?? normalizedId ?? 'Entity';
+        return {
+          id: normalizedId ?? name,
+          name,
+        } satisfies EntitySummary;
+      })
+      .filter((entity) => Boolean(entity.id));
+
+    const search = new URLSearchParams({ stage: 'mapping' });
+    if (mode === 'restart') {
+      search.set('mode', 'restart');
+    }
+
+    fetchFileRecords(importItem.id, {
+      clientId: importItem.clientId,
+      entities: entitiesFromImport,
+      entityIds: entitiesFromImport.map((entity) => entity.id),
+      period: importItem.period,
+      hydrateMode: mode,
+    });
+
+    navigate(`/gl/mapping/${importItem.id}?${search.toString()}`);
   };
 
   const handleFileImport = async (
@@ -425,6 +457,7 @@ export default function Import() {
               });
             }
           }}
+          onStartMapping={handleStartMapping}
         />
       </Card>
     </div>

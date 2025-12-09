@@ -50,6 +50,9 @@ export default function MappingToolbar() {
   const finalizeMappings = useMappingStore(state => state.finalizeMappings);
   const applyBatchMapping = useMappingStore(state => state.applyBatchMapping);
   const applyPresetToAccounts = useMappingStore(state => state.applyPresetToAccounts);
+  const saveMappings = useMappingStore(state => state.saveMappings);
+  const isSavingMappings = useMappingStore(state => state.isSavingMappings);
+  const saveError = useMappingStore(state => state.saveError);
   const { selectedIds, clearSelection } = useMappingSelectionStore();
   const datapoints = useTemplateStore(state => state.datapoints);
   const coaOptions = useMemo(() => buildTargetScoaOptions(datapoints), [datapoints]);
@@ -57,6 +60,7 @@ export default function MappingToolbar() {
   const [isPresetOpen, setPresetOpen] = useState(false);
   const [isBatchExcludeOpen, setBatchExcludeOpen] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const hasSelection = selectedIds.size > 0;
   const selectedCount = selectedIds.size;
 
@@ -109,6 +113,17 @@ export default function MappingToolbar() {
     setPresetOpen(false);
     clearSelection();
     setFinalizeError(null);
+  };
+
+  const handleSaveProgress = async () => {
+    setSaveSuccess(null);
+    const savedCount = await saveMappings();
+    if (savedCount > 0) {
+      setSaveSuccess(`Saved ${savedCount} mapped row${savedCount === 1 ? '' : 's'} for later.`);
+      setFinalizeError(null);
+    } else if (!saveError) {
+      setSaveSuccess('No mapped or excluded rows are ready to save yet.');
+    }
   };
 
   const handleConfirmExclude = () => {
@@ -246,11 +261,31 @@ export default function MappingToolbar() {
           >
             Finalize selection
           </button>
+          <button
+            type="button"
+            onClick={handleSaveProgress}
+            className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+              isSavingMappings
+                ? 'bg-slate-200 text-slate-500 focus:ring-0 dark:bg-slate-800 dark:text-slate-500'
+                : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
+            }`}
+            disabled={isSavingMappings}
+          >
+            {isSavingMappings ? 'Saving…' : 'Save progress'}
+          </button>
         </div>
-        {finalizeError && (
-          <p className="text-sm text-rose-600 dark:text-rose-300" role="alert">
-            {finalizeError}
-          </p>
+        {(finalizeError || saveError || saveSuccess) && (
+          <div className="space-y-1" role="alert">
+            {finalizeError && (
+              <p className="text-sm text-rose-600 dark:text-rose-300">{finalizeError}</p>
+            )}
+            {saveError && (
+              <p className="text-sm text-rose-600 dark:text-rose-300">{saveError}</p>
+            )}
+            {saveSuccess && !saveError && (
+              <p className="text-sm text-emerald-700 dark:text-emerald-300">{saveSuccess}</p>
+            )}
+          </div>
         )}
       </div>
       <BatchMapModal

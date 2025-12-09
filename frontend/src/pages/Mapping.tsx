@@ -12,6 +12,7 @@ import EntityTabs from '../components/mapping/EntityTabs';
 import {
   selectActiveEntityId,
   selectAvailableEntities,
+  type HydrationMode,
   useMappingStore,
 } from '../store/mappingStore';
 import scrollPageToTop from '../utils/scroll';
@@ -31,6 +32,13 @@ const stepParam = (value: string | null): MappingStep => {
   return 'mapping';
 };
 
+const resolveHydrationMode = (value: string | null): HydrationMode => {
+  if (value === 'restart' || value === 'none') {
+    return value;
+  }
+  return 'resume';
+};
+
 export default function Mapping() {
   const { uploadId = 'demo' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -41,6 +49,10 @@ export default function Mapping() {
   const setActiveEntityId = useMappingStore(state => state.setActiveEntityId);
   const availableEntities = useMappingStore(selectAvailableEntities);
   const fetchFileRecords = useMappingStore(state => state.fetchFileRecords);
+  const hydrationMode = useMemo(
+    () => resolveHydrationMode(searchParams.get('mode')),
+    [searchParams],
+  );
   const normalizedEntityParam = useMemo(() => {
     const param = searchParams.get('entityId');
     return normalizeEntityId(param);
@@ -53,10 +65,21 @@ export default function Mapping() {
   }, [activeStep]);
 
   useEffect(() => {
-    if (uploadId && uploadId !== activeUploadId) {
-      fetchFileRecords(uploadId);
+    if (!uploadId) {
+      return;
     }
-  }, [activeUploadId, fetchFileRecords, uploadId]);
+
+    const shouldReload = uploadId !== activeUploadId || hydrationMode === 'restart';
+    if (shouldReload) {
+      fetchFileRecords(uploadId, { hydrateMode: hydrationMode });
+
+      if (hydrationMode === 'restart') {
+        const next = new URLSearchParams(searchParams);
+        next.delete('mode');
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [activeUploadId, fetchFileRecords, hydrationMode, searchParams, setSearchParams, uploadId]);
 
   useEffect(() => {
     if (normalizedEntityParam !== activeEntityId) {
