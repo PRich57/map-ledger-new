@@ -84,6 +84,7 @@ describe('fetchUserClientAccess', () => {
 
     const [alpha, beta] = result.clients;
     expect(alpha.clientId).toBe('C1');
+    expect(alpha.clientScac).toBe('ALPH');
     expect(alpha.companies.map((company) => company.companyId)).toEqual([
       'AL1',
       'AL2',
@@ -101,6 +102,7 @@ describe('fetchUserClientAccess', () => {
       code: 'OPS-010',
       name: 'International',
     });
+    expect(beta.clientScac).toBe('BETA');
   });
 
   it('returns an empty client list when no SQL rows are returned', async () => {
