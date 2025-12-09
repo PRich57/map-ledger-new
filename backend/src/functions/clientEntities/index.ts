@@ -28,9 +28,50 @@ export const listClientEntitiesHandler = async (
   }
 };
 
+const getHeaderValue = (
+  request: HttpRequest,
+  headerName: string,
+): string | undefined => {
+  const headersAny: any = (request as any).headers;
+  if (!headersAny) {
+    return undefined;
+  }
+
+  if (typeof headersAny.get === 'function') {
+    const viaGet = headersAny.get(headerName);
+    if (typeof viaGet === 'string' && viaGet.trim().length > 0) {
+      return viaGet;
+    }
+  }
+
+  const candidates = [headerName, headerName.toLowerCase(), headerName.toUpperCase()];
+  for (const candidate of candidates) {
+    const value = headersAny[candidate];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
 const resolveUpdatedBy = (request: HttpRequest): string | undefined => {
   const principal = getClientPrincipal(request);
-  return principal?.userDetails || principal?.userId || undefined;
+  const emailClaim = principal?.claims?.find(
+    (claim) => claim.typ?.toLowerCase() === 'emails' || claim.typ?.toLowerCase() === 'email'
+  );
+
+  const fromHeader =
+    getHeaderValue(request, 'x-ms-client-principal-name') ||
+    getHeaderValue(request, 'x-ms-client-principal-id');
+
+  return (
+    principal?.userDetails ||
+    emailClaim?.val ||
+    principal?.userId ||
+    fromHeader ||
+    undefined
+  );
 };
 
 export const createClientEntityHandler = async (
