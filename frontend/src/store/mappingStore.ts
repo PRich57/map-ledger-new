@@ -702,11 +702,13 @@ const calculateExclusionPctFromAccount = (
 const buildSaveInputFromAccount = (
   account: GLAccountMappingRow,
   defaultEntity?: EntitySummary | null,
+  selectedEntityId?: string | null,
 ): MappingSaveInput | null => {
   const resolvedEntityId =
     account.entityId ||
-    slugify(account.entityName ?? '') ||
+    selectedEntityId ||
     defaultEntity?.id ||
+    slugify(account.entityName ?? '') ||
     null;
 
   if (!resolvedEntityId) {
@@ -1090,6 +1092,29 @@ const normalizeClientId = (
 
 const initialAccounts: GLAccountMappingRow[] = [];
 const initialEntities: EntitySummary[] = [];
+
+const dedupeEntities = (entities: EntitySummary[]): EntitySummary[] =>
+  Array.from(new Map(entities.map(entity => [entity.id, entity])).values());
+
+const mergeEntitiesWithIds = (
+  baseEntities: EntitySummary[],
+  derivedEntities: EntitySummary[] = [],
+  entityIds: string[] = [],
+): EntitySummary[] => {
+  const merged = new Map<string, EntitySummary>();
+
+  [...derivedEntities, ...baseEntities].forEach(entity => {
+    merged.set(entity.id, entity);
+  });
+
+  entityIds.forEach(id => {
+    if (!merged.has(id)) {
+      merged.set(id, { id, name: id });
+    }
+  });
+
+  return Array.from(merged.values());
+};
 
 export const useMappingStore = create<MappingState>((set, get) => ({
   accounts: initialAccounts,
@@ -1752,16 +1777,20 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     }
   },
   saveMappings: async (accountIds) => {
-    const { accounts } = get();
+    const state = get();
+    const { accounts, activeEntityId } = state;
     const scope = Array.isArray(accountIds) && accountIds.length > 0 ? accountIds : null;
 
     const scopedAccounts = accounts.filter(account => (scope ? scope.includes(account.id) : true));
 
-    const availableEntities = selectAvailableEntities(get());
-    const defaultEntity = availableEntities.length === 1 ? availableEntities[0] : null;
+    const availableEntities = selectAvailableEntities(state);
+    const activeEntity = activeEntityId
+      ? availableEntities.find(entity => entity.id === activeEntityId) ?? null
+      : null;
+    const defaultEntity = activeEntity ?? (availableEntities.length === 1 ? availableEntities[0] : null);
 
     const payload = scopedAccounts
-      .map(account => buildSaveInputFromAccount(account, defaultEntity))
+      .map(account => buildSaveInputFromAccount(account, defaultEntity, activeEntityId))
       .filter((entry): entry is MappingSaveInput => Boolean(entry));
 
     if (!payload.length) {
@@ -1821,13 +1850,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     const normalizedClientId = normalizeClientId(clientId);
     const normalizedPeriod = period && period.trim().length > 0 ? period : null;
 
-    const selectedEntities = entities
-      ? Array.from(
-          new Map(
-            entities.map(entity => [entity.id, { id: entity.id, name: entity.name }]),
-          ).values(),
-        )
-      : [];
+    const entityIdSummaries = (entityIds ?? []).map(id => ({ id, name: id }));
+    const selectedEntities = dedupeEntities([...(entities ?? []), ...entityIdSummaries]);
 
     const accountsFromImport = buildMappingRowsFromImport(rows, {
       uploadId,
@@ -1837,15 +1861,16 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
     const resolvedAccounts = resolveEntityConflicts(accountsFromImport, selectedEntities);
 
-    const resolvedEntities =
-      selectedEntities.length > 0
-        ? selectedEntities
-        : deriveEntitySummaries(resolvedAccounts);
+    const derivedEntities = deriveEntitySummaries(resolvedAccounts);
+    const mergedEntities = mergeEntitiesWithIds(selectedEntities, derivedEntities, entityIds ?? []);
     const resolvedEntityIds =
       entityIds?.length && entityIds.length > 0
-        ? entityIds
-        : resolvedEntities.map(entity => entity.id);
-    const resolvedActiveEntityId = resolvedEntityIds[0] ?? resolvedEntities[0]?.id ?? null;
+        ? Array.from(new Set(entityIds))
+        : mergedEntities.map(entity => entity.id);
+    const resolvedActiveEntityId =
+      resolvedEntityIds.find(id => mergedEntities.some(entity => entity.id === id)) ??
+      mergedEntities[0]?.id ??
+      null;
 
     const scopedAccounts = getAccountsForEntity(
       resolvedAccounts,
@@ -1869,7 +1894,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       activeClientId: normalizedClientId,
       activeEntityId: resolvedActiveEntityId,
       activeEntityIds: resolvedEntityIds,
-      activeEntities: resolvedEntities,
+      activeEntities: mergedEntities,
       activePeriod: resolvedPeriod,
     });
 
@@ -1893,13 +1918,19 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       const records = payload.items ?? [];
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
-      const rows: TrialBalanceRow[] = records.map((record) => ({
-        entity: record.entityName ?? '',
-        accountId: record.accountId,
-        description: record.accountName,
-        netChange: record.activityAmount ?? 0,
-        glMonth: record.glMonth ?? undefined,
-      }));
+      const rows: TrialBalanceRow[] = records.map((record) => {
+        const entityId = record.entityId ?? null;
+        const entityName = record.entityName ?? null;
+        return {
+          entity: entityName ?? entityId ?? '',
+          entityId,
+          entityName,
+          accountId: record.accountId,
+          description: record.accountName,
+          netChange: record.activityAmount ?? 0,
+          glMonth: record.glMonth ?? undefined,
+        };
+      });
 
       const preferredPeriod =
         options?.period ?? rows.find((row) => row.glMonth)?.glMonth ?? null;
