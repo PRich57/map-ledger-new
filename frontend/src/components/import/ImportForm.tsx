@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Upload, X, Download } from 'lucide-react';
-import Select from '../ui/Select';
-import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientEntityStore } from '../../store/clientEntityStore';
+import { useClientStore } from '../../store/clientStore';
 import {
   parseTrialBalanceWorkbook,
   ParsedUpload,
@@ -261,14 +260,15 @@ interface ImportFormProps {
 
 export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const companies = useOrganizationStore((state) => state.companies);
-  const isLoadingClients = useOrganizationStore((state) => state.isLoading);
+  const isLoadingClients = useClientStore((state) => state.isLoading);
+  const clients = useClientStore((state) => state.clients);
+  const activeClientId = useClientStore((state) => state.activeClientId);
   const fetchClientEntities = useClientEntityStore((state) => state.fetchForClient);
   const entityStoreError = useClientEntityStore((state) => state.error);
   const isLoadingEntities = useClientEntityStore((state) => state.isLoading);
   const entitiesByClient = useClientEntityStore((state) => state.entitiesByClient);
   const userEmail = useAuthStore((state) => state.user?.email ?? null);
-  const [clientId, setClientId] = useState('');
+  const clientId = activeClientId ?? '';
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploads, setUploads] = useState<ParsedUpload[]>([]);
   const [selectedSheets, setSelectedSheets] = useState<number[]>([]);
@@ -337,22 +337,13 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       }
 
       return `Showing all ${totalRows.toLocaleString()} rows from the uploaded sheet.`;
-    } else {
-      const totalRows = selectedSheets.reduce((sum, idx) => {
-        return sum + (uploads[idx]?.rows.length ?? 0);
-      }, 0);
-      return `Previewing first sheet. ${selectedSheets.length} sheets selected with ${totalRows.toLocaleString()} total rows.`;
     }
+
+    const totalRows = selectedSheets.reduce((sum, idx) => {
+      return sum + (uploads[idx]?.rows.length ?? 0);
+    }, 0);
+    return `Previewing first sheet. ${selectedSheets.length} sheets selected with ${totalRows.toLocaleString()} total rows.`;
   }, [uploads, selectedSheets, previewSampleCount]);
-
-  const clientOptions = useMemo(() => {
-    const all = companies.flatMap((company) => company.clients);
-    return all.filter(
-      (c, idx) => all.findIndex((cc) => cc.id === c.id) === idx
-    );
-  }, [companies]);
-
-  const singleClientId = clientOptions.length === 1 ? clientOptions[0].id : null;
 
   const entityOptions = useMemo(() => {
     if (!clientId) return [];
@@ -441,12 +432,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     setRowEntitySlots([]);
     setHasManualEntitySelection(false);
   }, [clientId]);
-
-  useEffect(() => {
-    if (singleClientId) {
-      setClientId(singleClientId);
-    }
-  }, [singleClientId]);
 
   useEffect(() => {
     if (!clientId) {
@@ -915,24 +900,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {clientOptions.length > 1 && (
-        <Select
-          label="Client"
-          value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
-          required
-          disabled={clientOptions.length === 0 || isLoadingClients}
-        >
-          <option value="">Select a client</option>
-          {clientOptions.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-      )}
-
-      {!isLoadingClients && clientOptions.length === 0 && (
+      {!isLoadingClients && clients.length === 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           No clients are currently linked to your account. Please contact an
           administrator to request access.
@@ -962,7 +930,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   setSelectedSheets([]);
                   setHeaderMap(null);
                   setCombinedRows([]);
-                  setClientId(singleClientId ?? '');
                   setEntityAssignments([]);
                   setEntitySlotSummaries([]);
                   setRequiredEntityCount(0);
