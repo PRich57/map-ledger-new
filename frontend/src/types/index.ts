@@ -466,6 +466,7 @@ export interface ClientEntity {
   name: string;
   displayName?: string;
   entityName?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
   aliases: string[];
 }
 
