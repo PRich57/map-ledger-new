@@ -22,11 +22,14 @@ interface ChartOfAccountsState {
 }
 
 const buildOptionLabel = (accountNumber: string, description?: string | null): string => {
-  const parts = [accountNumber, description?.trim()].filter(Boolean) as string[];
-  if (parts.length === 0) {
-    return 'Unknown account';
+  const trimmedDescription = description?.trim();
+  if (trimmedDescription) {
+    return trimmedDescription;
   }
-  return parts.join(' — ');
+  if (accountNumber) {
+    return accountNumber;
+  }
+  return 'Unknown account';
 };
 
 const toOption = (account: ChartOfAccount): ChartOfAccountOption => {
