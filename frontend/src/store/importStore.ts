@@ -115,9 +115,12 @@ const normalizeImport = (item: RawImport): Import => {
   const fileSize = Number(item.fileSize);
   const status: Import['status'] = item.status === 'failed' ? 'failed' : 'completed';
 
+  const resolvedId = item.fileUploadGuid ?? item.id ?? crypto.randomUUID();
+
   return {
     ...item,
-    id: item.id ?? item.fileUploadGuid ?? crypto.randomUUID(),
+    id: resolvedId,
+    fileUploadGuid: item.fileUploadGuid ?? item.id ?? resolvedId,
     clientId: item.clientId,
     clientName: item.clientName,
     fileName: item.fileName ?? item.sourceFileName ?? 'Unknown file',

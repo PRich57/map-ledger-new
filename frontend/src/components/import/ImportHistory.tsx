@@ -444,22 +444,22 @@ export default function ImportHistory({
                 </div>
               </div>
 
-              {previewImport.sheets && previewImport.sheets.length > 0 && (
-                <div className="mt-6">
-                  <h4 className="text-sm font-semibold text-gray-700">Sheets</h4>
-                  <ul className="mt-2 space-y-2 text-sm text-gray-700">
-                    {previewImport.sheets.map((sheet) => (
-                      <li key={`${sheet.sheetName}-${sheet.glMonth ?? 'n/a'}`} className="flex justify-between">
-                        <span>
-                          {sheet.sheetName}
-                          {sheet.glMonth ? ` (${sheet.glMonth})` : ''}
-                        </span>
-                        <span className="text-gray-500">{sheet.rowCount.toLocaleString()} rows</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                  {previewImport.sheets && previewImport.sheets.length > 0 && (
+                    <div className="mt-6">
+                      <h4 className="text-sm font-semibold text-gray-700">Sheets</h4>
+                      <ul className="mt-2 space-y-2 text-sm text-gray-700">
+                        {previewImport.sheets.map((sheet) => (
+                          <li key={`${sheet.sheetName}-${sheet.glMonth ?? 'n/a'}`} className="flex justify-between">
+                            <span>
+                              {sheet.sheetName}
+                              {sheet.glMonth ? ` (${sheet.glMonth})` : ''}
+                            </span>
+                            <span className="text-gray-500">{(sheet.rowCount ?? 0).toLocaleString()} rows</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
               {previewImport.entities && previewImport.entities.length > 0 && (
                 <div className="mt-6">
@@ -472,7 +472,7 @@ export default function ImportHistory({
                       >
                         <span>{entity.displayName ?? entity.entityName}</span>
                         <span className="text-gray-500">
-                          {entity.rowCount.toLocaleString()} rows
+                          {(entity.rowCount ?? 0).toLocaleString()} rows
                         </span>
                       </li>
                     ))}

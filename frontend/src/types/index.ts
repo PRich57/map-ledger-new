@@ -214,6 +214,7 @@ export interface ImportEntity {
 
 export interface Import {
   id: string;
+  fileUploadGuid?: string;
   clientId: string;
   clientName?: string;
   fileName: string;

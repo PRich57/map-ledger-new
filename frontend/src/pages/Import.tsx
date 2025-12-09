@@ -110,6 +110,13 @@ export default function Import() {
     importItem: Import,
     mode: 'resume' | 'restart',
   ) => {
+    const uploadGuid = importItem.fileUploadGuid ?? importItem.id;
+
+    if (!uploadGuid) {
+      setError('Unable to open mapping. Missing file identifier.');
+      return;
+    }
+
     const entitiesFromImport: EntitySummary[] = (importItem.entities ?? [])
       .map((entity) => {
         const normalizedId = entity.entityId ?? slugify(entity.entityName);
@@ -126,7 +133,7 @@ export default function Import() {
       search.set('mode', 'restart');
     }
 
-    fetchFileRecords(importItem.id, {
+    fetchFileRecords(uploadGuid, {
       clientId: importItem.clientId,
       entities: entitiesFromImport,
       entityIds: entitiesFromImport.map((entity) => entity.id),
@@ -134,7 +141,7 @@ export default function Import() {
       hydrateMode: mode,
     });
 
-    navigate(`/gl/mapping/${importItem.id}?${search.toString()}`);
+    navigate(`/gl/mapping/${uploadGuid}?${search.toString()}`);
   };
 
   const handleFileImport = async (
@@ -278,6 +285,7 @@ export default function Import() {
 
       await recordImport({
         id: importId,
+        fileUploadGuid: importId,
         clientId,
         userId: user.id,
         fileName,
