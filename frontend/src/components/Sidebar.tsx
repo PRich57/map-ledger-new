@@ -1,17 +1,17 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAuthStore } from '../store/authStore';
 import {
-  Users,
+  BarChart3,
   Building2,
   FileSpreadsheet,
-  Upload,
-  BarChart3,
-  Settings,
   Network,
+  Settings,
+  Upload,
+  Users,
 } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
 
 const linkBaseClass =
-  'flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500';
+  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500';
 
 const getLinkClasses = (isActive: boolean) =>
   `${linkBaseClass} ${
@@ -24,65 +24,97 @@ interface SidebarProps {
   isOpen: boolean;
 }
 
+interface NavItem {
+  label: string;
+  icon: JSX.Element;
+  to: string;
+  isVisible?: boolean;
+  isActiveOverride?: boolean;
+}
+
 export default function Sidebar({ isOpen }: SidebarProps) {
   const { user } = useAuthStore();
   const isSuperUser = user?.role === 'super';
   const location = useLocation();
   const isMappingRoute = location.pathname.startsWith('/gl/mapping');
 
+  const navItems: NavItem[] = [
+    {
+      label: 'Users',
+      icon: <Users className="h-5 w-5" />, 
+      to: '/users',
+      isVisible: isSuperUser,
+    },
+    {
+      label: 'Client Profiles',
+      icon: <Building2 className="h-5 w-5" />,
+      to: '/clients',
+    },
+    {
+      label: 'COA Templates',
+      icon: <FileSpreadsheet className="h-5 w-5" />, 
+      to: '/templates',
+      isVisible: isSuperUser,
+    },
+    {
+      label: 'Data Import',
+      icon: <Upload className="h-5 w-5" />,
+      to: '/import',
+    },
+    {
+      label: 'GL Mapping',
+      icon: <BarChart3 className="h-5 w-5" />,
+      to: '/gl/mapping/demo',
+      isActiveOverride: isMappingRoute,
+    },
+    {
+      label: 'Integrations',
+      icon: <Network className="h-5 w-5" />,
+      to: '/integrations',
+    },
+  ];
+
+  const settingsItem: NavItem = {
+    label: 'Settings',
+    icon: <Settings className="h-5 w-5" />,
+    to: '/settings',
+  };
+
+  const renderNavItem = ({ icon, label, to, isActiveOverride = false }: NavItem) => (
+    <NavLink
+      key={label}
+      to={to}
+      aria-label={label}
+      className={({ isActive }) => getLinkClasses(isActive || isActiveOverride)}
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white/70 shadow-inner dark:bg-slate-800/70">
+        {icon}
+      </span>
+      <span
+        className={`truncate text-left transition-[opacity,transform] duration-200 ${
+          isOpen ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 md:hidden'
+        }`}
+      >
+        {label}
+      </span>
+    </NavLink>
+  );
+
   return (
     <aside
-      className={`relative border-r border-gray-200 bg-gradient-sidebar shadow-soft transition-all duration-300 dark:border-slate-800 ${
-        isOpen ? 'w-64' : 'w-0 md:w-16'
-      } overflow-hidden`}
-      aria-hidden={!isOpen}
+      className={`relative z-20 flex h-full flex-shrink-0 flex-col border-r border-gray-200 bg-gradient-sidebar shadow-soft transition-[width,transform] duration-300 dark:border-slate-800 ${
+        isOpen ? 'w-64 translate-x-0' : 'w-16 -translate-x-full md:translate-x-0'
+      }`}
+      role="navigation"
+      aria-label="Primary navigation"
+      aria-expanded={isOpen}
     >
-      <div className={`flex h-full flex-col px-3 py-4 ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+      <div className="flex h-full flex-col px-3 py-4">
         <div className="space-y-1.5">
-          {isSuperUser && (
-            <NavLink to="/users" className={({ isActive }) => getLinkClasses(isActive)}>
-              <Users className="mr-3 h-5 w-5" />
-              Users
-            </NavLink>
-          )}
-
-          <NavLink to="/clients" className={({ isActive }) => getLinkClasses(isActive)}>
-            <Building2 className="mr-3 h-5 w-5" />
-            Client Profiles
-          </NavLink>
-
-          {isSuperUser && (
-            <NavLink to="/templates" className={({ isActive }) => getLinkClasses(isActive)}>
-              <FileSpreadsheet className="mr-3 h-5 w-5" />
-              COA Templates
-            </NavLink>
-          )}
-
-          <NavLink to="/import" className={({ isActive }) => getLinkClasses(isActive)}>
-            <Upload className="mr-3 h-5 w-5" />
-            Data Import
-          </NavLink>
-
-          <NavLink
-            to="/gl/mapping/demo"
-            className={({ isActive }) => getLinkClasses(isActive || isMappingRoute)}
-          >
-            <BarChart3 className="mr-3 h-5 w-5" />
-            GL Mapping
-          </NavLink>
-
-          <NavLink to="/integrations" className={({ isActive }) => getLinkClasses(isActive)}>
-            <Network className="mr-3 h-5 w-5" />
-            Integrations
-          </NavLink>
+          {navItems.filter((item) => item.isVisible ?? true).map(renderNavItem)}
         </div>
 
-        <div className="mt-auto">
-          <NavLink to="/settings" className={({ isActive }) => getLinkClasses(isActive)}>
-            <Settings className="mr-3 h-5 w-5" />
-            Settings
-          </NavLink>
-        </div>
+        <div className="mt-auto">{renderNavItem(settingsItem)}</div>
       </div>
     </aside>
   );
