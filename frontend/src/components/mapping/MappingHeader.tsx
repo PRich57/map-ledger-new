@@ -51,7 +51,7 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
             {activeClient && (
               <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 dark:bg-blue-900/60 dark:text-blue-100">
                 <Building2 className="mr-2 h-4 w-4" />
-                {activeClient.scac ?? activeClient.clientId}
+                {activeClient.scac ?? 'SCAC unavailable'}
               </span>
             )}
             <div>

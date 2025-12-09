@@ -3,17 +3,28 @@ import type { ClientProfile, UserClientAccess, UserClientCompany, UserClientOper
 
 interface ClientState {
   clients: ClientProfile[];
+  activeClientId: string | null;
   isLoading: boolean;
   error: string | null;
   hydrateFromAccessList: (accessList: UserClientAccess[], activeClientId?: string | null) => void;
+  setActiveClientId: (clientId: string | null) => void;
   upsertClient: (client: ClientProfile) => void;
   reset: () => void;
 }
 
-const initialState: Pick<ClientState, 'clients' | 'isLoading' | 'error'> = {
+const initialState: Pick<ClientState, 'clients' | 'activeClientId' | 'isLoading' | 'error'> = {
   clients: [],
+  activeClientId: null,
   isLoading: false,
   error: null,
+};
+
+const normalizeClientId = (clientId?: string | null): string | null => {
+  if (!clientId) {
+    return null;
+  }
+  const trimmed = clientId.trim();
+  return trimmed.length > 0 ? trimmed : null;
 };
 
 const normalizeOperation = (operation: UserClientOperation): UserClientOperation => {
@@ -24,6 +35,8 @@ const normalizeOperation = (operation: UserClientOperation): UserClientOperation
     id: id ?? crypto.randomUUID(),
     code: code ?? 'OP',
     name: name ?? 'Operation',
+    operationalScac: operation.operationalScac ?? null,
+    isActive: operation.isActive,
   } satisfies UserClientOperation;
 };
 
@@ -41,29 +54,37 @@ const extractOperations = (companies: UserClientCompany[]): UserClientOperation[
   return Array.from(operations.values());
 };
 
-const toClientProfile = (access: UserClientAccess): ClientProfile => ({
-  id: access.clientId,
-  clientId: access.clientId,
-  name: access.clientName,
-  scac: access.clientScac ?? access.clientId,
-  operations: extractOperations(access.companies ?? []),
-});
+const toClientProfile = (access: UserClientAccess): ClientProfile => {
+  const normalizedOperations = (access.operations ?? []).map(normalizeOperation);
+  const companyOperations = extractOperations(access.companies ?? []);
+  const operations = normalizedOperations.length > 0 ? normalizedOperations : companyOperations;
 
-export const useClientStore = create<ClientState>((set) => ({
+  return {
+    id: access.clientId,
+    clientId: access.clientId,
+    name: access.clientName,
+    scac: access.clientScac ?? null,
+    operations,
+  } satisfies ClientProfile;
+};
+
+export const useClientStore = create<ClientState>((set, get) => ({
   ...initialState,
   hydrateFromAccessList: (accessList, activeClientId) => {
     try {
       const mappedClients = accessList.map(toClientProfile);
-      const preferredClientId = activeClientId?.trim();
-      const sortedClients = preferredClientId
-        ? mappedClients.sort((a, b) => {
-            if (a.clientId === preferredClientId) return -1;
-            if (b.clientId === preferredClientId) return 1;
-            return a.name.localeCompare(b.name);
-          })
-        : mappedClients;
+      const preferredClientId = normalizeClientId(activeClientId ?? get().activeClientId);
+      const resolvedActiveClientId =
+        preferredClientId && mappedClients.some(client => client.clientId === preferredClientId)
+          ? preferredClientId
+          : mappedClients[0]?.clientId ?? null;
 
-      set({ clients: sortedClients, isLoading: false, error: null });
+      set({
+        clients: mappedClients,
+        activeClientId: resolvedActiveClientId,
+        isLoading: false,
+        error: null,
+      });
     } catch (error) {
       set({
         isLoading: false,
@@ -71,6 +92,16 @@ export const useClientStore = create<ClientState>((set) => ({
       });
     }
   },
+  setActiveClientId: clientId =>
+    set(state => {
+      const normalized = normalizeClientId(clientId);
+      if (normalized === null) {
+        return { activeClientId: state.clients[0]?.clientId ?? null };
+      }
+
+      const exists = state.clients.some(client => client.clientId === normalized);
+      return { activeClientId: exists ? normalized : state.activeClientId };
+    }),
   upsertClient: (client) =>
     set((state) => {
       const existingIndex = state.clients.findIndex(({ clientId }) => clientId === client.clientId);

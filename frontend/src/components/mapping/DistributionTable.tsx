@@ -9,6 +9,7 @@ import {
 import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { selectStandardScoaSummaries, useMappingStore } from '../../store/mappingStore';
 import { useOrganizationStore } from '../../store/organizationStore';
+import { useClientStore } from '../../store/clientStore';
 import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
 import DistributionToolbar from './DistributionToolbar';
 import DistributionSplitRow from './DistributionSplitRow';
@@ -154,7 +155,7 @@ const getSortValue = (row: DistributionRow, key: SortKey): string | number => {
 
 const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const standardTargets = useMappingStore(selectStandardScoaSummaries);
-  const activeClientId = useMappingStore(state => state.activeClientId);
+  const activeClientId = useClientStore(state => state.activeClientId);
   const companies = useOrganizationStore(state => state.companies);
   const summarySignature = useMemo(
     () => standardTargets.map(target => `${target.id}:${target.mappedAmount}`).join('|'),

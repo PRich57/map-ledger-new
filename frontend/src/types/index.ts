@@ -32,6 +32,8 @@ export interface UserClientOperation {
   id: string;
   code: string;
   name: string;
+  operationalScac?: string | null;
+  isActive?: boolean;
 }
 
 export interface UserClientCompany {
@@ -60,6 +62,7 @@ export interface UserClientAccess {
   clientId: string;
   clientName: string;
   clientScac?: string | null;
+  operations?: UserClientOperation[];
   companies: UserClientCompany[];
   metadata: UserClientMetadata;
 }

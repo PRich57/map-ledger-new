@@ -1,7 +1,11 @@
+import { useEffect, useMemo } from 'react';
 import { LogOut, Map, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { signOut, msalInstance } from '../utils/msal';
 import { useThemeStore } from '../store/themeStore';
+import { useOrganizationStore } from '../store/organizationStore';
+import { useClientStore } from '../store/clientStore';
+import { useMappingStore } from '../store/mappingStore';
 
 type Claims = Record<string, unknown>;
 
@@ -26,6 +30,14 @@ interface NavbarProps {
 
 export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) {
   const { account } = useAuthStore();
+  const userEmail = useAuthStore(state => state.user?.email ?? null);
+  const fetchOrganizations = useOrganizationStore(state => state.fetchForUser);
+  const clientAccess = useOrganizationStore(state => state.clientAccess);
+  const hydrateClients = useClientStore(state => state.hydrateFromAccessList);
+  const clients = useClientStore(state => state.clients);
+  const activeClientId = useClientStore(state => state.activeClientId);
+  const setActiveClientId = useClientStore(state => state.setActiveClientId);
+  const setMappingActiveClientId = useMappingStore(state => state.setActiveClientId);
   const theme = useThemeStore((state) => state.theme);
   const toggleTheme = useThemeStore((state) => state.toggleTheme);
 
@@ -47,6 +59,31 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
   const hasAccount =
     (msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0]) != null;
 
+  useEffect(() => {
+    if (!userEmail || clientAccess.length > 0) {
+      return;
+    }
+
+    fetchOrganizations(userEmail);
+  }, [clientAccess.length, fetchOrganizations, userEmail]);
+
+  useEffect(() => {
+    if (clientAccess.length === 0) {
+      return;
+    }
+
+    hydrateClients(clientAccess, activeClientId);
+  }, [activeClientId, clientAccess, hydrateClients]);
+
+  useEffect(() => {
+    setMappingActiveClientId(activeClientId ?? null);
+  }, [activeClientId, setMappingActiveClientId]);
+
+  const activeClient = useMemo(
+    () => clients.find(client => client.clientId === activeClientId) ?? clients[0] ?? null,
+    [activeClientId, clients],
+  );
+
   const handleSignOut = async () => {
     await signOut();
   };
@@ -60,6 +97,7 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
     <PanelLeftOpen className="h-5 w-5" />
   );
   const sidebarLabel = isSidebarOpen ? 'Collapse navigation menu' : 'Expand navigation menu';
+  const clientSelectorId = 'navbar-client-selector';
 
   return (
     <nav className="border-b border-gray-200 bg-white/80 backdrop-blur transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900/80">
@@ -84,6 +122,33 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
           </div>
 
           <div className="flex items-center gap-4">
+            {clients.length > 0 && (
+              <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white/70 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-800/60">
+                <label
+                  htmlFor={clientSelectorId}
+                  className="text-sm font-medium text-gray-700 dark:text-slate-200"
+                >
+                  Client
+                </label>
+                <select
+                  id={clientSelectorId}
+                  className="min-w-[10rem] rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-gray-100"
+                  value={activeClient?.clientId ?? ''}
+                  onChange={(event) => setActiveClientId(event.target.value)}
+                >
+                  {clients.map(client => (
+                    <option key={client.clientId} value={client.clientId}>
+                      {client.name} ({client.scac ?? 'SCAC N/A'})
+                    </option>
+                  ))}
+                </select>
+                {activeClient?.scac && (
+                  <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/60 dark:text-blue-50">
+                    {activeClient.scac}
+                  </span>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={toggleTheme}
