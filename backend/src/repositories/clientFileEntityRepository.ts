@@ -65,7 +65,6 @@ export const insertClientFileEntity = async (
         FROM ml.CLIENT_FILE_ENTITIES
         WHERE FILE_UPLOAD_GUID = @fileUploadGuid
           AND ENTITY_ID = @entityId
-          AND IS_DELETED = 0
       ) THEN 1 ELSE 0 END
     );
 
@@ -80,8 +79,7 @@ export const insertClientFileEntity = async (
         UPDATED_BY as updatedBy
       FROM ml.CLIENT_FILE_ENTITIES
       WHERE FILE_UPLOAD_GUID = @fileUploadGuid
-        AND ENTITY_ID = @entityId
-        AND IS_DELETED = 0;
+        AND ENTITY_ID = @entityId;
     END
     ELSE
     BEGIN
@@ -151,8 +149,7 @@ export const updateClientFileEntity = async (
       INSERTED.UPDATED_DTTM as updatedDttm,
       INSERTED.UPDATED_BY as updatedBy
     WHERE FILE_UPLOAD_GUID = @fileUploadGuid
-      AND ENTITY_ID = @entityId
-      AND IS_DELETED = 0`,
+      AND ENTITY_ID = @entityId`,
     {
       fileUploadGuid: input.fileUploadGuid,
       entityId: input.entityId,
@@ -172,14 +169,9 @@ export const softDeleteClientFileEntity = async (
   updatedBy?: string
 ): Promise<boolean> => {
   const result = await runQuery(
-    `UPDATE ml.CLIENT_FILE_ENTITIES
-    SET IS_DELETED = 1,
-        DELETED_DTTM = CURRENT_TIMESTAMP,
-        UPDATED_DTTM = CURRENT_TIMESTAMP,
-        UPDATED_BY = @updatedBy
+    `DELETE FROM ml.CLIENT_FILE_ENTITIES
     WHERE FILE_UPLOAD_GUID = @fileUploadGuid
-      AND ENTITY_ID = @entityId
-      AND IS_DELETED = 0`,
+      AND ENTITY_ID = @entityId`,
     { fileUploadGuid, entityId, updatedBy: updatedBy ?? null }
   );
 
@@ -209,8 +201,7 @@ export const listClientFileEntities = async (
       UPDATED_DTTM as updatedDttm,
       UPDATED_BY as updatedBy
     FROM ml.CLIENT_FILE_ENTITIES
-    WHERE FILE_UPLOAD_GUID = @fileUploadGuid
-      AND IS_DELETED = 0`,
+    WHERE FILE_UPLOAD_GUID = @fileUploadGuid`,
     { fileUploadGuid }
   );
 
