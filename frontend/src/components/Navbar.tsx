@@ -1,4 +1,4 @@
-import { LogOut, Map, Moon, Settings, Sun } from 'lucide-react';
+import { LogOut, Map, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { signOut, msalInstance } from '../utils/msal';
 import { useThemeStore } from '../store/themeStore';
@@ -19,7 +19,12 @@ const getClaimString = (claims: Claims, key: string): string | undefined => {
   return typeof value === 'string' ? value : undefined;
 };
 
-export default function Navbar() {
+interface NavbarProps {
+  isSidebarOpen: boolean;
+  onToggleSidebar: () => void;
+}
+
+export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) {
   const { account } = useAuthStore();
   const theme = useThemeStore((state) => state.theme);
   const toggleTheme = useThemeStore((state) => state.toggleTheme);
@@ -49,12 +54,26 @@ export default function Navbar() {
   const isDark = theme === 'dark';
   const themeIcon = isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />;
   const themeLabel = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+  const sidebarIcon = isSidebarOpen ? (
+    <PanelLeftClose className="h-5 w-5" />
+  ) : (
+    <PanelLeftOpen className="h-5 w-5" />
+  );
+  const sidebarLabel = isSidebarOpen ? 'Collapse navigation menu' : 'Expand navigation menu';
 
   return (
     <nav className="border-b border-gray-200 bg-white/80 backdrop-blur transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900/80">
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center space-x-3">
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              aria-label={sidebarLabel}
+              className="rounded-full p-2 text-gray-500 transition-colors hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:text-blue-400"
+            >
+              {sidebarIcon}
+            </button>
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600 text-white shadow-md">
               <Map className="h-6 w-6" />
             </div>

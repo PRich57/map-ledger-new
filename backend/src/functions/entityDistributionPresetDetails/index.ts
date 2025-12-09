@@ -9,9 +9,9 @@ import {
   EntityDistributionPresetDetailInput,
 } from '../../repositories/entityDistributionPresetDetailRepository';
 
-const parseNumber = (value: unknown): number | undefined => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+const parseGuid = (value: unknown): string | undefined => {
+  const text = getFirstStringValue(value);
+  return text && text.length > 0 ? text : undefined;
 };
 
 const normalizeBool = (value: unknown): boolean | null => {
@@ -55,7 +55,9 @@ const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] =>
   const inputs: EntityDistributionPresetDetailInput[] = [];
 
   for (const entry of payload) {
-    const presetId = parseNumber((entry as Record<string, unknown>)?.presetId);
+    const presetId =
+      parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
+      parseGuid((entry as Record<string, unknown>)?.presetId);
     const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
 
     if (!presetId || !operationCd) {
@@ -79,7 +81,9 @@ const listHandler = async (
   context: InvocationContext
 ): Promise<HttpResponseInit> => {
   try {
-    const presetId = parseNumber(request.query.get('presetId'));
+    const presetId =
+      parseGuid(request.query.get('presetGuid')) ??
+      parseGuid(request.query.get('presetId'));
     const items = await listEntityDistributionPresetDetails(presetId);
     return json({ items });
   } catch (error) {
@@ -114,11 +118,12 @@ const updateHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const body = await readJson(request);
-    const presetId = parseNumber(body?.presetId);
+    const presetId =
+      parseGuid(body?.presetGuid) ?? parseGuid(body?.presetId);
     const operationCd = getFirstStringValue(body?.operationCd);
 
     if (!presetId || !operationCd) {
-      return json({ message: 'presetId and operationCd are required' }, 400);
+      return json({ message: 'presetGuid and operationCd are required' }, 400);
     }
 
     const updated = await updateEntityDistributionPresetDetail(presetId, operationCd, {

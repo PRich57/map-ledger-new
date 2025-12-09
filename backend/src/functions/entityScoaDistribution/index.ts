@@ -9,9 +9,9 @@ import {
   EntityScoaDistributionInput,
 } from '../../repositories/entityScoaDistributionRepository';
 
-const parseNumber = (value: unknown): number | undefined => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+const parseGuid = (value: unknown): string | undefined => {
+  const text = getFirstStringValue(value);
+  return text && text.length > 0 ? text : undefined;
 };
 
 const normalizeText = (value: unknown): string | null => {
@@ -45,7 +45,10 @@ const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
       entityId,
       scoaAccountId,
       distributionType,
-      presetId: parseNumber((entry as Record<string, unknown>)?.presetId) ?? null,
+      presetId:
+        parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
+        parseGuid((entry as Record<string, unknown>)?.presetId) ??
+        null,
       distributionStatus: normalizeText((entry as Record<string, unknown>)?.distributionStatus),
       updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
     });
@@ -101,7 +104,8 @@ const updateHandler = async (
     const entityId = getFirstStringValue(body?.entityId);
     const scoaAccountId = getFirstStringValue(body?.scoaAccountId);
     const distributionType = getFirstStringValue(body?.distributionType);
-    const presetId = parseNumber(body?.presetId);
+    const presetId =
+      parseGuid(body?.presetGuid) ?? parseGuid(body?.presetId);
 
     if (!entityId || !scoaAccountId || !distributionType) {
       return json({ message: 'entityId, scoaAccountId, and distributionType are required' }, 400);

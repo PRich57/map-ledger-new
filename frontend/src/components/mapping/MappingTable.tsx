@@ -118,7 +118,8 @@ const COLUMN_DEFINITIONS: { key: SortKey; label: string }[] = [
 ];
 
 const COLUMN_WIDTH_CLASSES: Partial<Record<SortKey, string>> = {
-  targetScoa: 'min-w-[14rem] md:min-w-[16rem] lg:min-w-[18rem]',
+  targetScoa:
+    'min-w-[18rem] md:min-w-[22rem] lg:min-w-[26rem] xl:min-w-[30rem] max-w-[36rem]',
   exclusion: 'w-56',
   aiConfidence: 'w-28',
 };
