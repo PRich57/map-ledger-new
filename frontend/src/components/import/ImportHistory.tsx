@@ -19,6 +19,7 @@ interface ImportHistoryProps {
   total: number;
   onPageChange: (page: number) => void;
   onDelete?: (importId: string) => Promise<void>;
+  onStartMapping?: (importItem: Import, mode: 'resume' | 'restart') => void;
 }
 
 type SortField = 'fileName' | 'clientId' | 'period' | 'status' | 'importedBy' | 'timestamp';
@@ -74,6 +75,7 @@ export default function ImportHistory({
   total,
   onPageChange,
   onDelete,
+  onStartMapping,
 }: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('timestamp');
@@ -81,6 +83,7 @@ export default function ImportHistory({
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [workflowImport, setWorkflowImport] = useState<Import | null>(null);
   const columnCount = sortableFields.length + 2;
 
   const filteredImports = useMemo(() => {
@@ -355,6 +358,15 @@ export default function ImportHistory({
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="flex justify-end gap-3">
+                      {onStartMapping && (
+                        <button
+                          type="button"
+                          onClick={() => setWorkflowImport(importItem)}
+                          className="text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
+                        >
+                          Open
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setPreviewImport(importItem)}
@@ -465,6 +477,65 @@ export default function ImportHistory({
                   </ul>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {workflowImport && onStartMapping && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="workflow-start-title"
+        >
+          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 id="workflow-start-title" className="text-lg font-semibold text-gray-900">
+                  Continue mapping?
+                </h3>
+                <p className="text-sm text-gray-600">
+                  Resume your previous work or start fresh with automated suggestions.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWorkflowImport(null)}
+                className="rounded-md px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-100"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">{workflowImport.fileName}</p>
+                <p className="text-sm text-gray-600">{formatPeriodLabel(workflowImport.period)}</p>
+              </div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStartMapping(workflowImport, 'resume');
+                    setWorkflowImport(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                >
+                  <span>Continue where I left off</span>
+                  <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStartMapping(workflowImport, 'restart');
+                    setWorkflowImport(null);
+                  }}
+                  className="flex w-full items-center justify-between rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:bg-gray-50"
+                >
+                  <span>Start over with suggestions</span>
+                  <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </div>
         </div>

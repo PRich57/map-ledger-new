@@ -45,6 +45,25 @@ const logError = (...args: unknown[]) => {
   console.error(logPrefix, ...args);
 };
 
+type SavedMappingRow = {
+  id: string;
+  entityId: string;
+  entityName?: string | null;
+  accountId: string;
+  accountName?: string | null;
+  activity: number;
+  netChange: number;
+  status: MappingStatus;
+  mappingType: MappingType;
+  polarity: MappingPolarity;
+  presetId?: string | null;
+  exclusionPct?: number | null;
+  splitDefinitions?: MappingSplitDefinition[];
+  glMonth?: string | null;
+};
+
+export type HydrationMode = 'resume' | 'restart' | 'none';
+
 const DRIVER_BENEFITS_DESCRIPTION =
   'DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET';
 const NON_DRIVER_BENEFITS_DESCRIPTION =
@@ -642,6 +661,98 @@ const getAllocatableNetChange = (account: GLAccountMappingRow): number => {
   return remaining;
 };
 
+interface MappingSaveInput {
+  entityId: string;
+  entityAccountId: string;
+  polarity?: MappingPolarity | null;
+  mappingType?: MappingType | null;
+  mappingStatus?: MappingStatus | null;
+  presetId?: string | null;
+  exclusionPct?: number | null;
+  splitDefinitions?: {
+    targetId?: string | null;
+    allocationType?: 'percentage' | 'amount';
+    allocationValue?: number | null;
+    basisDatapoint?: string | null;
+    isCalculated?: boolean | null;
+  }[];
+}
+
+const calculateExclusionPctFromAccount = (
+  account: GLAccountMappingRow,
+): number | null => {
+  const excludedAmount = Math.abs(getAccountExcludedAmount(account));
+  const baseAmount = Math.abs(account.netChange);
+
+  if (baseAmount === 0) {
+    return excludedAmount > 0 ? 100 : null;
+  }
+
+  const pct = (excludedAmount / baseAmount) * 100;
+  if (!Number.isFinite(pct)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, pct));
+};
+
+const buildSaveInputFromAccount = (
+  account: GLAccountMappingRow,
+): MappingSaveInput | null => {
+  if (!account.entityId) {
+    return null;
+  }
+
+  if (account.status !== 'Mapped' && account.status !== 'Excluded') {
+    return null;
+  }
+
+  const normalizedType =
+    account.mappingType === 'exclude' || account.status === 'Excluded'
+      ? 'exclude'
+      : account.mappingType;
+
+  const payload: MappingSaveInput = {
+    entityId: account.entityId,
+    entityAccountId: account.accountId,
+    polarity: account.polarity,
+    mappingType: normalizedType,
+    mappingStatus: normalizedType === 'exclude' ? 'Excluded' : account.status,
+    presetId: account.presetId ?? null,
+    exclusionPct:
+      normalizedType === 'exclude'
+        ? 100
+        : calculateExclusionPctFromAccount(account),
+  };
+
+  if (normalizedType === 'direct' && account.manualCOAId) {
+    payload.splitDefinitions = [
+      {
+        targetId: account.manualCOAId,
+        allocationType: 'percentage',
+        allocationValue: 100,
+        isCalculated: false,
+      },
+    ];
+  }
+
+  if (normalizedType === 'percentage') {
+    const splits = account.splitDefinitions
+      .filter(split => !split.isExclusion)
+      .map(split => ({
+        targetId: split.targetId,
+        allocationType: split.allocationType,
+        allocationValue: split.allocationValue,
+        isCalculated: false,
+      }));
+    if (splits.length) {
+      payload.splitDefinitions = splits;
+    }
+  }
+
+  return payload;
+};
+
 const deriveMappingStatus = (account: GLAccountMappingRow): MappingStatus => {
   if (account.mappingType === 'exclude' || account.status === 'Excluded') {
     return 'Excluded';
@@ -875,6 +986,9 @@ interface MappingState {
   activePeriod: string | null;
   isLoadingFromApi: boolean;
   apiError: string | null;
+  isSavingMappings: boolean;
+  saveError: string | null;
+  lastSavedCount: number;
   setSearchTerm: (term: string) => void;
   setActiveEntityId: (entityId: string | null) => void;
   setActivePeriod: (period: string | null) => void;
@@ -922,6 +1036,11 @@ interface MappingState {
     accountId: string,
     payload: { entityName: string; entityId?: string | null }
   ) => void;
+  hydrateFromHistory: (
+    uploadGuid: string,
+    mode?: HydrationMode,
+  ) => Promise<void>;
+  saveMappings: (accountIds?: string[]) => Promise<number>;
   loadImportedAccounts: (payload: {
     uploadId: string;
     clientId?: string | null;
@@ -937,6 +1056,7 @@ interface MappingState {
       entities?: EntitySummary[];
       entityIds?: string[];
       period?: string | null;
+      hydrateMode?: HydrationMode;
     },
   ) => Promise<void>;
 }
@@ -958,6 +1078,9 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   activePeriod: null,
   isLoadingFromApi: false,
   apiError: null,
+  isSavingMappings: false,
+  saveError: null,
+  lastSavedCount: 0,
   setSearchTerm: term => set({ searchTerm: term }),
   setActiveEntityId: entityId =>
     set(state => {
@@ -1577,6 +1700,74 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       updateDynamicBasisAccounts(resolved);
       return { accounts: resolved };
     }),
+  hydrateFromHistory: async (uploadGuid, mode = 'resume') => {
+    if (!uploadGuid || mode === 'none') {
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({ fileUploadGuid: uploadGuid });
+      const response = await fetch(`${API_BASE_URL}/mapping/suggest?${params.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to load saved mappings (${response.status})`);
+      }
+
+      const payload = (await response.json()) as { items?: SavedMappingRow[] };
+      const saved = payload.items ?? [];
+      logDebug('Hydrated saved mappings', { count: saved.length, uploadGuid, mode });
+
+      set(state => {
+        const merged = mergeSavedMappings(state.accounts, saved, mode);
+        updateDynamicBasisAccounts(merged);
+        return { accounts: merged };
+      });
+    } catch (error) {
+      logError('Unable to hydrate saved mappings', error);
+    }
+  },
+  saveMappings: async (accountIds) => {
+    const { accounts } = get();
+    const scope = Array.isArray(accountIds) && accountIds.length > 0 ? accountIds : null;
+
+    const payload = accounts
+      .filter(account => (scope ? scope.includes(account.id) : true))
+      .map(buildSaveInputFromAccount)
+      .filter((entry): entry is MappingSaveInput => Boolean(entry));
+
+    if (!payload.length) {
+      set({ saveError: 'No mapped or excluded rows are ready to save.', lastSavedCount: 0 });
+      return 0;
+    }
+
+    set({ isSavingMappings: true, saveError: null });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/entityAccountMappings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: payload }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to save mappings (${response.status})`);
+      }
+
+      const body = (await response.json()) as { items?: unknown[] };
+      const savedCount = body.items?.length ?? payload.length;
+
+      set({ isSavingMappings: false, lastSavedCount: savedCount, saveError: null });
+      return savedCount;
+    } catch (error) {
+      logError('Unable to save mappings', error);
+      set({
+        isSavingMappings: false,
+        lastSavedCount: 0,
+        saveError: error instanceof Error ? error.message : 'Failed to save mappings',
+      });
+      return 0;
+    }
+  },
   loadImportedAccounts: ({
     uploadId,
     clientId,
@@ -1680,6 +1871,9 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         rows,
       });
 
+      const hydrateMode: HydrationMode = options?.hydrateMode ?? 'resume';
+      await get().hydrateFromHistory(uploadGuid, hydrateMode);
+
       set({ isLoadingFromApi: false, apiError: null });
     } catch (error) {
       logError('Unable to load file records', error);
@@ -1723,6 +1917,77 @@ const ensureMinimumPercentageSplits = (
     createBlankSplitDefinition(),
   );
   return [...preserved, ...placeholders];
+};
+
+const buildMappingKey = (
+  entityId?: string | null,
+  accountId?: string | null,
+  glMonth?: string | null,
+) => `${entityId ?? ''}__${accountId ?? ''}__${normalizePeriod(glMonth) ?? ''}`;
+
+const mergeSavedMappings = (
+  accounts: GLAccountMappingRow[],
+  saved: SavedMappingRow[],
+  mode: HydrationMode,
+): GLAccountMappingRow[] => {
+  if (!saved.length) {
+    return accounts;
+  }
+
+  const lookup = new Map<string, SavedMappingRow>();
+  saved.forEach(row => {
+    const primaryKey = buildMappingKey(row.entityId, row.accountId, row.glMonth ?? null);
+    lookup.set(primaryKey, row);
+    const fallbackKey = buildMappingKey(row.entityId, row.accountId, null);
+    if (!lookup.has(fallbackKey)) {
+      lookup.set(fallbackKey, row);
+    }
+  });
+
+  return accounts.map(account => {
+    if (!account.entityId) {
+      return account;
+    }
+
+    const keyWithPeriod = buildMappingKey(account.entityId, account.accountId, account.glMonth ?? null);
+    const match = lookup.get(keyWithPeriod) ?? lookup.get(buildMappingKey(account.entityId, account.accountId, null));
+
+    if (!match) {
+      return account;
+    }
+
+    const shouldResetStatus = mode === 'restart' && match.status !== 'Excluded';
+    const resolvedStatus: MappingStatus = shouldResetStatus ? 'Unmapped' : match.status;
+    const resolvedType: MappingType =
+      resolvedStatus === 'Excluded' || match.mappingType === 'exclude'
+        ? 'exclude'
+        : match.mappingType;
+
+    const next: GLAccountMappingRow = {
+      ...account,
+      mappingType: resolvedType,
+      presetId: match.presetId ?? undefined,
+      polarity: match.polarity,
+      splitDefinitions:
+        resolvedType === 'percentage'
+          ? ensureMinimumPercentageSplits(match.splitDefinitions ?? [])
+          : [],
+      manualCOAId:
+        resolvedType === 'direct'
+          ? match.splitDefinitions?.[0]?.targetId ?? match.presetId ?? account.manualCOAId
+          : undefined,
+    };
+
+    if (resolvedType === 'exclude') {
+      next.status = 'Excluded';
+      next.manualCOAId = undefined;
+      next.splitDefinitions = [];
+    } else {
+      next.status = resolvedStatus;
+    }
+
+    return applyDerivedStatus(next);
+  });
 };
 
 const getSplitValidationIssues = (accounts: GLAccountMappingRow[]) => {
