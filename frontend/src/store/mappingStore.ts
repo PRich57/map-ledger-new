@@ -664,11 +664,14 @@ const getAllocatableNetChange = (account: GLAccountMappingRow): number => {
 interface MappingSaveInput {
   entityId: string;
   entityAccountId: string;
+  accountName?: string | null;
   polarity?: MappingPolarity | null;
   mappingType?: MappingType | null;
   mappingStatus?: MappingStatus | null;
   presetId?: string | null;
   exclusionPct?: number | null;
+  netChange?: number | null;
+  glMonth?: string | null;
   splitDefinitions?: {
     targetId?: string | null;
     allocationType?: 'percentage' | 'amount';
@@ -715,6 +718,7 @@ const buildSaveInputFromAccount = (
   const payload: MappingSaveInput = {
     entityId: account.entityId,
     entityAccountId: account.accountId,
+    accountName: account.accountName,
     polarity: account.polarity,
     mappingType: normalizedType,
     mappingStatus: normalizedType === 'exclude' ? 'Excluded' : account.status,
@@ -723,6 +727,8 @@ const buildSaveInputFromAccount = (
       normalizedType === 'exclude'
         ? 100
         : calculateExclusionPctFromAccount(account),
+    netChange: account.netChange,
+    glMonth: account.glMonth ?? null,
   };
 
   if (normalizedType === 'direct' && account.manualCOAId) {

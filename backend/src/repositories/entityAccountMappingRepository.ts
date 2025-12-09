@@ -61,8 +61,16 @@ const requiresPreset = (mappingType?: string | null): boolean => {
   return normalized === 'percentage' || normalized === 'dynamic';
 };
 
+const toEntityId = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return `${value}`.trim();
+};
+
 const mapRow = (row: {
-  entity_id: string | null;
+  entity_id: string | number | null;
   entity_account_id: string;
   polarity?: string | null;
   mapping_type?: string | null;
@@ -73,7 +81,7 @@ const mapRow = (row: {
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
 }): EntityAccountMappingRow => ({
-  entityId: row.entity_id?.trim() ?? '',
+  entityId: toEntityId(row.entity_id),
   entityAccountId: row.entity_account_id,
   polarity: row.polarity ?? null,
   mappingType: row.mapping_type ?? null,
@@ -99,7 +107,7 @@ export const listEntityAccountMappings = async (
   }
 
   const result = await runQuery<{
-    entity_id: string;
+    entity_id: string | number;
     entity_account_id: string;
     polarity?: string | null;
     mapping_type?: string | null;
@@ -140,7 +148,7 @@ export const listEntityAccountMappingsByFileUpload = async (
   const result = await runQuery<{
     file_upload_guid: string;
     record_id: number;
-    entity_id: string | null;
+    entity_id: string | number | null;
     entity_account_id: string;
     account_name: string | null;
     activity_amount: number | null;
