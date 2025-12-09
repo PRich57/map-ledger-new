@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Upload, X, Download } from 'lucide-react';
+import Select from '../ui/Select';
 import { useClientEntityStore } from '../../store/clientEntityStore';
 import { useClientStore } from '../../store/clientStore';
 import {
