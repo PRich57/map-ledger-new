@@ -4,15 +4,13 @@ import type { EntitySummary } from '../../types';
 interface EntityTabsProps {
   entities: EntitySummary[];
   activeEntityId: string | null;
-  onSelect: (entityId: string | null) => void;
+  onSelect: (entityId: string) => void;
 }
 
-type EntityTab = EntitySummary | { id: null; name: string };
-
 const EntityTabs = ({ entities, activeEntityId, onSelect }: EntityTabsProps) => {
-  const tabs = React.useMemo<EntityTab[]>(() => {
+  const tabs = React.useMemo<EntitySummary[]>(() => {
     const uniqueEntities = new Map(entities.map(entity => [entity.id, entity]));
-    return [{ id: null, name: 'All Entities' }, ...uniqueEntities.values()];
+    return Array.from(uniqueEntities.values());
   }, [entities]);
 
   return (
@@ -24,11 +22,10 @@ const EntityTabs = ({ entities, activeEntityId, onSelect }: EntityTabsProps) => 
         data-testid="entity-tabset"
       >
         {tabs.map(tab => {
-          const isActive =
-            (tab.id === null && activeEntityId === null) || tab.id === activeEntityId;
+          const isActive = tab.id === activeEntityId;
           return (
             <button
-              key={tab.id ?? 'all-entities'}
+              key={tab.id}
               type="button"
               role="tab"
               aria-selected={isActive}
