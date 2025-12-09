@@ -701,9 +701,15 @@ const calculateExclusionPctFromAccount = (
 
 const buildSaveInputFromAccount = (
   account: GLAccountMappingRow,
+  defaultEntity?: EntitySummary | null,
 ): MappingSaveInput | null => {
-  const entityId = account.entityId ?? slugify(account.entityName ?? '');
-  if (!entityId) {
+  const resolvedEntityId =
+    account.entityId ||
+    slugify(account.entityName ?? '') ||
+    defaultEntity?.id ||
+    null;
+
+  if (!resolvedEntityId) {
     return null;
   }
 
@@ -717,7 +723,7 @@ const buildSaveInputFromAccount = (
       : account.mappingType;
 
   const payload: MappingSaveInput = {
-    entityId,
+    entityId: resolvedEntityId,
     entityAccountId: account.accountId,
     accountName: account.accountName,
     polarity: account.polarity,
@@ -1739,8 +1745,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
 
     const scopedAccounts = accounts.filter(account => (scope ? scope.includes(account.id) : true));
 
+    const availableEntities = selectAvailableEntities(get());
+    const defaultEntity = availableEntities.length === 1 ? availableEntities[0] : null;
+
     const payload = scopedAccounts
-      .map(buildSaveInputFromAccount)
+      .map(account => buildSaveInputFromAccount(account, defaultEntity))
       .filter((entry): entry is MappingSaveInput => Boolean(entry));
 
     if (!payload.length) {
@@ -1748,7 +1757,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         account =>
           (account.status === 'Mapped' || account.status === 'Excluded') &&
           !account.entityId &&
-          !account.entityName,
+          !account.entityName &&
+          !defaultEntity,
       );
 
       set({
