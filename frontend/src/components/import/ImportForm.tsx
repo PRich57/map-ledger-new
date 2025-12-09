@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Upload, X, Download } from 'lucide-react';
 import Select from '../ui/Select';
-import MultiSelect from '../ui/MultiSelect';
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientEntityStore } from '../../store/clientEntityStore';
 import {
@@ -25,6 +24,7 @@ import type { ClientEntity, ImportSheet, TrialBalanceRow } from '../../types';
 import { normalizeGlMonth, isValidNormalizedMonth } from '../../utils/extractDateFromText';
 import { detectLikelyEntities } from '../../utils/detectClientEntities';
 import { useAuthStore } from '../../store/authStore';
+import { slugify } from '../../utils/slugify';
 
 const templateHeaders = [
   'GL ID',
@@ -39,6 +39,24 @@ const templateHeaders = [
 type SavedHeaderMapping = {
   sourceHeader: string;
   mappingMethod: string;
+};
+
+type EntityAssignment = {
+  slot: number;
+  entityId: string;
+  name: string;
+  isCustom: boolean;
+};
+
+type EntitySlotSummary = {
+  slot: number;
+  glMonths: string[];
+  accountIds: string[];
+  rowCount: number;
+};
+
+const normalizeMonthKey = (glMonth?: string): string => {
+  return normalizeGlMonth(glMonth ?? '') || 'unspecified';
 };
 
 const extractRowGlMonth = (row: ParsedRow | TrialBalanceRow): string => {
@@ -88,6 +106,143 @@ const extractGlMonthsFromRows = (rows: TrialBalanceRow[]): string[] => {
   return Array.from(monthsSet).sort();
 };
 
+const inferEntitySlotsFromRows = (
+  rows: TrialBalanceRow[],
+): {
+  requiredEntities: number;
+  rowSlots: number[];
+  slotSummaries: EntitySlotSummary[];
+} => {
+  if (rows.length === 0) {
+    return { requiredEntities: 0, rowSlots: [], slotSummaries: [] };
+  }
+
+  const perAccountMonthCounts = new Map<string, number>();
+  const rowSlots: number[] = [];
+
+  rows.forEach((row) => {
+    const glMonth = normalizeMonthKey(row.glMonth);
+    const accountId = (row.accountId ?? '').toString().trim() || 'unknown-account';
+    const key = `${glMonth}__${accountId}`;
+    const nextCount = (perAccountMonthCounts.get(key) ?? 0) + 1;
+    perAccountMonthCounts.set(key, nextCount);
+    rowSlots.push(nextCount);
+  });
+
+  const requiredEntities = Math.max(...perAccountMonthCounts.values());
+  const slotSummaries: EntitySlotSummary[] = Array.from(
+    { length: requiredEntities },
+    (_, idx) => {
+      const slot = idx + 1;
+      const slotRows = rows
+        .map((row, rowIdx) => ({ row, slotIndex: rowSlots[rowIdx] }))
+        .filter(({ slotIndex }) => slotIndex === slot)
+        .map(({ row }) => row);
+
+      const glMonths = new Set<string>();
+      const accountIds = new Set<string>();
+
+      slotRows.forEach((row) => {
+        glMonths.add(normalizeMonthKey(row.glMonth));
+        accountIds.add((row.accountId ?? '').toString().trim() || 'unknown-account');
+      });
+
+      return {
+        slot,
+        glMonths: Array.from(glMonths),
+        accountIds: Array.from(accountIds),
+        rowCount: slotRows.length,
+      } satisfies EntitySlotSummary;
+    },
+  );
+
+  return { requiredEntities, rowSlots, slotSummaries };
+};
+
+const ensureAssignmentCount = (
+  count: number,
+  assignments: EntityAssignment[],
+): EntityAssignment[] => {
+  const normalizedCount = Math.max(0, count);
+  const next = assignments.slice(0, normalizedCount).map((assignment, idx) => ({
+    ...assignment,
+    slot: idx + 1,
+  }));
+
+  while (next.length < normalizedCount) {
+    next.push({
+      slot: next.length + 1,
+      entityId: '',
+      name: '',
+      isCustom: true,
+    });
+  }
+
+  return next;
+};
+
+const prepareEntityAssignments = (
+  requiredCount: number,
+  availableEntities: ClientEntity[],
+  assignments: EntityAssignment[],
+): EntityAssignment[] => {
+  const base = ensureAssignmentCount(requiredCount, assignments);
+  if (requiredCount === 0) {
+    return base;
+  }
+
+  const unusedEntities = availableEntities.filter(
+    (entity) => !base.some((assignment) => assignment.entityId === entity.id),
+  );
+
+  return base.map((assignment, idx) => {
+    if (assignment.entityId && assignment.name) {
+      return assignment;
+    }
+
+    const candidate = unusedEntities[idx];
+    if (!candidate) {
+      return assignment;
+    }
+
+    return {
+      ...assignment,
+      entityId: candidate.id,
+      name: candidate.displayName ?? candidate.name,
+      isCustom: false,
+    };
+  });
+};
+
+const normalizeEntityLabel = (entity: ClientEntity | null): string => {
+  if (!entity) {
+    return '';
+  }
+  return entity.displayName ?? entity.name;
+};
+
+const filterRowsByGlMonth = (
+  rows: TrialBalanceRow[],
+  glMonth: string,
+): TrialBalanceRow[] => {
+  const normalizedTarget = normalizeGlMonth(glMonth);
+  return rows
+    .map((row) => {
+      const detectedMonth = extractRowGlMonth(row);
+      if (detectedMonth && detectedMonth !== row.glMonth) {
+        return { ...row, glMonth: detectedMonth };
+      }
+      return row;
+    })
+    .filter((row) => {
+      if (!normalizedTarget) {
+        return true;
+      }
+      const normalizedRowMonth = normalizeGlMonth(row.glMonth ?? '');
+      return normalizedRowMonth === normalizedTarget;
+    });
+};
+
 interface ImportFormProps {
   onImport: (
     uploads: TrialBalanceRow[],
@@ -112,7 +267,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   const isLoadingEntities = useClientEntityStore((state) => state.isLoading);
   const entitiesByClient = useClientEntityStore((state) => state.entitiesByClient);
   const userEmail = useAuthStore((state) => state.user?.email ?? null);
-  const [entityIds, setEntityIds] = useState<string[]>([]);
   const [clientId, setClientId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploads, setUploads] = useState<ParsedUpload[]>([]);
@@ -121,6 +275,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     string,
     string | null
   > | null>(null);
+  const [entityAssignments, setEntityAssignments] = useState<EntityAssignment[]>([]);
+  const [entitySlotSummaries, setEntitySlotSummaries] = useState<EntitySlotSummary[]>([]);
+  const [requiredEntityCount, setRequiredEntityCount] = useState(0);
+  const [rowEntitySlots, setRowEntitySlots] = useState<number[]>([]);
   const [savedHeaderMappings, setSavedHeaderMappings] = useState<
     Record<string, SavedHeaderMapping>
   >({});
@@ -200,7 +358,74 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     return entitiesByClient[clientId] ?? [];
   }, [clientId, entitiesByClient]);
 
-  const singleEntity = entityOptions.length === 1 ? entityOptions[0] : null;
+  const resolvedAssignments = useMemo(
+    () => ensureAssignmentCount(requiredEntityCount, entityAssignments),
+    [entityAssignments, requiredEntityCount],
+  );
+
+  const assignedEntities = useMemo(() => {
+    const seen = new Set<string>();
+    return resolvedAssignments.reduce<ClientEntity[]>((acc, assignment) => {
+      const trimmedName = assignment.name.trim();
+      const trimmedId = assignment.entityId.trim();
+      if (!trimmedName || !trimmedId || seen.has(trimmedId)) {
+        return acc;
+      }
+
+      const knownEntity = entityOptions.find((entity) => entity.id === trimmedId);
+      const hydrated: ClientEntity =
+        knownEntity ?? {
+          id: trimmedId,
+          name: trimmedName,
+          displayName: trimmedName,
+          aliases: [],
+        };
+
+      seen.add(hydrated.id);
+      acc.push(hydrated);
+      return acc;
+    }, []);
+  }, [entityOptions, resolvedAssignments]);
+
+  const isEntitySelectionComplete = useMemo(() => {
+    if (requiredEntityCount === 0) {
+      return false;
+    }
+
+    if (resolvedAssignments.length !== requiredEntityCount) {
+      return false;
+    }
+
+    const completedAssignments = resolvedAssignments.filter(
+      (assignment) => assignment.name.trim().length > 0 && assignment.entityId.trim().length > 0,
+    );
+
+    if (completedAssignments.length !== requiredEntityCount) {
+      return false;
+    }
+
+    const uniqueIds = new Set(completedAssignments.map((assignment) => assignment.entityId.trim()));
+    return uniqueIds.size === requiredEntityCount;
+  }, [requiredEntityCount, resolvedAssignments]);
+
+  const rowsWithEntityAssignments = useMemo(() => {
+    if (combinedRows.length === 0) {
+      return [] as TrialBalanceRow[];
+    }
+
+    return combinedRows.map((row, index) => {
+      const slotIndex = rowEntitySlots[index] ?? 1;
+      const assignment = resolvedAssignments[slotIndex - 1];
+      if (!assignment || assignment.name.trim().length === 0) {
+        return row;
+      }
+
+      return { ...row, entity: assignment.name.trim(), entitySlot: slotIndex };
+    });
+  }, [combinedRows, resolvedAssignments, rowEntitySlots]);
+
+  const entityAssignmentNeedsCustom =
+    requiredEntityCount > 0 && entityOptions.length < requiredEntityCount;
 
   useEffect(() => {
     if (clientId) {
@@ -209,15 +434,12 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [clientId, fetchClientEntities]);
 
   useEffect(() => {
-    setEntityIds([]);
+    setEntityAssignments([]);
+    setEntitySlotSummaries([]);
+    setRequiredEntityCount(0);
+    setRowEntitySlots([]);
     setHasManualEntitySelection(false);
   }, [clientId]);
-
-  useEffect(() => {
-    if (singleEntity && !hasManualEntitySelection) {
-      setEntityIds([singleEntity.id]);
-    }
-  }, [singleEntity, hasManualEntitySelection]);
 
   useEffect(() => {
     if (singleClientId) {
@@ -251,23 +473,103 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [clientId, toHeaderMappingRecord]);
 
   useEffect(() => {
-    if (!hasManualEntitySelection && entityOptions.length > 0 && uploads.length > 0) {
-      const detected = detectLikelyEntities({
-        uploads,
-        selectedSheetIndexes: selectedSheets,
-        entities: entityOptions,
-        combinedRows,
-        fileName: selectedFile?.name,
+    const { requiredEntities, rowSlots, slotSummaries } = inferEntitySlotsFromRows(
+      combinedRows,
+    );
+    const normalizedRequired = combinedRows.length > 0 ? Math.max(requiredEntities, 1) : 0;
+
+    setRowEntitySlots(rowSlots);
+    setEntitySlotSummaries(slotSummaries);
+    setRequiredEntityCount(normalizedRequired);
+
+    if (combinedRows.length === 0) {
+      setEntityAssignments([]);
+    }
+  }, [combinedRows]);
+
+  useEffect(() => {
+    if (requiredEntityCount === 0) {
+      if (entityAssignments.length > 0) {
+        setEntityAssignments([]);
+      }
+      return;
+    }
+
+    const nextAssignments = hasManualEntitySelection
+      ? ensureAssignmentCount(requiredEntityCount, entityAssignments)
+      : prepareEntityAssignments(requiredEntityCount, entityOptions, entityAssignments);
+
+    const hasChanged =
+      nextAssignments.length !== entityAssignments.length ||
+      nextAssignments.some((assignment, idx) => {
+        const current = entityAssignments[idx];
+        if (!current) return true;
+        return (
+          current.slot !== assignment.slot ||
+          current.entityId !== assignment.entityId ||
+          current.name !== assignment.name ||
+          current.isCustom !== assignment.isCustom
+        );
       });
 
-      if (detected.length > 0) {
-        setEntityIds(detected);
-      }
+    if (hasChanged) {
+      setEntityAssignments(nextAssignments);
     }
+  }, [
+    entityAssignments,
+    entityOptions,
+    hasManualEntitySelection,
+    requiredEntityCount,
+  ]);
+
+  useEffect(() => {
+    if (
+      hasManualEntitySelection ||
+      entityOptions.length === 0 ||
+      uploads.length === 0 ||
+      requiredEntityCount === 0
+    ) {
+      return;
+    }
+
+    const detected = detectLikelyEntities({
+      uploads,
+      selectedSheetIndexes: selectedSheets,
+      entities: entityOptions,
+      combinedRows,
+      fileName: selectedFile?.name,
+    }).slice(0, requiredEntityCount);
+
+    if (detected.length === 0) {
+      return;
+    }
+
+    setEntityAssignments((prev) => {
+      const hydrated = prepareEntityAssignments(requiredEntityCount, entityOptions, prev);
+
+      return hydrated.map((assignment, idx) => {
+        const detectedId = detected[idx];
+        if (!detectedId) {
+          return assignment;
+        }
+        const matched = entityOptions.find((entity) => entity.id === detectedId);
+        if (!matched) {
+          return assignment;
+        }
+
+        return {
+          ...assignment,
+          entityId: matched.id,
+          name: normalizeEntityLabel(matched),
+          isCustom: false,
+        };
+      });
+    });
   }, [
     combinedRows,
     entityOptions,
     hasManualEntitySelection,
+    requiredEntityCount,
     selectedFile?.name,
     selectedSheets,
     uploads,
@@ -332,6 +634,73 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     [clientId, savedHeaderMappings, toHeaderMappingRecord, userEmail]
   );
 
+  const handleAssignmentSelection = (slot: number, value: string) => {
+    setHasManualEntitySelection(true);
+    setEntityAssignments((prev) => {
+      const normalized = ensureAssignmentCount(
+        Math.max(requiredEntityCount, slot),
+        prev,
+      );
+
+      return normalized.map((assignment) => {
+        if (assignment.slot !== slot) {
+          return assignment;
+        }
+
+        if (!value) {
+          return { ...assignment, entityId: '', name: '', isCustom: true };
+        }
+
+        if (value === '__custom__') {
+          const fallbackId =
+            assignment.name.trim().length > 0
+              ? slugify(assignment.name)
+              : `custom-entity-${slot}`;
+
+          return {
+            ...assignment,
+            entityId: fallbackId || `custom-entity-${slot}`,
+            isCustom: true,
+          };
+        }
+
+        const matched = entityOptions.find((entity) => entity.id === value) ?? null;
+        return {
+          slot: assignment.slot,
+          entityId: matched?.id ?? value,
+          name: normalizeEntityLabel(matched) || value,
+          isCustom: !matched,
+        };
+      });
+    });
+  };
+
+  const handleCustomEntityNameChange = (slot: number, value: string) => {
+    setHasManualEntitySelection(true);
+    const trimmed = value.trimStart();
+    setEntityAssignments((prev) => {
+      const normalized = ensureAssignmentCount(
+        Math.max(requiredEntityCount, slot),
+        prev,
+      );
+
+      return normalized.map((assignment) => {
+        if (assignment.slot !== slot) {
+          return assignment;
+        }
+
+        const normalizedId =
+          slugify(trimmed) || assignment.entityId || `custom-entity-${slot}`;
+        return {
+          ...assignment,
+          name: trimmed,
+          entityId: normalizedId,
+          isCustom: true,
+        };
+      });
+    });
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) processFile(file);
@@ -367,6 +736,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setHeaderMap(null);
       setHeaderMappingError(null);
       setCombinedRows([]);
+      setEntityAssignments([]);
+      setEntitySlotSummaries([]);
+      setRequiredEntityCount(0);
+      setRowEntitySlots([]);
       setError(null);
       setHasManualEntitySelection(false);
     } catch (err) {
@@ -377,6 +750,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       setHeaderMap(null);
       setHeaderMappingError(null);
       setCombinedRows([]);
+      setEntityAssignments([]);
+      setEntitySlotSummaries([]);
+      setRequiredEntityCount(0);
+      setRowEntitySlots([]);
     }
   };
 
@@ -479,14 +856,11 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     if (
       selectedFile &&
       clientId &&
-      entityIds.length > 0 &&
-      combinedRows.length > 0 &&
+      isEntitySelectionComplete &&
+      rowsWithEntityAssignments.length > 0 &&
       headerMap
     ) {
-      const glMonths = extractGlMonthsFromRows(combinedRows);
-      const selectedEntities = entityOptions.filter((entity) =>
-        entityIds.includes(entity.id)
-      );
+      const glMonths = extractGlMonthsFromRows(rowsWithEntityAssignments);
 
       const sheetSelections: ImportSheet[] = selectedSheets.map((sheetIdx) => {
         const sheetUpload = uploads[sheetIdx];
@@ -506,9 +880,9 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       });
 
       await onImport(
-        combinedRows,
+        rowsWithEntityAssignments,
         clientId,
-        selectedEntities,
+        assignedEntities,
         headerMap,
         glMonths,
         selectedFile.name,
@@ -570,20 +944,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         </div>
       )}
 
-      <MultiSelect
-        label="Entity"
-        options={entityOptions.map((entity) => ({
-          value: entity.id,
-          label: entity.displayName ?? entity.name,
-        }))}
-        value={entityIds}
-        onChange={(values) => {
-          setHasManualEntitySelection(true);
-          setEntityIds(values);
-        }}
-        disabled={!clientId || isLoadingClients || isLoadingEntities}
-      />
-
       <div
         className="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg"
         onDragOver={(e) => e.preventDefault()}
@@ -602,7 +962,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   setHeaderMap(null);
                   setCombinedRows([]);
                   setClientId(singleClientId ?? '');
-                  setEntityIds([]);
+                  setEntityAssignments([]);
+                  setEntitySlotSummaries([]);
+                  setRequiredEntityCount(0);
+                  setRowEntitySlots([]);
                   setHasManualEntitySelection(false);
                 }}
                 className="text-gray-500 hover:text-red-500"
@@ -694,16 +1057,104 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
       {headerMap && combinedRows.length > 0 && (
         <div className="space-y-4">
+          {requiredEntityCount > 0 && (
+            <div className="space-y-4 rounded-md border border-blue-200 bg-blue-50 p-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-medium text-blue-900">Entity assignment</h3>
+                  <p className="text-sm text-blue-800">
+                    Duplicate account IDs were found within the same GL month. Assign{' '}
+                    {requiredEntityCount} entity
+                    {requiredEntityCount > 1 ? ' groups' : ' group'} before moving on to mapping.
+                  </p>
+                </div>
+                <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-medium text-blue-800">
+                  Minimum required: {requiredEntityCount}
+                </span>
+              </div>
+
+              {entityAssignmentNeedsCustom && (
+                <p className="text-xs text-blue-800">
+                  Fewer than {requiredEntityCount} saved entities were found for this client. Type new entity names to
+                  cover every group.
+                </p>
+              )}
+
+              <div className="grid gap-3">
+                {resolvedAssignments.map((assignment) => {
+                  const summary = entitySlotSummaries.find((slot) => slot.slot === assignment.slot);
+                  const glMonthSummary = summary?.glMonths.join(', ') || 'Unspecified month';
+                  const accountSummary = summary?.accountIds.join(', ') || 'Multiple accounts';
+
+                  return (
+                    <div
+                      key={assignment.slot}
+                      className="rounded-md border border-blue-200 bg-white p-3 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">Entity group {assignment.slot}</p>
+                          <p className="text-xs text-gray-600">
+                            Months: {glMonthSummary} · Accounts: {accountSummary}
+                          </p>
+                        </div>
+                        <span className="text-xs text-gray-500">{summary?.rowCount ?? 0} rows</span>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <Select
+                          label="Choose an entity"
+                          value={assignment.isCustom ? '__custom__' : assignment.entityId}
+                          onChange={(e) => handleAssignmentSelection(assignment.slot, e.target.value)}
+                          disabled={!clientId || isLoadingClients || isLoadingEntities}
+                          required
+                        >
+                          <option value="">Select an entity</option>
+                          {entityOptions.map((entity) => (
+                            <option key={entity.id} value={entity.id}>
+                              {normalizeEntityLabel(entity)}
+                            </option>
+                          ))}
+                          <option value="__custom__">Type a new entity</option>
+                        </Select>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor={`custom-entity-${assignment.slot}`}>
+                            Entity name
+                          </label>
+                          <input
+                            id={`custom-entity-${assignment.slot}`}
+                            type="text"
+                            value={assignment.name}
+                            onChange={(e) => handleCustomEntityNameChange(assignment.slot, e.target.value)}
+                            placeholder="Enter an entity name"
+                            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!isEntitySelectionComplete && (
+                <p className="text-sm text-amber-700">
+                  Assign an entity name to every group to enable mapping.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
             <h3 className="text-sm font-medium text-gray-900 mb-2">Import Summary</h3>
             <div className="text-sm text-gray-700 space-y-1">
-              <p><strong>Total Rows:</strong> {combinedRows.length.toLocaleString()}</p>
+              <p><strong>Total Rows:</strong> {rowsWithEntityAssignments.length.toLocaleString()}</p>
               <p><strong>Sheets:</strong> {selectedSheets.map(idx => uploads[idx]?.sheetName).join(', ')}</p>
-              <p><strong>GL Months Detected:</strong> {extractGlMonthsFromRows(combinedRows).join(', ') || 'None detected'}</p>
+              <p><strong>GL Months Detected:</strong> {extractGlMonthsFromRows(rowsWithEntityAssignments).join(', ') || 'None detected'}</p>
             </div>
           </div>
           <PreviewTable
-            rows={combinedRows.slice(0, 20)}
+            rows={rowsWithEntityAssignments.slice(0, 20)}
             sheetName="Combined Data"
             columnOrder={uploads[selectedSheets[0]]?.headers ?? []}
           />
@@ -728,12 +1179,12 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             disabled={
               !selectedFile ||
               !clientId ||
-              entityIds.length === 0 ||
+              !isEntitySelectionComplete ||
               isImporting ||
               uploads.length === 0 ||
               selectedSheets.length === 0 ||
               !headerMap ||
-              combinedRows.length === 0
+              rowsWithEntityAssignments.length === 0
             }
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
           >
@@ -773,4 +1224,10 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   );
 }
 
-export { normalizeGlMonth, extractGlMonthsFromRows };
+export {
+  normalizeGlMonth,
+  extractGlMonthsFromRows,
+  filterRowsByGlMonth,
+  inferEntitySlotsFromRows,
+  prepareEntityAssignments,
+};
