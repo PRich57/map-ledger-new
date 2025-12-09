@@ -11,14 +11,14 @@ import {
 import { useAuthStore } from '../store/authStore';
 
 const linkBaseClass =
-  'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500';
+  'group flex items-center text-sm font-medium rounded-xl transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500';
 
-const getLinkClasses = (isActive: boolean) =>
+const getLinkClasses = (isActive: boolean, isOpen: boolean) =>
   `${linkBaseClass} ${
     isActive
-      ? 'bg-primary-600 text-white shadow-md'
-      : 'text-gray-600 hover:bg-primary-50 hover:text-primary-600 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-  }`;
+      ? 'bg-primary-600 text-white dark:bg-primary-700'
+      : 'text-gray-700 hover:bg-primary-50 hover:text-primary-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white'
+  } ${isOpen ? 'gap-3 px-3 py-2.5 justify-start' : 'gap-0 p-2.5 justify-center'}`;
 
 interface SidebarProps {
   isOpen: boolean;
@@ -85,14 +85,14 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       key={label}
       to={to}
       aria-label={label}
-      className={({ isActive }) => getLinkClasses(isActive || isActiveOverride)}
+      className={({ isActive }) => getLinkClasses(isActive || isActiveOverride, isOpen)}
     >
-      <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white/70 shadow-inner dark:bg-slate-800/70">
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg text-current">
         {icon}
       </span>
       <span
         className={`truncate text-left transition-[opacity,transform] duration-200 ${
-          isOpen ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2 md:hidden'
+          isOpen ? 'opacity-100 translate-x-0' : 'hidden'
         }`}
       >
         {label}
