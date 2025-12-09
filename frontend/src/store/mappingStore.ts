@@ -1056,7 +1056,7 @@ interface MappingState {
   saveMappings: (accountIds?: string[]) => Promise<number>;
   loadImportedAccounts: (payload: {
     uploadId: string;
-    clientId?: string | null;
+    clientId?: string | number | null;
     entityIds?: string[];
     entities?: EntitySummary[];
     period?: string | null;
@@ -1065,7 +1065,7 @@ interface MappingState {
   fetchFileRecords: (
     uploadGuid: string,
     options?: {
-      clientId?: string | null;
+      clientId?: string | number | null;
       entities?: EntitySummary[];
       entityIds?: string[];
       period?: string | null;
@@ -1075,6 +1075,18 @@ interface MappingState {
 }
 
 const mappingStatuses: MappingStatus[] = ['New', 'Unmapped', 'Mapped', 'Excluded'];
+
+const normalizeClientId = (
+  clientId?: string | number | null,
+): string | null => {
+  if (clientId === undefined || clientId === null) {
+    return null;
+  }
+
+  const clientIdString = typeof clientId === 'string' ? clientId : String(clientId);
+  const trimmed = clientIdString.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
 
 const initialAccounts: GLAccountMappingRow[] = [];
 const initialEntities: EntitySummary[] = [];
@@ -1806,7 +1818,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
     period,
     rows,
   }) => {
-    const normalizedClientId = clientId && clientId.trim().length > 0 ? clientId : null;
+    const normalizedClientId = normalizeClientId(clientId);
     const normalizedPeriod = period && period.trim().length > 0 ? period : null;
 
     const selectedEntities = entities
@@ -1892,9 +1904,11 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       const preferredPeriod =
         options?.period ?? rows.find((row) => row.glMonth)?.glMonth ?? null;
 
+      const normalizedClientId = normalizeClientId(options?.clientId ?? null);
+
       get().loadImportedAccounts({
         uploadId: uploadGuid,
-        clientId: options?.clientId ?? null,
+        clientId: normalizedClientId,
         entityIds: options?.entityIds,
         entities: options?.entities,
         period: preferredPeriod,
