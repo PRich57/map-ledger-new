@@ -36,6 +36,7 @@ const createFallbackUserClientAccess = (
     {
       clientId: 'demo-client-1',
       clientName: 'Demo Healthcare Group',
+      clientScac: 'DHC1',
       companies: [
         {
           companyId: 'demo-company-1',
@@ -60,6 +61,7 @@ const createFallbackUserClientAccess = (
     {
       clientId: 'demo-client-2',
       clientName: 'Demo Professional Services',
+      clientScac: 'DPS1',
       companies: [
         {
           companyId: 'demo-company-3',
