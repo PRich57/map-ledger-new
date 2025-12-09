@@ -9,6 +9,8 @@ export interface Operation {
   id: string;
   code?: string;
   name: string;
+  operationalScac?: string | null;
+  isActive?: boolean;
 }
 
 export interface ClientMetadata {
@@ -154,6 +156,16 @@ export const deriveCompaniesFromAccessList = (
   const companyMap = new Map<string, Company>();
 
   accessList.forEach((clientAccess) => {
+    const clientOperations = (clientAccess.operations ?? []).map((op) => {
+      const code = op.code || op.id || op.name;
+      return {
+        id: code,
+        code,
+        name: op.name || code,
+        operationalScac: op.operationalScac ?? clientAccess.clientScac ?? null,
+        isActive: op.isActive,
+      } satisfies Operation;
+    });
     const associatedCompanies =
       clientAccess.companies.length > 0
         ? clientAccess.companies
@@ -161,7 +173,7 @@ export const deriveCompaniesFromAccessList = (
             {
               companyId: `${clientAccess.clientId}-default`,
               companyName: clientAccess.clientName,
-              operations: [],
+              operations: clientOperations,
             },
           ];
 
@@ -169,14 +181,18 @@ export const deriveCompaniesFromAccessList = (
       const companyId = company.companyId || `${clientAccess.clientId}-default`;
       const companyName = company.companyName || companyId;
       const existingCompany = companyMap.get(companyId);
-      const normalizedOperations: Operation[] = (company.operations ?? []).map((op) => {
-        const code = op.code || op.id || op.name;
-        return {
-          id: code,
-          code,
-          name: op.name,
-        };
-      });
+      const normalizedOperations: Operation[] = (company.operations ?? [])
+        .concat(clientOperations)
+        .map((op) => {
+          const code = op.code || op.id || op.name;
+          return {
+            id: code,
+            code,
+            name: op.name || code,
+            operationalScac: op.operationalScac ?? clientAccess.clientScac ?? null,
+            isActive: op.isActive,
+          };
+        });
 
       if (!existingCompany) {
         companyMap.set(companyId, {

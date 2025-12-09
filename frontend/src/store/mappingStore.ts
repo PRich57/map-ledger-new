@@ -1004,6 +1004,7 @@ interface MappingState {
   isSavingMappings: boolean;
   saveError: string | null;
   lastSavedCount: number;
+  setActiveClientId: (clientId: string | null) => void;
   setSearchTerm: (term: string) => void;
   setActiveEntityId: (entityId: string | null) => void;
   setActivePeriod: (period: string | null) => void;
@@ -1131,6 +1132,8 @@ export const useMappingStore = create<MappingState>((set, get) => ({
   isSavingMappings: false,
   saveError: null,
   lastSavedCount: 0,
+  setActiveClientId: clientId =>
+    set({ activeClientId: normalizeClientId(clientId) }),
   setSearchTerm: term => set({ searchTerm: term }),
   setActiveEntityId: entityId =>
     set(state => {

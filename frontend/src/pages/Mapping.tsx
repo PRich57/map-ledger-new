@@ -15,6 +15,9 @@ import {
   type HydrationMode,
   useMappingStore,
 } from '../store/mappingStore';
+import { useOrganizationStore } from '../store/organizationStore';
+import { useClientStore } from '../store/clientStore';
+import { useAuthStore } from '../store/authStore';
 import scrollPageToTop from '../utils/scroll';
 
 const normalizeEntityId = (value: string | null): string | null => {
@@ -42,7 +45,11 @@ const resolveHydrationMode = (value: string | null): HydrationMode => {
 export default function Mapping() {
   const { uploadId = 'demo' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeClientId = useMappingStore(state => state.activeClientId);
+  const userEmail = useAuthStore(state => state.user?.email ?? null);
+  const hydrateClients = useClientStore(state => state.hydrateFromAccessList);
+  const clientAccess = useOrganizationStore(state => state.clientAccess);
+  const fetchOrganizations = useOrganizationStore(state => state.fetchForUser);
+  const activeClientId = useClientStore(state => state.activeClientId);
   const activeUploadId = useMappingStore(state => state.activeUploadId);
   const availableEntities = useMappingStore(selectAvailableEntities);
   const activeEntityId = useMappingStore(selectActiveEntityId);
@@ -55,6 +62,7 @@ export default function Mapping() {
   }, [activeEntityId, entityStages, searchParams]);
   const setActiveEntityId = useMappingStore(state => state.setActiveEntityId);
   const fetchFileRecords = useMappingStore(state => state.fetchFileRecords);
+  const setMappingActiveClientId = useMappingStore(state => state.setActiveClientId);
   const hydrationMode = useMemo(
     () => resolveHydrationMode(searchParams.get('mode')),
     [searchParams],
@@ -63,6 +71,30 @@ export default function Mapping() {
     () => new Set(availableEntities.map(entity => entity.id)),
     [availableEntities],
   );
+
+  useEffect(() => {
+    if (!userEmail) {
+      return;
+    }
+
+    if (clientAccess.length > 0) {
+      return;
+    }
+
+    fetchOrganizations(userEmail);
+  }, [clientAccess.length, fetchOrganizations, userEmail]);
+
+  useEffect(() => {
+    if (clientAccess.length === 0) {
+      return;
+    }
+
+    hydrateClients(clientAccess, activeClientId);
+  }, [activeClientId, clientAccess, hydrateClients]);
+
+  useEffect(() => {
+    setMappingActiveClientId(activeClientId ?? null);
+  }, [activeClientId, setMappingActiveClientId]);
   const normalizedEntityParam = useMemo(() => {
     const param = searchParams.get('entityId');
     const normalized = normalizeEntityId(param);
@@ -85,7 +117,7 @@ export default function Mapping() {
 
     const shouldReload = uploadId !== activeUploadId || hydrationMode === 'restart';
     if (shouldReload) {
-      fetchFileRecords(uploadId, { hydrateMode: hydrationMode });
+      fetchFileRecords(uploadId, { hydrateMode: hydrationMode, clientId: activeClientId });
 
       if (hydrationMode === 'restart') {
         const next = new URLSearchParams(searchParams);
@@ -93,7 +125,15 @@ export default function Mapping() {
         setSearchParams(next, { replace: true });
       }
     }
-  }, [activeUploadId, fetchFileRecords, hydrationMode, searchParams, setSearchParams, uploadId]);
+  }, [
+    activeClientId,
+    activeUploadId,
+    fetchFileRecords,
+    hydrationMode,
+    searchParams,
+    setSearchParams,
+    uploadId,
+  ]);
 
   useEffect(() => {
     if (availableEntities.length === 0) {
