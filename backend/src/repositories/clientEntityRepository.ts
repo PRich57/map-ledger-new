@@ -90,10 +90,20 @@ const mapRow = (row: RawClientEntityRow): ClientEntityRecord => ({
       : Boolean(row.is_deleted && Number(row.is_deleted) !== 0),
 });
 
+const normalizeClientId = (value?: string | number | null): string | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const trimmed = `${value}`.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 export const listClientEntities = async (
-  clientId: string
+  clientId: string | number,
 ): Promise<ClientEntityRecord[]> => {
-  if (!clientId || clientId.trim().length === 0) {
+  const normalizedClientId = normalizeClientId(clientId);
+  if (!normalizedClientId) {
     return [];
   }
 
@@ -112,7 +122,7 @@ export const listClientEntities = async (
     FROM ml.CLIENT_ENTITIES
     WHERE CLIENT_ID = @clientId
       AND ISNULL(IS_DELETED, 0) = 0`,
-    { clientId }
+    { clientId: normalizedClientId }
   );
 
   return (result.recordset ?? []).map(mapRow);
