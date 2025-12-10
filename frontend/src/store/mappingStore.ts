@@ -1000,6 +1000,12 @@ type UploadMetadata = {
   uploadedAt?: string | null;
 };
 
+const normalizeEntitySummary = (entity: EntitySummary): EntitySummary => {
+  const id = (entity.id ?? '').toString().trim();
+  const name = entity.name?.trim() ?? id;
+  return { ...entity, id, name };
+};
+
 type FileRecordsResponse = {
   items?: FileRecord[];
   fileUploadGuid?: string;
@@ -1957,6 +1963,7 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       const payload = (await response.json()) as FileRecordsResponse;
       const records = payload.items ?? [];
       const entities = payload.entities ?? options?.entities ?? [];
+      const normalizedEntities = entities.map(normalizeEntitySummary);
       const uploadMetadata =
         payload.upload ??
         (payload.fileName || payload.uploadedAt
@@ -1964,12 +1971,12 @@ export const useMappingStore = create<MappingState>((set, get) => ({
           : null);
       logDebug('Fetched file records', { count: records.length, uploadGuid });
 
-      const entityNameLookup = new Map(entities.map((entity) => [entity.id, entity.name]));
+      const entityNameLookup = new Map(normalizedEntities.map(entity => [entity.id, entity.name]));
 
       const rows: TrialBalanceRow[] = records.map((record) => {
-        const entityId = record.entityId ?? null;
+        const entityId = record.entityId ? String(record.entityId).trim() : null;
         const entityName =
-          record.entityName ?? (entityId ? entityNameLookup.get(entityId) ?? null : null);
+          record.entityName?.trim() ?? (entityId ? entityNameLookup.get(entityId) ?? null : null);
         return {
           entity: entityName ?? entityId ?? '',
           entityId,
@@ -1985,12 +1992,17 @@ export const useMappingStore = create<MappingState>((set, get) => ({
         options?.period ?? rows.find((row) => row.glMonth)?.glMonth ?? null;
 
       const normalizedClientId = normalizeClientId(options?.clientId ?? null);
+      const normalizedEntityIds = options?.entityIds
+        ?.map(id => id?.toString().trim())
+        .filter((id): id is string => Boolean(id && id.length > 0));
 
       get().loadImportedAccounts({
         uploadId: uploadGuid,
         clientId: normalizedClientId,
-        entityIds: options?.entityIds ?? (entities.length > 0 ? entities.map((entity) => entity.id) : undefined),
-        entities,
+        entityIds:
+          normalizedEntityIds ??
+          (normalizedEntities.length > 0 ? normalizedEntities.map(entity => entity.id) : undefined),
+        entities: normalizedEntities,
         period: preferredPeriod,
         rows,
         uploadMetadata: uploadMetadata
