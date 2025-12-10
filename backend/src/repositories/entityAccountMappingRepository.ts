@@ -51,6 +51,23 @@ const normalizeNumber = (value?: number | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalizeExclusionPct = (value?: number | null): number | null => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  // Clamp to 0-100 range, then divide by 100 to convert to 0.000-1.000 for database storage
+  const clamped = Math.max(0, Math.min(parsed, 100));
+  const normalized = clamped / 100;
+
+  return Number.isFinite(normalized) ? normalized : null;
+};
+
 const normalizePresetId = (value?: string | null): string | null => {
   const normalized = normalizeText(value);
   if (normalized) {
@@ -85,7 +102,10 @@ const mapRow = (row: {
   mappingType: row.mapping_type ?? null,
   presetId: row.preset_id ?? null,
   mappingStatus: row.mapping_status ?? null,
-  exclusionPct: row.exclusion_pct ?? null,
+  // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+  exclusionPct: row.exclusion_pct !== null && row.exclusion_pct !== undefined
+    ? row.exclusion_pct * 100
+    : null,
   insertedDttm:
     row.inserted_dttm instanceof Date
       ? row.inserted_dttm.toISOString()
@@ -343,7 +363,7 @@ export const upsertEntityAccountMappings = async (
       params[`mappingType${index}`] = normalizeText(input.mappingType);
       params[`presetId${index}`] = presetId;
       params[`mappingStatus${index}`] = normalizeText(input.mappingStatus);
-      params[`exclusionPct${index}`] = normalizeNumber(input.exclusionPct);
+      params[`exclusionPct${index}`] = normalizeExclusionPct(input.exclusionPct);
       params[`updatedBy${index}`] = normalizeText(input.updatedBy);
 
       return `(@entityId${index}, @entityAccountId${index}, @polarity${index}, @mappingType${index}, @presetId${index}, @mappingStatus${index}, @exclusionPct${index}, @updatedBy${index})`;

@@ -42,9 +42,11 @@ const normalizeSpecifiedPct = (value?: number | null): number | null => {
     return null;
   }
 
+  // Clamp to 0-100 range, then divide by 100 to convert to 0.000-1.000 for database storage
   const clamped = Math.max(0, Math.min(parsed, 100));
+  const normalized = clamped / 100;
 
-  return Number.isFinite(clamped) ? clamped : null;
+  return Number.isFinite(normalized) ? normalized : null;
 };
 
 const mapRow = (row: {
@@ -65,7 +67,10 @@ const mapRow = (row: {
     : row.is_calculated === null || row.is_calculated === undefined
       ? null
       : Boolean(row.is_calculated),
-  specifiedPct: row.specified_pct ?? null,
+  // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+  specifiedPct: row.specified_pct !== null && row.specified_pct !== undefined
+    ? row.specified_pct * 100
+    : null,
   insertedDttm:
     row.inserted_dttm instanceof Date
       ? row.inserted_dttm.toISOString()
