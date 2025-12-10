@@ -24,6 +24,11 @@ import {
 } from '../../repositories/entityMappingPresetDetailRepository';
 import { EntityAccountInput, upsertEntityAccounts } from '../../repositories/entityAccountRepository';
 import { EntityScoaActivityInput, upsertEntityScoaActivity } from '../../repositories/entityScoaActivityRepository';
+import {
+  createEntityPresetMappings,
+  deleteEntityPresetMappings,
+  EntityPresetMappingInput,
+} from '../../repositories/entityPresetMappingRepository';
 
 interface IncomingSplitDefinition {
   targetId?: string | null;
@@ -572,6 +577,27 @@ const saveHandler = async (
 
       if (presetDetails.length) {
         await syncPresetDetails(presetGuid, presetDetails, input.updatedBy ?? null);
+      }
+
+      // For dynamic mappings, also insert into ENTITY_PRESET_MAPPING with calculated percentages
+      if (presetType === 'dynamic' && input.splitDefinitions?.length) {
+        // Delete existing preset mappings for this preset
+        await deleteEntityPresetMappings(presetGuid);
+
+        // Build preset mapping inputs with applied percentages
+        const presetMappingInputs: EntityPresetMappingInput[] = input.splitDefinitions
+          .filter(split => normalizeText(split.targetId))
+          .map(split => ({
+            presetGuid,
+            basisDatapoint: normalizeText(split.basisDatapoint),
+            targetDatapoint: normalizeText(split.targetId) as string,
+            appliedPct: normalizeNumber(split.allocationValue),
+            updatedBy: input.updatedBy ?? null,
+          }));
+
+        if (presetMappingInputs.length) {
+          await createEntityPresetMappings(presetMappingInputs);
+        }
       }
 
       upserts.push({
