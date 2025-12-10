@@ -3,8 +3,9 @@ import { json } from '../../http';
 import {
   listEntityAccountMappingsByFileUpload,
   EntityAccountMappingWithRecord,
+  EntityMappingPresetDetailRow,
+  listEntityAccountMappingsWithPresets,
 } from '../../repositories/entityAccountMappingRepository';
-import { listEntityMappingPresetDetails } from '../../repositories/entityMappingPresetDetailRepository';
 
 type MappingStatus = 'Mapped' | 'Unmapped' | 'New' | 'Excluded';
 type MappingType = 'direct' | 'percentage' | 'dynamic' | 'exclude';
@@ -74,7 +75,6 @@ const normalizeStatus = (status?: string | null, mappingType?: string | null): M
 
 const mapToSuggestion = (
   row: EntityAccountMappingWithRecord,
-  presetDetails: Map<string, Awaited<ReturnType<typeof listEntityMappingPresetDetails>>>,
   fileUploadGuid: string,
 ): MappingSuggestionRow => {
   const normalizedType = (row.mappingType ?? '').trim().toLowerCase();
@@ -82,11 +82,15 @@ const mapToSuggestion = (
     ? (normalizedType as MappingType)
     : 'direct';
   const presetId = row.presetId ?? null;
-  const details = presetId ? presetDetails.get(presetId) ?? [] : [];
+  const details = presetId ? row.presetDetails ?? [] : [];
   const polarity = derivePolarity(row.activityAmount, row.polarity);
   const status = normalizeStatus(row.mappingStatus, mappingType);
   const entityId = row.entityId?.trim() || 'unknown-entity';
   const activity = row.activityAmount ?? 0;
+  const hydratedDetails = details.filter(
+    (detail): detail is EntityMappingPresetDetailRow & { targetDatapoint: string } =>
+      Boolean(detail.targetDatapoint),
+  );
 
   return {
     id: `${fileUploadGuid}-${row.recordId ?? row.entityAccountId}`,
@@ -101,13 +105,14 @@ const mapToSuggestion = (
     polarity,
     presetId,
     exclusionPct: row.exclusionPct ?? null,
-    splitDefinitions: details.map((detail, index) => ({
+    splitDefinitions: hydratedDetails.map((detail, index) => ({
       id: `${presetId ?? 'preset'}-${index}`,
       targetId: detail.targetDatapoint,
       targetName: detail.targetDatapoint,
       allocationType: 'percentage',
       allocationValue: detail.specifiedPct ?? 0,
       notes: detail.basisDatapoint ?? undefined,
+      isCalculated: detail.isCalculated ?? undefined,
     })),
     entities: [
       {
@@ -126,30 +131,18 @@ export async function mappingSuggestHandler(
 ): Promise<HttpResponseInit> {
   try {
     const fileUploadGuid = request.query.get('fileUploadGuid')?.trim();
+    const entityId = request.query.get('entityId')?.trim();
 
-    if (!fileUploadGuid) {
-      return json({ message: 'fileUploadGuid is required' }, 400);
+    if (!fileUploadGuid && !entityId) {
+      return json({ message: 'fileUploadGuid or entityId is required' }, 400);
     }
 
-    const mappings = await listEntityAccountMappingsByFileUpload(fileUploadGuid);
-    const presetIds = Array.from(
-      new Set(
-        mappings
-          .map((row) => row.presetId)
-          .filter((id): id is string => Boolean(id && id.trim())),
-      ),
-    );
+    const mappings = fileUploadGuid
+      ? await listEntityAccountMappingsByFileUpload(fileUploadGuid)
+      : await listEntityAccountMappingsWithPresets(entityId as string);
 
-    const presetDetails = await Promise.all(
-      presetIds.map(async (presetId) => {
-        const details = await listEntityMappingPresetDetails(presetId);
-        return [presetId, details] as const;
-      }),
-    );
-
-    const presetDetailLookup = new Map(presetDetails);
-
-    const items = mappings.map((row) => mapToSuggestion(row, presetDetailLookup, fileUploadGuid));
+    const resolvedUploadGuid = fileUploadGuid ?? `${entityId}-preset`;
+    const items = mappings.map((row) => mapToSuggestion(row, resolvedUploadGuid));
     return json({ items });
   } catch (error) {
     context.error('Failed to build mapping suggestions', error);

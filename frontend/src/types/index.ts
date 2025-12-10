@@ -535,6 +535,7 @@ export interface GLAccountMappingRow {
   manualCOAId?: string;
   polarity: MappingPolarity;
   presetId?: string;
+  exclusionPct?: number | null;
   notes?: string;
   splitDefinitions: MappingSplitDefinition[];
   entities: GLAccountEntityBreakdown[];

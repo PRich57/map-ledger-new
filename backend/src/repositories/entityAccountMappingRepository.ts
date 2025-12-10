@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { runQuery } from '../utils/sqlClient';
 
 export interface EntityAccountMappingUpsertInput {
@@ -23,9 +22,17 @@ export interface EntityAccountMappingWithRecord extends EntityAccountMappingRow 
   accountName?: string | null;
   activityAmount?: number | null;
   glMonth?: string | null;
+  presetDetails?: EntityMappingPresetDetailRow[];
 }
 
 const TABLE_NAME = 'ml.ENTITY_ACCOUNT_MAPPING';
+
+export interface EntityMappingPresetDetailRow {
+  basisDatapoint?: string | null;
+  targetDatapoint?: string | null;
+  isCalculated?: boolean | null;
+  specifiedPct?: number | null;
+}
 
 const normalizeText = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
@@ -50,15 +57,6 @@ const normalizePresetId = (value?: string | null): string | null => {
     return normalized;
   }
   return null;
-};
-
-const requiresPreset = (mappingType?: string | null): boolean => {
-  if (!mappingType) {
-    return false;
-  }
-
-  const normalized = mappingType.trim().toLowerCase();
-  return normalized === 'percentage' || normalized === 'dynamic';
 };
 
 const toEntityId = (value: string | number | null | undefined): string => {
@@ -138,6 +136,118 @@ export const listEntityAccountMappings = async (
   return (result.recordset ?? []).map(mapRow);
 };
 
+const hydratePresetDetails = <T extends EntityAccountMappingRow>(
+  rows: (T &
+    EntityMappingPresetDetailRow & {
+      recordId?: number | null;
+    })[],
+): (T & {
+  presetDetails?: EntityMappingPresetDetailRow[];
+  recordId?: number | null;
+})[] => {
+  const grouped = new Map<string, {
+    base: T & { recordId?: number | null };
+    details: EntityMappingPresetDetailRow[];
+  }>();
+
+  rows.forEach((row) => {
+    const key = `${row.entityId}|${row.entityAccountId}|${row.recordId ?? ''}`;
+    const existing = grouped.get(key);
+    const detail = row.targetDatapoint
+      ? {
+          targetDatapoint: row.targetDatapoint,
+          basisDatapoint: row.basisDatapoint ?? null,
+          isCalculated: row.isCalculated ?? null,
+          specifiedPct: row.specifiedPct ?? null,
+        }
+      : null;
+
+    if (existing) {
+      if (detail) {
+        existing.details.push(detail);
+      }
+      return;
+    }
+
+    grouped.set(key, {
+      base: {
+        ...(row as T),
+        recordId: row.recordId ?? null,
+      },
+      details: detail ? [detail] : [],
+    });
+  });
+
+  return Array.from(grouped.values()).map(({ base, details }) => ({
+    ...base,
+    presetDetails: details,
+  }));
+};
+
+export const listEntityAccountMappingsWithPresets = async (
+  entityId: string,
+): Promise<(EntityAccountMappingRow & { presetDetails?: EntityMappingPresetDetailRow[] })[]> => {
+  if (!entityId) {
+    return [];
+  }
+
+  const result = await runQuery<
+    {
+      entity_id: string | number;
+      entity_account_id: string;
+      polarity?: string | null;
+      mapping_type?: string | null;
+      preset_id?: string | null;
+      mapping_status?: string | null;
+      exclusion_pct?: number | null;
+      inserted_dttm?: Date | string | null;
+      updated_dttm?: Date | string | null;
+      updated_by?: string | null;
+      record_id?: number | null;
+      basisDatapoint?: string | null;
+      targetDatapoint?: string | null;
+      isCalculated?: boolean | null;
+      specifiedPct?: number | null;
+    }
+  >(
+    `SELECT
+      eam.ENTITY_ID as entity_id,
+      eam.ENTITY_ACCOUNT_ID as entity_account_id,
+      eam.POLARITY as polarity,
+      eam.MAPPING_TYPE as mapping_type,
+      eam.PRESET_GUID as preset_id,
+      eam.MAPPING_STATUS as mapping_status,
+      eam.EXCLUSION_PCT as exclusion_pct,
+      eam.INSERTED_DTTM as inserted_dttm,
+      eam.UPDATED_DTTM as updated_dttm,
+      eam.UPDATED_BY as updated_by,
+      emd.BASIS_DATAPOINT as basisDatapoint,
+      emd.TARGET_DATAPOINT as targetDatapoint,
+      emd.IS_CALCULATED as isCalculated,
+      emd.SPECIFIED_PCT as specifiedPct
+    FROM ${TABLE_NAME} eam
+    LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
+    LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
+    WHERE eam.ENTITY_ID = @entityId
+    ORDER BY eam.ENTITY_ACCOUNT_ID ASC`,
+    { entityId },
+  );
+
+  const rows = (result.recordset ?? []).map((row) => ({
+    ...mapRow(row),
+    recordId: row.record_id ?? null,
+    basisDatapoint: row.basisDatapoint,
+    targetDatapoint: row.targetDatapoint,
+    isCalculated: row.isCalculated,
+    specifiedPct: row.specifiedPct,
+  }));
+  const decorated = hydratePresetDetails(rows);
+  return decorated.map(({ presetDetails, ...rest }) => ({
+    ...rest,
+    presetDetails,
+  }));
+};
+
 export const listEntityAccountMappingsByFileUpload = async (
   fileUploadGuid: string,
 ): Promise<EntityAccountMappingWithRecord[]> => {
@@ -161,6 +271,10 @@ export const listEntityAccountMappingsByFileUpload = async (
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
+    basisDatapoint?: string | null;
+    targetDatapoint?: string | null;
+    isCalculated?: boolean | null;
+    specifiedPct?: number | null;
   }>(
     `SELECT
       fr.FILE_UPLOAD_GUID as file_upload_guid,
@@ -177,22 +291,37 @@ export const listEntityAccountMappingsByFileUpload = async (
       eam.EXCLUSION_PCT as exclusion_pct,
       eam.INSERTED_DTTM as inserted_dttm,
       eam.UPDATED_DTTM as updated_dttm,
-      eam.UPDATED_BY as updated_by
+      eam.UPDATED_BY as updated_by,
+      emd.BASIS_DATAPOINT as basisDatapoint,
+      emd.TARGET_DATAPOINT as targetDatapoint,
+      emd.IS_CALCULATED as isCalculated,
+      emd.SPECIFIED_PCT as specifiedPct
     FROM ml.FILE_RECORDS fr
     LEFT JOIN ${TABLE_NAME} eam
       ON eam.ENTITY_ID = fr.ENTITY_ID AND eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+    LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
+    LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
     WHERE fr.FILE_UPLOAD_GUID = @fileUploadGuid
     ORDER BY fr.SOURCE_SHEET_NAME ASC, fr.RECORD_ID ASC`,
     { fileUploadGuid }
   );
 
-  return (result.recordset ?? []).map((row) => ({
+  const rows = (result.recordset ?? []).map((row) => ({
     ...mapRow(row),
     fileUploadGuid: row.file_upload_guid,
-    recordId: row.record_id,
+    record_id: row.record_id,
     accountName: row.account_name,
     activityAmount: row.activity_amount,
     glMonth: row.gl_month,
+    basisDatapoint: row.basisDatapoint,
+    targetDatapoint: row.targetDatapoint,
+    isCalculated: row.isCalculated,
+    specifiedPct: row.specifiedPct,
+  }));
+
+  return hydratePresetDetails(rows).map(({ presetDetails, ...rest }) => ({
+    ...rest,
+    presetDetails,
   }));
 };
 
@@ -206,9 +335,7 @@ export const upsertEntityAccountMappings = async (
   const params: Record<string, unknown> = {};
   const valuesClause = inputs
     .map((input, index) => {
-      const presetId =
-        normalizePresetId(input.presetId) ??
-        (requiresPreset(input.mappingType) ? crypto.randomUUID() : null);
+      const presetId = normalizePresetId(input.presetId);
 
       params[`entityId${index}`] = input.entityId;
       params[`entityAccountId${index}`] = input.entityAccountId;
@@ -290,6 +417,53 @@ export const upsertEntityAccountMappings = async (
       inserted.UPDATED_DTTM as updated_dttm,
       inserted.UPDATED_BY as updated_by;`,
     params
+  );
+
+  return (result.recordset ?? []).map(mapRow);
+};
+
+export const listEntityAccountMappingsForAccounts = async (
+  mappings: { entityId: string; entityAccountId: string }[],
+): Promise<EntityAccountMappingRow[]> => {
+  if (!mappings.length) {
+    return [];
+  }
+
+  const params: Record<string, unknown> = {};
+  const clauses = mappings.map((mapping, index) => {
+    params[`entityId${index}`] = mapping.entityId;
+    params[`entityAccountId${index}`] = mapping.entityAccountId;
+    return `(ENTITY_ID = @entityId${index} AND ENTITY_ACCOUNT_ID = @entityAccountId${index})`;
+  });
+
+  const whereClause = clauses.join(' OR ');
+
+  const result = await runQuery<{
+    entity_id: string | number;
+    entity_account_id: string;
+    polarity?: string | null;
+    mapping_type?: string | null;
+    preset_id?: string | null;
+    mapping_status?: string | null;
+    exclusion_pct?: number | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+  }>(
+    `SELECT
+      ENTITY_ID as entity_id,
+      ENTITY_ACCOUNT_ID as entity_account_id,
+      POLARITY as polarity,
+      MAPPING_TYPE as mapping_type,
+      PRESET_GUID as preset_id,
+      MAPPING_STATUS as mapping_status,
+      EXCLUSION_PCT as exclusion_pct,
+      INSERTED_DTTM as inserted_dttm,
+      UPDATED_DTTM as updated_dttm,
+      UPDATED_BY as updated_by
+    FROM ${TABLE_NAME}
+    WHERE ${whereClause}`,
+    params,
   );
 
   return (result.recordset ?? []).map(mapRow);

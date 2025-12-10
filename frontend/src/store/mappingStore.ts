@@ -91,7 +91,7 @@ const buildTargetFromDescription = (description: string) => {
 
   const slug = slugify(description) || 'target';
   return {
-    id: `chart-of-account-${slug}`,
+    id: slug,
     value: description,
     label: description,
     accountNumber: description,
@@ -1085,6 +1085,7 @@ interface MappingState {
   hydrateFromHistory: (
     uploadGuid: string,
     mode?: HydrationMode,
+    entityIds?: string[],
   ) => Promise<void>;
   saveMappings: (accountIds?: string[]) => Promise<number>;
   loadImportedAccounts: (payload: {
@@ -1785,25 +1786,66 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       updateDynamicBasisAccounts(resolved);
       return { accounts: resolved };
     }),
-  hydrateFromHistory: async (uploadGuid, mode = 'resume') => {
-    if (!uploadGuid || mode === 'none') {
+  hydrateFromHistory: async (uploadGuid, mode = 'resume', entityIds = []) => {
+    if ((mode === 'none') || (!uploadGuid && entityIds.length === 0)) {
+      return;
+    }
+
+    const scopes: { fileUploadGuid?: string | null; entityId?: string }[] = [];
+    if (uploadGuid) {
+      scopes.push({ fileUploadGuid: uploadGuid });
+    }
+
+    const uniqueEntityIds = Array.from(
+      new Set(
+        entityIds
+          .map(id => id?.trim())
+          .filter((id): id is string => Boolean(id && id.length > 0)),
+      ),
+    );
+
+    uniqueEntityIds.forEach(entityId => scopes.push({ entityId }));
+
+    if (scopes.length === 0) {
       return;
     }
 
     try {
-      const params = new URLSearchParams({ fileUploadGuid: uploadGuid });
-      const response = await fetch(`${API_BASE_URL}/mapping/suggest?${params.toString()}`);
+      const aggregated: SavedMappingRow[] = [];
 
-      if (!response.ok) {
-        throw new Error(`Failed to load saved mappings (${response.status})`);
+      for (const scope of scopes) {
+        const params = new URLSearchParams();
+        if (scope.fileUploadGuid) {
+          params.set('fileUploadGuid', scope.fileUploadGuid);
+        }
+        if (scope.entityId) {
+          params.set('entityId', scope.entityId);
+        }
+        params.set('includePresetDetails', 'true');
+
+        const response = await fetch(`${API_BASE_URL}/mapping/suggest?${params.toString()}`);
+
+        if (!response.ok) {
+          throw new Error(`Failed to load saved mappings (${response.status})`);
+        }
+
+        const payload = (await response.json()) as { items?: SavedMappingRow[] };
+        aggregated.push(...(payload.items ?? []));
       }
 
-      const payload = (await response.json()) as { items?: SavedMappingRow[] };
-      const saved = payload.items ?? [];
-      logDebug('Hydrated saved mappings', { count: saved.length, uploadGuid, mode });
+      logDebug('Hydrated saved mappings', {
+        count: aggregated.length,
+        uploadGuid,
+        entityIds: uniqueEntityIds,
+        mode,
+      });
+
+      if (aggregated.length === 0) {
+        return;
+      }
 
       set(state => {
-        const merged = mergeSavedMappings(state.accounts, saved, mode);
+        const merged = mergeSavedMappings(state.accounts, aggregated, mode);
         updateDynamicBasisAccounts(merged);
         return { accounts: merged };
       });
@@ -2015,7 +2057,9 @@ export const useMappingStore = create<MappingState>((set, get) => ({
       });
 
       const hydrateMode: HydrationMode = options?.hydrateMode ?? 'resume';
-      await get().hydrateFromHistory(uploadGuid, hydrateMode);
+      const hydrateEntityIds =
+        normalizedEntityIds ?? normalizedEntities.map(entity => entity.id);
+      await get().hydrateFromHistory(uploadGuid, hydrateMode, hydrateEntityIds);
 
       set({ isLoadingFromApi: false, apiError: null });
     } catch (error) {
@@ -2106,11 +2150,13 @@ const mergeSavedMappings = (
         ? 'exclude'
         : match.mappingType;
 
+    const exclusionPct = match.exclusionPct ?? null;
     const next: GLAccountMappingRow = {
       ...account,
       mappingType: resolvedType,
       presetId: match.presetId ?? undefined,
       polarity: match.polarity,
+      exclusionPct,
       splitDefinitions:
         resolvedType === 'percentage'
           ? ensureMinimumPercentageSplits(match.splitDefinitions ?? [])
@@ -2127,6 +2173,21 @@ const mergeSavedMappings = (
       next.splitDefinitions = [];
     } else {
       next.status = resolvedStatus;
+    }
+
+    if (typeof exclusionPct === 'number' && exclusionPct > 0 && resolvedType !== 'exclude') {
+      const exclusionSplit: MappingSplitDefinition = {
+        id: `${account.id}-exclusion`,
+        targetId: '',
+        targetName: 'Exclusion',
+        allocationType: 'percentage',
+        allocationValue: exclusionPct,
+        notes: 'Excluded amount',
+        isExclusion: true,
+      };
+
+      const nonExclusionSplits = next.splitDefinitions.filter(split => !split.isExclusion);
+      next.splitDefinitions = [...nonExclusionSplits, exclusionSplit];
     }
 
     return applyDerivedStatus(next);

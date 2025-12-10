@@ -7,11 +7,14 @@ import {
   EntityAccountMappingUpsertInput,
   listEntityAccountMappings,
   listEntityAccountMappingsByFileUpload,
+  listEntityAccountMappingsForAccounts,
+  listEntityAccountMappingsWithPresets,
   upsertEntityAccountMappings,
 } from '../../repositories/entityAccountMappingRepository';
 import {
   createEntityMappingPreset,
   EntityMappingPresetInput,
+  listEntityMappingPresets,
 } from '../../repositories/entityMappingPresetRepository';
 import {
   createEntityMappingPresetDetails,
@@ -77,11 +80,53 @@ const normalizeMappingType = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed.toLowerCase() : null;
 };
 
-const requiresPreset = (mappingType?: string | null): boolean => {
-  if (!mappingType) {
-    return false;
+const resolvePresetType = (value: string | null | undefined): string => {
+  const normalized = normalizeMappingType(value);
+  if (normalized === 'percentage' || normalized === 'dynamic') {
+    return normalized;
   }
-  return ['percentage', 'dynamic'].includes(mappingType.trim().toLowerCase());
+  return 'direct';
+};
+
+const normalizePercentageDetails = (
+  details: EntityMappingPresetDetailInput[],
+): EntityMappingPresetDetailInput[] => {
+  const numericDetails = details.filter(
+    (detail) => typeof detail.specifiedPct === 'number'
+  );
+
+  if (!numericDetails.length) {
+    return details;
+  }
+
+  const total = numericDetails.reduce(
+    (sum, detail) => sum + Number(detail.specifiedPct ?? 0),
+    0,
+  );
+
+  if (Math.abs(total - 100) < 0.001) {
+    return details;
+  }
+
+  const factor = total === 0 ? 0 : 100 / total;
+  let runningTotal = 0;
+  let numericPosition = 0;
+
+  return details.map((detail) => {
+    if (typeof detail.specifiedPct !== 'number') {
+      return detail;
+    }
+
+    numericPosition += 1;
+    if (numericPosition === numericDetails.length) {
+      const adjusted = Number((100 - runningTotal).toFixed(3));
+      return { ...detail, specifiedPct: adjusted };
+    }
+
+    const scaled = Number((detail.specifiedPct * factor).toFixed(3));
+    runningTotal += scaled;
+    return { ...detail, specifiedPct: scaled };
+  });
 };
 
 const mapSplitDefinitionsToPresetDetails = (
@@ -89,31 +134,84 @@ const mapSplitDefinitionsToPresetDetails = (
   mappingType: string | null,
   splits?: IncomingSplitDefinition[],
   updatedBy?: string | null,
+  baseAmount?: number | null,
 ): EntityMappingPresetDetailInput[] => {
   if (!splits || splits.length === 0) {
     return [];
   }
 
-  return splits.reduce<EntityMappingPresetDetailInput[]>((results, split) => {
+  const normalizedType = resolvePresetType(mappingType);
+  const normalizedBaseAmount =
+    baseAmount === null || baseAmount === undefined
+      ? null
+      : Math.abs(baseAmount);
+
+  const rawDetails = splits.reduce<EntityMappingPresetDetailInput[]>((results, split) => {
     const targetDatapoint = normalizeText(split.targetId);
     if (!targetDatapoint) {
       return results;
     }
 
     const basisDatapoint = normalizeText(split.basisDatapoint);
-    const isCalculated = split.isCalculated ?? mappingType === 'dynamic';
+    const isCalculated = split.isCalculated ?? normalizedType === 'dynamic';
+    const allocationType = normalizeText(split.allocationType) ?? 'percentage';
+    const allocationValue = normalizeNumber(split.allocationValue);
+
+    let specifiedPct: number | null = null;
+
+    if (normalizedType === 'dynamic') {
+      specifiedPct = null;
+    } else if (normalizedType === 'direct') {
+      specifiedPct = 100;
+    } else if (allocationType === 'amount' && normalizedBaseAmount) {
+      specifiedPct = Number(
+        (((allocationValue ?? 0) / normalizedBaseAmount) * 100).toFixed(3),
+      );
+    } else {
+      specifiedPct = allocationValue ?? null;
+    }
 
     results.push({
       presetGuid,
       basisDatapoint: basisDatapoint ?? null,
       targetDatapoint,
       isCalculated,
-      specifiedPct: normalizeNumber(split.allocationValue),
+      specifiedPct,
       updatedBy: updatedBy ?? null,
     });
 
     return results;
   }, []);
+
+  if (normalizedType === 'percentage') {
+    return normalizePercentageDetails(rawDetails);
+  }
+
+  return rawDetails;
+};
+
+const buildPresetDescription = (
+  accountName: string | null | undefined,
+  mappingType: string | null,
+  details: EntityMappingPresetDetailInput[],
+): string | null => {
+  const source = normalizeText(accountName);
+  const normalizedType = resolvePresetType(mappingType);
+
+  if (normalizedType === 'dynamic') {
+    return source ?? 'Dynamic mapping preset';
+  }
+
+  const targets = details
+    .map((detail) => normalizeText(detail.targetDatapoint))
+    .filter((value): value is string => Boolean(value));
+
+  if (!targets.length) {
+    return source;
+  }
+
+  const descriptionSource = source ?? 'Mapping';
+  return `${descriptionSource} -> ${targets.join(', ')}`;
 };
 
 const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
@@ -204,19 +302,78 @@ const buildScoaActivities = (
   }, []);
 };
 
-const syncPresetDetails = async (
-  presetGuid: string,
-  mappingType: string | null,
-  splitDefinitions: IncomingSplitDefinition[] | undefined,
-  updatedBy: string | null,
-): Promise<void> => {
-  const desiredDetails = mapSplitDefinitionsToPresetDetails(
-    presetGuid,
-    mappingType,
-    splitDefinitions,
-    updatedBy,
+const toPresetCacheKey = (entityId: string, entityAccountId: string): string =>
+  `${entityId}|${entityAccountId}`;
+
+const buildExistingPresetLookup = async (
+  inputs: MappingSaveInput[],
+): Promise<{
+  presetLookup: Map<string, string>;
+  knownPresetGuids: Set<string>;
+}> => {
+  const uniqueMappings: { entityId: string; entityAccountId: string }[] = [];
+  const seen = new Set<string>();
+
+  inputs.forEach((input) => {
+    if (!input.entityId || !input.entityAccountId) {
+      return;
+    }
+
+    const key = toPresetCacheKey(input.entityId, input.entityAccountId);
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    uniqueMappings.push({
+      entityId: input.entityId,
+      entityAccountId: input.entityAccountId,
+    });
+  });
+
+  const existingMappings = uniqueMappings.length
+    ? await listEntityAccountMappingsForAccounts(uniqueMappings)
+    : [];
+  const presetLookup = new Map<string, string>();
+  const knownPresetGuids = new Set<string>();
+
+  existingMappings.forEach((mapping) => {
+    if (mapping.presetId) {
+      const presetGuid = mapping.presetId;
+      presetLookup.set(
+        toPresetCacheKey(mapping.entityId, mapping.entityAccountId),
+        presetGuid,
+      );
+      knownPresetGuids.add(presetGuid);
+    }
+  });
+
+  const entityIds = Array.from(
+    new Set(inputs.map((input) => input.entityId).filter(Boolean) as string[]),
   );
 
+  if (entityIds.length) {
+    const presetLists = await Promise.all(
+      entityIds.map((entityId) => listEntityMappingPresets(entityId)),
+    );
+
+    presetLists.forEach((rows) => {
+      rows.forEach((row) => {
+        if (row.presetGuid) {
+          knownPresetGuids.add(row.presetGuid);
+        }
+      });
+    });
+  }
+
+  return { presetLookup, knownPresetGuids };
+};
+
+const syncPresetDetails = async (
+  presetGuid: string,
+  desiredDetails: EntityMappingPresetDetailInput[],
+  updatedBy?: string | null,
+): Promise<void> => {
   if (!desiredDetails.length) {
     return;
   }
@@ -242,7 +399,7 @@ const syncPresetDetails = async (
           {
             isCalculated: detail.isCalculated ?? undefined,
             specifiedPct: detail.specifiedPct ?? undefined,
-            updatedBy,
+            updatedBy: detail.updatedBy ?? null,
           },
         ),
       );
@@ -262,27 +419,29 @@ const syncPresetDetails = async (
 
 const ensurePreset = async (
   entityId: string,
+  entityAccountId: string,
   mappingType: string | null,
-  presetId: string | null,
-): Promise<string | null> => {
-  if (!requiresPreset(mappingType)) {
-    return presetId;
-  }
+  presetGuid: string,
+  presetLookup: Map<string, string>,
+  knownPresetGuids: Set<string>,
+  presetDescription: string | null,
+): Promise<void> => {
+  const cacheKey = toPresetCacheKey(entityId, entityAccountId);
+  presetLookup.set(cacheKey, presetGuid);
 
-  const normalizedPreset = presetId?.trim();
-  if (normalizedPreset) {
-    return normalizedPreset;
+  if (knownPresetGuids.has(presetGuid)) {
+    return;
   }
 
   const presetInput: EntityMappingPresetInput = {
     entityId,
-    presetType: mappingType ?? 'mapping',
-    presetDescription: `Auto-generated preset for ${entityId}`,
-    presetGuid: crypto.randomUUID(),
+    presetType: resolvePresetType(mappingType),
+    presetDescription,
+    presetGuid,
   };
 
-  const created = await createEntityMappingPreset(presetInput);
-  return created?.presetGuid ?? presetInput.presetGuid ?? null;
+  await createEntityMappingPreset(presetInput);
+  knownPresetGuids.add(presetGuid);
 };
 
 const saveHandler = async (
@@ -297,24 +456,47 @@ const saveHandler = async (
       return json({ message: 'No mapping records provided' }, 400);
     }
 
+    const { presetLookup, knownPresetGuids } = await buildExistingPresetLookup(inputs);
     const upserts: EntityAccountMappingUpsertInput[] = [];
     const entityAccounts: EntityAccountInput[] = [];
     const scoaActivityLookup = new Map<string, EntityScoaActivityInput>();
 
     for (const input of inputs) {
-      const presetGuid = await ensurePreset(
+      const cacheKey = toPresetCacheKey(
         input.entityId as string,
-        input.mappingType ?? null,
-        input.presetId ?? null,
+        input.entityAccountId as string,
+      );
+      const presetGuid =
+        normalizeText(input.presetId) ??
+        presetLookup.get(cacheKey) ??
+        crypto.randomUUID();
+
+      const presetType = resolvePresetType(input.mappingType);
+      const presetDetails = mapSplitDefinitionsToPresetDetails(
+        presetGuid,
+        presetType,
+        input.splitDefinitions,
+        input.updatedBy ?? null,
+        input.netChange ?? null,
+      );
+      const presetDescription = buildPresetDescription(
+        input.accountName ?? input.entityAccountId ?? null,
+        presetType,
+        presetDetails,
       );
 
-      if (presetGuid && input.splitDefinitions) {
-        await syncPresetDetails(
-          presetGuid,
-          input.mappingType ?? null,
-          input.splitDefinitions,
-          input.updatedBy ?? null,
-        );
+      await ensurePreset(
+        input.entityId as string,
+        input.entityAccountId as string,
+        presetType,
+        presetGuid,
+        presetLookup,
+        knownPresetGuids,
+        presetDescription,
+      );
+
+      if (presetDetails.length) {
+        await syncPresetDetails(presetGuid, presetDetails, input.updatedBy ?? null);
       }
 
       upserts.push({
@@ -375,6 +557,8 @@ const listHandler = async (
   try {
     const entityId = getFirstStringValue(request.query.get('entityId'));
     const fileUploadGuid = getFirstStringValue(request.query.get('fileUploadGuid'));
+    const includePresetDetails =
+      getFirstStringValue(request.query.get('includePresetDetails'))?.toLowerCase() === 'true';
 
     if (!entityId && !fileUploadGuid) {
       return json({ message: 'entityId or fileUploadGuid is required' }, 400);
@@ -382,7 +566,9 @@ const listHandler = async (
 
     const items = fileUploadGuid
       ? await listEntityAccountMappingsByFileUpload(fileUploadGuid)
-      : await listEntityAccountMappings(entityId);
+      : includePresetDetails
+        ? await listEntityAccountMappingsWithPresets(entityId as string)
+        : await listEntityAccountMappings(entityId);
 
     return json({ items });
   } catch (error) {
