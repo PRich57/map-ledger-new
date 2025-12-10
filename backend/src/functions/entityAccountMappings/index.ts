@@ -173,6 +173,7 @@ const mapSplitDefinitionsToPresetDetails = (
   splits?: IncomingSplitDefinition[],
   updatedBy?: string | null,
   baseAmount?: number | null,
+  exclusionPct?: number | null,
 ): EntityMappingPresetDetailInput[] => {
   if (!splits || splits.length === 0) {
     return [];
@@ -232,8 +233,32 @@ const mapSplitDefinitionsToPresetDetails = (
     return results;
   }, []);
 
-  if (normalizedType === 'percentage') {
-    return normalizePercentageDetails(rawDetails);
+  // If exclusionPct is provided and no exclusion split exists in rawDetails, add one
+
+  if (normalizedType === 'percentage' && typeof exclusionPct === 'number' && exclusionPct > 0) {
+
+    const hasExclusionSplit = rawDetails.some(detail => detail.targetDatapoint === 'excluded');
+
+    if (!hasExclusionSplit) {
+
+      rawDetails.push({
+
+        presetGuid,
+
+        basisDatapoint: null,
+
+        targetDatapoint: 'excluded',
+
+        isCalculated: false,
+
+        specifiedPct: exclusionPct,
+
+        updatedBy: updatedBy ?? null,
+
+      });
+
+    }
+
   }
 
   return rawDetails;
@@ -527,6 +552,7 @@ const saveHandler = async (
         input.splitDefinitions,
         input.updatedBy ?? null,
         input.netChange ?? null,
+        input.exclusionPct ?? null,
       );
       const presetDescription = buildPresetDescription(
         input.accountName ?? input.entityAccountId ?? null,

@@ -38,7 +38,7 @@ const toOption = (account: ChartOfAccount): ChartOfAccountOption => {
   const fallbackValue = account.description ?? accountNumber ?? 'account';
 
   return {
-    id: `chart-of-account-${accountNumber || fallbackValue}`,
+    id: accountNumber || String(fallbackValue),
     value: accountNumber || String(fallbackValue),
     label,
     accountNumber,
