@@ -770,6 +770,78 @@ const buildSaveInputFromAccount = (
     }
   }
 
+  if (normalizedType === 'dynamic') {
+    const ratioState = useRatioAllocationStore.getState();
+    const { allocations, presets, results, selectedPeriod } = ratioState;
+
+    // Find the allocation for this source account
+    const allocation = allocations.find(alloc => alloc.sourceAccount.id === account.id);
+
+    if (allocation && allocation.targetDatapoints.length > 0) {
+      // Get all preset IDs referenced by the allocation's target datapoints
+      const presetIds = new Set<string>();
+      allocation.targetDatapoints.forEach(target => {
+        if (target.groupId) {
+          presetIds.add(target.groupId);
+        }
+      });
+
+      // Find the results for this allocation to get calculated percentages
+      const allocationResult = results.find(
+        result => result.allocationId === allocation.id && result.periodId === (selectedPeriod ?? account.glMonth),
+      );
+
+      // Build split definitions from presets
+      const dynamicSplits: MappingSaveInput['splitDefinitions'] = [];
+
+      presetIds.forEach(presetId => {
+        const preset = presets.find(p => p.id === presetId);
+        if (!preset) return;
+
+        preset.rows.forEach(row => {
+          // Find the calculated percentage from results if available
+          const resultAllocation = allocationResult?.allocations.find(
+            alloc => alloc.targetId === row.targetAccountId,
+          );
+
+          dynamicSplits.push({
+            targetId: row.targetAccountId,
+            basisDatapoint: row.dynamicAccountId,
+            allocationType: 'percentage',
+            allocationValue: resultAllocation?.percentage ?? null,
+            isCalculated: true,
+          });
+        });
+      });
+
+      // Handle non-preset targets (individual dynamic targets)
+      allocation.targetDatapoints
+        .filter(target => !target.groupId)
+        .forEach(target => {
+          const resultAllocation = allocationResult?.allocations.find(
+            alloc => alloc.targetId === target.datapointId,
+          );
+
+          dynamicSplits.push({
+            targetId: target.datapointId,
+            basisDatapoint: target.ratioMetric.id,
+            allocationType: 'percentage',
+            allocationValue: resultAllocation?.percentage ?? null,
+            isCalculated: true,
+          });
+        });
+
+      if (dynamicSplits.length) {
+        payload.splitDefinitions = dynamicSplits;
+        // Use the first preset ID as the presetId if available
+        const firstPresetId = presetIds.size > 0 ? Array.from(presetIds)[0] : null;
+        if (firstPresetId) {
+          payload.presetId = firstPresetId;
+        }
+      }
+    }
+  }
+
   return payload;
 };
 
