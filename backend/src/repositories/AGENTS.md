@@ -260,6 +260,28 @@ VALUES (
 );
 ```
 
+## ml.ENTITY_PRESET_MAPPING
+```sql
+INSERT INTO ml.ENTITY_PRESET_MAPPING (
+    PRESET_GUID,
+    BASIS_DATAPOINT,
+    TARGET_DATAPOINT,
+    APPLIED_PCT,
+    INSERTED_DTTM,
+    UPDATED_DTTM,
+    UPDATED_BY
+)
+VALUES (
+    NULL,    -- PRESET_GUID varchar(36)
+    NULL,    -- BASIS_DATAPOINT varchar(max)
+    NULL,    -- TARGET_DATAPOINT varchar(max)
+    NULL,    -- APPLIED_PCT decimal(4, 3)
+    DEFAULT, -- INSERTED_DTTM datetime
+    NULL,    -- UPDATED_DTTM datetime
+    NULL     -- UPDATED_BY varchar(100)
+);
+```
+
 ## ml.ENTITY_SCOA_ACTIVITY
 ```sql
 INSERT INTO ml.ENTITY_SCOA_ACTIVITY (

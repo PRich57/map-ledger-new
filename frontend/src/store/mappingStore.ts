@@ -679,7 +679,7 @@ interface MappingSaveInput {
   glMonth?: string | null;
   splitDefinitions?: {
     targetId?: string | null;
-    allocationType?: 'percentage' | 'amount';
+    allocationType?: 'percentage' | 'amount' | 'dynamic';
     allocationValue?: number | null;
     basisDatapoint?: string | null;
     isCalculated?: boolean | null;
@@ -807,7 +807,7 @@ const buildSaveInputFromAccount = (
           dynamicSplits.push({
             targetId: row.targetAccountId,
             basisDatapoint: row.dynamicAccountId,
-            allocationType: 'percentage',
+            allocationType: 'dynamic',
             allocationValue: resultAllocation?.percentage ?? null,
             isCalculated: true,
           });
@@ -825,7 +825,7 @@ const buildSaveInputFromAccount = (
           dynamicSplits.push({
             targetId: target.datapointId,
             basisDatapoint: target.ratioMetric.id,
-            allocationType: 'percentage',
+            allocationType: 'dynamic',
             allocationValue: resultAllocation?.percentage ?? null,
             isCalculated: true,
           });
