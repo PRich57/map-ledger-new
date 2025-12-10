@@ -105,15 +105,21 @@ const mapToSuggestion = (
     polarity,
     presetId,
     exclusionPct: row.exclusionPct ?? null,
-    splitDefinitions: hydratedDetails.map((detail, index) => ({
-      id: `${presetId ?? 'preset'}-${index}`,
-      targetId: detail.targetDatapoint,
-      targetName: detail.targetDatapoint,
-      allocationType: 'percentage',
-      allocationValue: detail.specifiedPct ?? 0,
-      notes: detail.basisDatapoint ?? undefined,
-      isCalculated: detail.isCalculated ?? undefined,
-    })),
+    splitDefinitions: hydratedDetails.map((detail, index) => {
+      // Check if this is an exclusion split
+      const isExclusionSplit = detail.targetDatapoint.toLowerCase() === 'exclude';
+
+      return {
+        id: `${presetId ?? 'preset'}-${index}`,
+        targetId: isExclusionSplit ? '' : detail.targetDatapoint,
+        targetName: isExclusionSplit ? 'Exclusion' : detail.targetDatapoint,
+        allocationType: 'percentage',
+        allocationValue: detail.specifiedPct ?? 0,
+        notes: isExclusionSplit ? 'Excluded amount' : (detail.basisDatapoint ?? undefined),
+        isCalculated: detail.isCalculated ?? undefined,
+        isExclusion: isExclusionSplit,
+      };
+    }),
     entities: [
       {
         id: entityId,

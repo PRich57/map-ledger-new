@@ -31,6 +31,7 @@ interface IncomingSplitDefinition {
   allocationType?: string | null;
   allocationValue?: number | null;
   isCalculated?: boolean | null;
+  isExclusion?: boolean | null;
 }
 
 interface MappingSaveInput {
@@ -148,8 +149,19 @@ const mapSplitDefinitionsToPresetDetails = (
 
   const rawDetails = splits.reduce<EntityMappingPresetDetailInput[]>((results, split) => {
     const targetDatapoint = normalizeText(split.targetId);
-    if (!targetDatapoint) {
+
+    // Check if this is an exclusion split (marked with isExclusion flag)
+    const isExclusionSplit = split.isExclusion === true;
+
+    // For exclusion splits, use 'exclude' as the target datapoint
+    // For regular splits, skip if no targetDatapoint
+    let finalTargetDatapoint: string;
+    if (isExclusionSplit) {
+      finalTargetDatapoint = 'exclude';
+    } else if (!targetDatapoint) {
       return results;
+    } else {
+      finalTargetDatapoint = targetDatapoint;
     }
 
     const basisDatapoint = normalizeText(split.basisDatapoint);
@@ -174,7 +186,7 @@ const mapSplitDefinitionsToPresetDetails = (
     results.push({
       presetGuid,
       basisDatapoint: basisDatapoint ?? null,
-      targetDatapoint,
+      targetDatapoint: finalTargetDatapoint,
       isCalculated,
       specifiedPct,
       updatedBy: updatedBy ?? null,
