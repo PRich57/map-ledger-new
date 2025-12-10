@@ -479,10 +479,6 @@ export default function MappingTable() {
               const isSelected = selectedIds.has(account.id);
               const targetScoa =
                 account.manualCOAId ?? account.suggestedCOAId ?? '';
-              const targetScoaLabel = targetScoa
-                ? coaOptions.find((option) => option.value === targetScoa)?.label ??
-                  targetScoa
-                : '';
               const requiresSplit =
                 account.mappingType === 'percentage' ||
                 account.mappingType === 'dynamic';
