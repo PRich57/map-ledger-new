@@ -259,7 +259,10 @@ export const listEntityAccountMappingsWithPresets = async (
     basisDatapoint: row.basisDatapoint,
     targetDatapoint: row.targetDatapoint,
     isCalculated: row.isCalculated,
-    specifiedPct: row.specifiedPct,
+    // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+    specifiedPct: row.specifiedPct !== null && row.specifiedPct !== undefined
+      ? row.specifiedPct * 100
+      : null,
   }));
   const decorated = hydratePresetDetails(rows);
   return decorated.map(({ presetDetails, ...rest }) => ({
@@ -336,7 +339,10 @@ export const listEntityAccountMappingsByFileUpload = async (
     basisDatapoint: row.basisDatapoint,
     targetDatapoint: row.targetDatapoint,
     isCalculated: row.isCalculated,
-    specifiedPct: row.specifiedPct,
+    // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+    specifiedPct: row.specifiedPct !== null && row.specifiedPct !== undefined
+      ? row.specifiedPct * 100
+      : null,
   }));
 
   return hydratePresetDetails(rows).map(({ presetDetails, ...rest }) => ({

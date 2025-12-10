@@ -92,24 +92,61 @@ const resolvePresetType = (value: string | null | undefined): string => {
 const normalizePercentageDetails = (
   details: EntityMappingPresetDetailInput[],
 ): EntityMappingPresetDetailInput[] => {
-  const numericDetails = details.filter(
+  // Separate exclusions from regular mappings
+  const exclusions = details.filter((detail) => detail.targetDatapoint === 'excluded');
+  const nonExclusions = details.filter((detail) => detail.targetDatapoint !== 'excluded');
+
+  // Get numeric details (those with a specified percentage)
+  const numericNonExclusions = nonExclusions.filter(
+    (detail) => typeof detail.specifiedPct === 'number'
+  );
+  const numericExclusions = exclusions.filter(
     (detail) => typeof detail.specifiedPct === 'number'
   );
 
-  if (!numericDetails.length) {
-    return details;
-  }
-
-  const total = numericDetails.reduce(
+  // Calculate total from all numeric details
+  const totalNonExclusion = numericNonExclusions.reduce(
     (sum, detail) => sum + Number(detail.specifiedPct ?? 0),
     0,
   );
+  const totalExclusion = numericExclusions.reduce(
+    (sum, detail) => sum + Number(detail.specifiedPct ?? 0),
+    0,
+  );
+  const total = totalNonExclusion + totalExclusion;
 
+  // If we have exclusions without percentages, calculate them as the remainder
+  const exclusionsWithoutPct = exclusions.filter(
+    (detail) => typeof detail.specifiedPct !== 'number'
+  );
+
+  if (exclusionsWithoutPct.length > 0 && totalNonExclusion > 0) {
+    const remainingPct = Math.max(0, 100 - totalNonExclusion);
+    const pctPerExclusion = remainingPct / exclusionsWithoutPct.length;
+
+    const updatedExclusions = exclusions.map((detail) => {
+      if (typeof detail.specifiedPct !== 'number') {
+        return { ...detail, specifiedPct: Number(pctPerExclusion.toFixed(3)) };
+      }
+      return detail;
+    });
+
+    return [...nonExclusions, ...updatedExclusions];
+  }
+
+  // If total is already 100, return as-is
   if (Math.abs(total - 100) < 0.001) {
     return details;
   }
 
-  const factor = total === 0 ? 0 : 100 / total;
+  // If no numeric details or total is 0, return as-is
+  const allNumericDetails = [...numericNonExclusions, ...numericExclusions];
+  if (!allNumericDetails.length || total === 0) {
+    return details;
+  }
+
+  // Scale all numeric details proportionally to total 100%
+  const factor = 100 / total;
   let runningTotal = 0;
   let numericPosition = 0;
 
@@ -119,7 +156,7 @@ const normalizePercentageDetails = (
     }
 
     numericPosition += 1;
-    if (numericPosition === numericDetails.length) {
+    if (numericPosition === allNumericDetails.length) {
       const adjusted = Number((100 - runningTotal).toFixed(3));
       return { ...detail, specifiedPct: adjusted };
     }
@@ -153,11 +190,11 @@ const mapSplitDefinitionsToPresetDetails = (
     // Check if this is an exclusion split (marked with isExclusion flag)
     const isExclusionSplit = split.isExclusion === true;
 
-    // For exclusion splits, use 'exclude' as the target datapoint
+    // For exclusion splits, use 'excluded' as the target datapoint
     // For regular splits, skip if no targetDatapoint
     let finalTargetDatapoint: string;
     if (isExclusionSplit) {
-      finalTargetDatapoint = 'exclude';
+      finalTargetDatapoint = 'excluded';
     } else if (!targetDatapoint) {
       return results;
     } else {
