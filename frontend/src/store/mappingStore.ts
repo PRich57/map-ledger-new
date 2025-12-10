@@ -2175,7 +2175,10 @@ const mergeSavedMappings = (
       next.status = resolvedStatus;
     }
 
-    if (typeof exclusionPct === 'number' && exclusionPct > 0 && resolvedType !== 'exclude') {
+    // Only add an exclusion split if one doesn't already exist in the split definitions
+    // This handles backwards compatibility with old data that doesn't have exclusion splits in preset details
+    const hasExclusionSplit = next.splitDefinitions.some(split => split.isExclusion);
+    if (typeof exclusionPct === 'number' && exclusionPct > 0 && resolvedType !== 'exclude' && !hasExclusionSplit) {
       const exclusionSplit: MappingSplitDefinition = {
         id: `${account.id}-exclusion`,
         targetId: '',
