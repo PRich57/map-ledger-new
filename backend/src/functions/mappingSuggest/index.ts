@@ -107,7 +107,7 @@ const mapToSuggestion = (
     exclusionPct: row.exclusionPct ?? null,
     splitDefinitions: hydratedDetails.map((detail, index) => {
       // Check if this is an exclusion split
-      const isExclusionSplit = detail.targetDatapoint.toLowerCase() === 'exclude';
+      const isExclusionSplit = detail.targetDatapoint.toLowerCase() === 'excluded';
 
       return {
         id: `${presetId ?? 'preset'}-${index}`,
