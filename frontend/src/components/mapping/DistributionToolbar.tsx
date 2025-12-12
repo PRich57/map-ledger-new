@@ -35,8 +35,10 @@ export default function DistributionToolbar() {
   const applyPresetToRows = useDistributionStore(state => state.applyPresetToRows);
   const rowsCount = useDistributionStore(state => state.rows.length);
   const isSavingDistributions = useDistributionStore(state => state.isSavingDistributions);
+  const isAutoSaving = useDistributionStore(state => state.isAutoSaving);
   const saveError = useDistributionStore(state => state.saveError);
   const saveSuccess = useDistributionStore(state => state.saveSuccess);
+  const autoSaveMessage = useDistributionStore(state => state.autoSaveMessage);
   const saveDistributions = useDistributionStore(state => state.saveDistributions);
   const presetOptions = useRatioAllocationStore(selectPresetSummaries);
   const { selectedIds, clearSelection } = useDistributionSelectionStore();
@@ -179,13 +181,18 @@ export default function DistributionToolbar() {
               {isSavingDistributions ? 'Saving distributions...' : 'Save distributions'}
             </button>
           </div>
-          {(saveError || saveSuccess) && (
+          {(saveError || saveSuccess || autoSaveMessage) && (
             <div className="space-y-1" role="status" aria-live="polite">
               {saveError && (
                 <p className="text-xs text-rose-600 dark:text-rose-300">{saveError}</p>
               )}
               {!saveError && saveSuccess && (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300">{saveSuccess}</p>
+              )}
+              {autoSaveMessage && (
+                <p className={`text-xs ${isAutoSaving ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-300'}`}>
+                  {isAutoSaving ? 'Auto-saving changes…' : autoSaveMessage}
+                </p>
               )}
             </div>
           )}

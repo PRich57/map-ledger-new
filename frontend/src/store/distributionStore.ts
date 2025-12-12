@@ -12,6 +12,8 @@ import type {
 
 const env = import.meta.env;
 const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
+const AUTO_SAVE_DEBOUNCE_MS = 1200;
+const AUTO_SAVE_BACKOFF_MS = 2500;
 
 export interface DistributionOperationCatalogItem {
   id: string;
@@ -24,6 +26,10 @@ interface DistributionState {
   operationsCatalog: DistributionOperationCatalogItem[];
   searchTerm: string;
   statusFilters: DistributionStatus[];
+  currentEntityId: string | null;
+  currentUpdatedBy: string | null;
+  isAutoSaving: boolean;
+  autoSaveMessage: string | null;
   syncRowsFromStandardTargets: (summaries: StandardScoaSummary[]) => void;
   setSearchTerm: (term: string) => void;
   toggleStatusFilter: (status: DistributionStatus) => void;
@@ -46,6 +52,9 @@ interface DistributionState {
   saveError: string | null;
   saveSuccess: string | null;
   lastSavedCount: number;
+  queueAutoSave: (ids: string[], options?: { immediate?: boolean }) => void;
+  flushAutoSaveQueue: (options?: { immediate?: boolean }) => Promise<void>;
+  setSaveContext: (entityId: string | null, updatedBy: string | null) => void;
   saveDistributions: (
     entityId: string | null,
     updatedBy: string | null,
@@ -138,242 +147,504 @@ const clampOperationsForType = (
   }));
 };
 
-export const useDistributionStore = create<DistributionState>((set, _get) => ({
-  rows: [],
-  operationsCatalog: [],
-  searchTerm: '',
-  statusFilters: [],
-  isSavingDistributions: false,
-  saveError: null,
-  saveSuccess: null,
-  lastSavedCount: 0,
-  syncRowsFromStandardTargets: summaries =>
-    set(state => {
-      const existingByTarget = new Map(
-        state.rows.map(row => [row.mappingRowId, row] as const),
-      );
-      const nextRows: DistributionRow[] = summaries.map(summary => {
-        const existing = existingByTarget.get(summary.id);
-        const nextOperations = existing
-          ? existing.operations.map(operation => ({ ...operation }))
-          : [];
-        const resolvedType = existing?.type ?? 'direct';
-        return applyDistributionStatus({
-          id: existing?.id ?? summary.id,
-          mappingRowId: summary.id,
-          accountId: summary.value,
-          description: summary.label,
-          activity: summary.mappedAmount,
-          type: resolvedType,
-          operations: clampOperationsForType(resolvedType, nextOperations),
-          presetId: existing?.presetId ?? null,
-          notes: existing?.notes,
-          status: existing?.status ?? 'Undistributed',
-          isDirty: existing?.isDirty ?? false,
-        });
-      });
-      return { rows: nextRows };
-    }),
-  setSearchTerm: term => set({ searchTerm: term }),
-  toggleStatusFilter: status =>
-    set(state => ({
-      statusFilters: state.statusFilters.includes(status)
-        ? state.statusFilters.filter(value => value !== status)
-        : [...state.statusFilters, status],
-    })),
-  clearStatusFilters: () => set({ statusFilters: [] }),
-  updateRow: (id, updates) =>
-    set(state => ({
-      rows: state.rows.map(row => {
-        if (row.id !== id) {
-          return row;
-        }
-        const nextRow: DistributionRow = {
-          ...row,
-          ...updates,
-          operations: updates.operations ?? row.operations,
-          type: updates.type ?? row.type,
-          isDirty: true,
-        };
-        return applyDistributionStatus(nextRow);
-      }),
-    })),
-  updateRowType: (id, type) =>
-    set(state => ({
-      rows: state.rows.map(row => {
-        if (row.id !== id) {
-          return row;
-        }
-        const nextOperations = clampOperationsForType(type, row.operations);
-        return applyDistributionStatus({
-          ...row,
-          type,
-          operations: nextOperations,
-          isDirty: true,
-        });
-      }),
-    })),
-  updateRowOperations: (id, operations) =>
+const buildOperationPayload = (
+  operation: DistributionOperationShare,
+): DistributionSaveOperation | null => {
+  const candidate = (operation.id ?? operation.code ?? '').trim().toUpperCase();
+  if (!candidate) {
+    return null;
+  }
+  const allocation =
+    typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
+      ? Math.max(0, Math.min(100, operation.allocation))
+      : null;
+  return {
+    operationCd: candidate,
+    allocation,
+    notes: operation.notes ?? null,
+  };
+};
+
+const buildDistributionPayloadRows = (
+  rows: DistributionRow[],
+  updatedBy: string | null,
+): DistributionSaveRowInput[] =>
+  rows.map(row => ({
+    scoaAccountId: row.accountId,
+    distributionType: row.type,
+    presetGuid: row.presetId ?? null,
+    presetDescription: row.description ?? row.accountId,
+    distributionStatus: row.status,
+    operations: row.operations
+      .map(buildOperationPayload)
+      .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
+    updatedBy,
+  }));
+
+const applySaveResults = (
+  rows: DistributionRow[],
+  payloadRows: DistributionSaveRowInput[],
+  savedItems: DistributionSaveResponseItem[],
+  autoSaveState: DistributionRow['autoSaveState'] = 'saved',
+): DistributionRow[] => {
+  const lookup = new Map<string, DistributionSaveResponseItem>();
+  savedItems.forEach(item => {
+    lookup.set(item.scoaAccountId, item);
+  });
+
+  const savedAccountIds = new Set(payloadRows.map(row => row.scoaAccountId));
+
+  return rows.map(row => {
+    if (!savedAccountIds.has(row.accountId)) {
+      return row;
+    }
+    const match = lookup.get(row.accountId);
+    return {
+      ...row,
+      presetId: match?.presetGuid ?? row.presetId,
+      status: match?.distributionStatus ?? row.status,
+      isDirty: false,
+      autoSaveState,
+      autoSaveError: null,
+    };
+  });
+};
+
+const postDistributionRows = async (
+  entityId: string,
+  payloadRows: DistributionSaveRowInput[],
+): Promise<DistributionSaveResponseItem[]> => {
+  const requestBody = {
+    entityId,
+    changedRows: payloadRows,
+    items: payloadRows,
+  };
+
+  const response = await fetch(`${API_BASE_URL}/entityDistributions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => 'Unable to save distribution rows.');
+    throw new Error(message || 'Unable to save distribution rows.');
+  }
+
+  const body = (await response.json()) as { items?: DistributionSaveResponseItem[] };
+  return body.items ?? [];
+};
+
+const autoSaveQueue = new Set<string>();
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSaveDelay = AUTO_SAVE_DEBOUNCE_MS;
+let isAutoSaveRunning = false;
+
+export const useDistributionStore = create<DistributionState>((set, _get) => {
+  const queueRowsForAutoSave = (ids: string[], options?: { immediate?: boolean }) => {
+    const normalizedIds = ids.filter(Boolean);
+    if (!normalizedIds.length) {
+      return;
+    }
+    normalizedIds.forEach(id => autoSaveQueue.add(id));
     set(state => ({
       rows: state.rows.map(row =>
-        row.id === id
-          ? applyDistributionStatus({ ...row, operations, isDirty: true })
+        autoSaveQueue.has(row.id)
+          ? {
+              ...row,
+              autoSaveState: row.autoSaveState === 'saving' ? row.autoSaveState : 'queued',
+              autoSaveError: null,
+            }
           : row,
       ),
-    })),
-  updateRowPreset: (id, presetId) =>
-    set(state => ({
-      rows: state.rows.map(row =>
-        row.id === id ? { ...row, presetId: presetId ?? undefined, isDirty: true } : row,
-      ),
-    })),
-  updateRowNotes: (id, notes) =>
-    set(state => ({
-      rows: state.rows.map(row =>
-        row.id === id ? { ...row, notes: notes || undefined, isDirty: true } : row,
-      ),
-    })),
-  setOperationsCatalog: operations =>
-    set({
-      operationsCatalog: operations.map(operation => ({
-        ...operation,
-        code: operation.code || operation.id,
-        id: operation.id || operation.code,
-      })),
-    }),
-  applyBatchDistribution: (ids, updates) => {
-    if (!ids.length) {
-      return;
-    }
-    set(state => {
-      const idSet = new Set(ids);
-      return {
-        rows: state.rows.map(row => {
-          if (!idSet.has(row.id)) {
-            return row;
-          }
-          let nextRow: DistributionRow = { ...row };
-          if (updates.type && updates.type !== nextRow.type) {
-            nextRow = {
-              ...nextRow,
-              type: updates.type,
-              operations: clampOperationsForType(updates.type, nextRow.operations),
-            };
-          }
-          if (Object.prototype.hasOwnProperty.call(updates, 'operation')) {
-            const operationShare = updates.operation;
-            if (operationShare) {
-              nextRow = {
-                ...nextRow,
-                operations: clampOperationsForType(nextRow.type, [operationShare]),
-              };
-            } else {
-              nextRow = { ...nextRow, operations: [] };
-            }
-          }
-          return applyDistributionStatus({ ...nextRow, isDirty: true });
-        }),
-      };
-    });
-  },
-  applyPresetToRows: (ids, presetId) => {
-    if (!ids.length) {
-      return;
-    }
-    set(state => {
-      const idSet = new Set(ids);
-      return {
-        rows: state.rows.map(row =>
-          idSet.has(row.id) ? { ...row, presetId: presetId ?? null, isDirty: true } : row,
-        ),
-      };
-    });
-  },
-  saveDistributions: async (entityId, updatedBy) => {
-    const state = _get();
-
-    if (!entityId) {
-      set({
-        saveError: 'Select an entity before saving the distributions.',
-        saveSuccess: null,
-        lastSavedCount: 0,
-      });
-      return 0;
-    }
-
-    if (state.rows.length === 0) {
-      set({
-        saveError: 'No distribution rows are available to save.',
-        saveSuccess: null,
-        lastSavedCount: 0,
-      });
-      return 0;
-    }
-
-    set({
-      isSavingDistributions: true,
-      saveError: null,
-      saveSuccess: null,
-    });
-
-    const buildOperationPayload = (
-      operation: DistributionOperationShare,
-    ): DistributionSaveOperation | null => {
-      const candidate = (operation.id ?? operation.code ?? '').trim().toUpperCase();
-      if (!candidate) {
-        return null;
-      }
-      const allocation =
-        typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
-          ? Math.max(0, Math.min(100, operation.allocation))
-          : null;
-      return {
-        operationCd: candidate,
-        allocation,
-        notes: operation.notes ?? null,
-      };
-    };
-
-    const dirtyRows = state.rows.filter(row => row.isDirty);
-
-    if (dirtyRows.length === 0) {
-      set({
-        isSavingDistributions: false,
-        saveError: null,
-        saveSuccess: 'No distribution rows have been modified.',
-        lastSavedCount: 0,
-      });
-      return 0;
-    }
-
-    const payloadRows: DistributionSaveRowInput[] = dirtyRows.map(row => ({
-      scoaAccountId: row.accountId,
-      distributionType: row.type,
-      presetGuid: row.presetId ?? null,
-      presetDescription: row.description ?? row.accountId,
-      distributionStatus: row.status,
-      operations: row.operations
-        .map(buildOperationPayload)
-        .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
-      updatedBy,
+      autoSaveMessage: null,
     }));
 
-    const requestBody = {
-      entityId,
-      changedRows: payloadRows,
-      items: payloadRows,
-    };
+    scheduleAutoSave(options?.immediate ?? false);
+  };
+
+  const runAutoSave = async () => {
+    if (isAutoSaveRunning) {
+      scheduleAutoSave();
+      return;
+    }
+
+    const state = _get();
+    const { currentEntityId, currentUpdatedBy } = state;
+    const queuedRows = state.rows.filter(row => row.isDirty && autoSaveQueue.has(row.id));
+
+    if (queuedRows.length === 0) {
+      set({ isAutoSaving: false, autoSaveMessage: null });
+      return;
+    }
+
+    if (!currentEntityId) {
+      autoSaveDelay = AUTO_SAVE_BACKOFF_MS;
+      set(currentState => ({
+        rows: currentState.rows.map(row =>
+          autoSaveQueue.has(row.id)
+            ? {
+                ...row,
+                autoSaveState: 'error',
+                autoSaveError: 'Select an entity before auto-saving distributions.',
+              }
+            : row,
+        ),
+        isAutoSaving: false,
+        autoSaveMessage: 'Auto-save paused until an entity is selected.',
+      }));
+      scheduleAutoSave();
+      return;
+    }
+
+    isAutoSaveRunning = true;
+    autoSaveTimer = null;
+    set(currentState => ({
+      rows: currentState.rows.map(row =>
+        autoSaveQueue.has(row.id) && row.isDirty
+          ? { ...row, autoSaveState: 'saving', autoSaveError: null }
+          : row,
+      ),
+      isAutoSaving: true,
+      autoSaveMessage: null,
+    }));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/entityDistributions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+      const payloadRows = buildDistributionPayloadRows(queuedRows, currentUpdatedBy ?? null);
+      const savedItems = await postDistributionRows(currentEntityId, payloadRows);
+      queuedRows.forEach(row => autoSaveQueue.delete(row.id));
+      autoSaveDelay = AUTO_SAVE_DEBOUNCE_MS;
+
+      set(currentState => ({
+        rows: applySaveResults(currentState.rows, payloadRows, savedItems, 'saved'),
+        isAutoSaving: false,
+        autoSaveMessage:
+          savedItems.length > 0
+            ? `Auto-saved ${savedItems.length} row${savedItems.length === 1 ? '' : 's'}.`
+            : 'No distribution rows were changed.',
+      }));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to auto-save distribution rows.';
+      autoSaveDelay = AUTO_SAVE_BACKOFF_MS;
+      set(currentState => ({
+        rows: currentState.rows.map(row =>
+          autoSaveQueue.has(row.id) && row.isDirty
+            ? { ...row, autoSaveState: 'error', autoSaveError: message }
+            : row,
+        ),
+        isAutoSaving: false,
+        autoSaveMessage: message,
+      }));
+    } finally {
+      isAutoSaveRunning = false;
+      if (autoSaveQueue.size > 0) {
+        scheduleAutoSave();
+      }
+    }
+  };
+
+  function scheduleAutoSave(immediate = false) {
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+    }
+    autoSaveTimer = setTimeout(() => {
+      void runAutoSave();
+    }, immediate ? 0 : autoSaveDelay);
+  }
+
+  return {
+    rows: [],
+    operationsCatalog: [],
+    searchTerm: '',
+    statusFilters: [],
+    currentEntityId: null,
+    currentUpdatedBy: null,
+    isAutoSaving: false,
+    autoSaveMessage: null,
+    isSavingDistributions: false,
+    saveError: null,
+    saveSuccess: null,
+    lastSavedCount: 0,
+    syncRowsFromStandardTargets: summaries =>
+      set(state => {
+        const existingByTarget = new Map(
+          state.rows.map(row => [row.mappingRowId, row] as const),
+        );
+        const nextRows: DistributionRow[] = summaries.map(summary => {
+          const existing = existingByTarget.get(summary.id);
+          const nextOperations = existing
+            ? existing.operations.map(operation => ({ ...operation }))
+            : [];
+          const resolvedType = existing?.type ?? 'direct';
+          return applyDistributionStatus({
+            id: existing?.id ?? summary.id,
+            mappingRowId: summary.id,
+            accountId: summary.value,
+            description: summary.label,
+            activity: summary.mappedAmount,
+            type: resolvedType,
+            operations: clampOperationsForType(resolvedType, nextOperations),
+            presetId: existing?.presetId ?? null,
+            notes: existing?.notes,
+            status: existing?.status ?? 'Undistributed',
+            isDirty: existing?.isDirty ?? false,
+            autoSaveState: existing?.autoSaveState ?? 'idle',
+            autoSaveError: existing?.autoSaveError ?? null,
+          });
+        });
+        return { rows: nextRows };
+      }),
+    setSearchTerm: term => set({ searchTerm: term }),
+    toggleStatusFilter: status =>
+      set(state => ({
+        statusFilters: state.statusFilters.includes(status)
+          ? state.statusFilters.filter(value => value !== status)
+          : [...state.statusFilters, status],
+      })),
+    clearStatusFilters: () => set({ statusFilters: [] }),
+    updateRow: (id, updates) => {
+      set(state => ({
+        rows: state.rows.map(row => {
+          if (row.id !== id) {
+            return row;
+          }
+          const nextRow: DistributionRow = {
+            ...row,
+            ...updates,
+            operations: updates.operations ?? row.operations,
+            type: updates.type ?? row.type,
+            isDirty: true,
+            autoSaveState: 'queued',
+            autoSaveError: null,
+          };
+          return applyDistributionStatus(nextRow);
+        }),
+      }));
+      queueRowsForAutoSave([id]);
+    },
+    updateRowType: (id, type) => {
+      set(state => ({
+        rows: state.rows.map(row => {
+          if (row.id !== id) {
+            return row;
+          }
+          const nextOperations = clampOperationsForType(type, row.operations);
+          return applyDistributionStatus({
+            ...row,
+            type,
+            operations: nextOperations,
+            isDirty: true,
+            autoSaveState: 'queued',
+            autoSaveError: null,
+          });
+        }),
+      }));
+      queueRowsForAutoSave([id]);
+    },
+    updateRowOperations: (id, operations) => {
+      set(state => ({
+        rows: state.rows.map(row =>
+          row.id === id
+            ? applyDistributionStatus({
+                ...row,
+                operations,
+                isDirty: true,
+                autoSaveState: 'queued',
+                autoSaveError: null,
+              })
+            : row,
+        ),
+      }));
+      queueRowsForAutoSave([id]);
+    },
+    updateRowPreset: (id, presetId) => {
+      set(state => ({
+        rows: state.rows.map(row =>
+          row.id === id
+            ? {
+                ...row,
+                presetId: presetId ?? undefined,
+                isDirty: true,
+                autoSaveState: 'queued',
+                autoSaveError: null,
+              }
+            : row,
+        ),
+      }));
+      queueRowsForAutoSave([id]);
+    },
+    updateRowNotes: (id, notes) => {
+      set(state => ({
+        rows: state.rows.map(row =>
+          row.id === id
+            ? {
+                ...row,
+                notes: notes || undefined,
+                isDirty: true,
+                autoSaveState: 'queued',
+                autoSaveError: null,
+              }
+            : row,
+        ),
+      }));
+      queueRowsForAutoSave([id]);
+    },
+    setOperationsCatalog: operations =>
+      set({
+        operationsCatalog: operations.map(operation => ({
+          ...operation,
+          code: operation.code || operation.id,
+          id: operation.id || operation.code,
+        })),
+      }),
+    applyBatchDistribution: (ids, updates) => {
+      if (!ids.length) {
+        return;
+      }
+      set(state => {
+        const idSet = new Set(ids);
+        return {
+          rows: state.rows.map(row => {
+            if (!idSet.has(row.id)) {
+              return row;
+            }
+            let nextRow: DistributionRow = { ...row };
+            if (updates.type && updates.type !== nextRow.type) {
+              nextRow = {
+                ...nextRow,
+                type: updates.type,
+                operations: clampOperationsForType(updates.type, nextRow.operations),
+              };
+            }
+            if (Object.prototype.hasOwnProperty.call(updates, 'operation')) {
+              const operationShare = updates.operation;
+              if (operationShare) {
+                nextRow = {
+                  ...nextRow,
+                  operations: clampOperationsForType(nextRow.type, [operationShare]),
+                };
+              } else {
+                nextRow = { ...nextRow, operations: [] };
+              }
+            }
+            return applyDistributionStatus({
+              ...nextRow,
+              isDirty: true,
+              autoSaveState: 'queued',
+              autoSaveError: null,
+            });
+          }),
+        };
       });
-      if (!response.ok) {
-        const message = await response
-          .text()
-          .catch(() => 'Unable to save distribution rows.');
+      queueRowsForAutoSave(ids);
+    },
+    applyPresetToRows: (ids, presetId) => {
+      if (!ids.length) {
+        return;
+      }
+      set(state => {
+        const idSet = new Set(ids);
+        return {
+          rows: state.rows.map(row =>
+            idSet.has(row.id)
+              ? {
+                  ...row,
+                  presetId: presetId ?? null,
+                  isDirty: true,
+                  autoSaveState: 'queued',
+                  autoSaveError: null,
+                }
+              : row,
+          ),
+        };
+      });
+      queueRowsForAutoSave(ids);
+    },
+    queueAutoSave: (ids, options) => queueRowsForAutoSave(ids, options),
+    flushAutoSaveQueue: async options => {
+      if (options?.immediate) {
+        autoSaveDelay = 0;
+      }
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      if (autoSaveQueue.size === 0) {
+        autoSaveDelay = AUTO_SAVE_DEBOUNCE_MS;
+        return;
+      }
+      await runAutoSave();
+      autoSaveDelay = AUTO_SAVE_DEBOUNCE_MS;
+    },
+    setSaveContext: (entityId, updatedBy) => {
+      set({ currentEntityId: entityId, currentUpdatedBy: updatedBy });
+      if (entityId && autoSaveQueue.size > 0) {
+        scheduleAutoSave(true);
+      }
+    },
+    saveDistributions: async (entityId, updatedBy) => {
+      const state = _get();
+
+      const resolvedEntityId = entityId ?? state.currentEntityId;
+      const resolvedUpdatedBy = updatedBy ?? state.currentUpdatedBy;
+
+      if (!resolvedEntityId) {
+        set({
+          saveError: 'Select an entity before saving the distributions.',
+          saveSuccess: null,
+          lastSavedCount: 0,
+        });
+        return 0;
+      }
+
+      if (state.rows.length === 0) {
+        set({
+          saveError: 'No distribution rows are available to save.',
+          saveSuccess: null,
+          lastSavedCount: 0,
+        });
+        return 0;
+      }
+
+      set({
+        isSavingDistributions: true,
+        saveError: null,
+        saveSuccess: null,
+      });
+
+      const dirtyRows = state.rows.filter(row => row.isDirty);
+
+      if (dirtyRows.length === 0) {
+        set({
+          isSavingDistributions: false,
+          saveError: null,
+          saveSuccess: 'No distribution rows have been modified.',
+          lastSavedCount: 0,
+        });
+        return 0;
+      }
+
+      const payloadRows = buildDistributionPayloadRows(dirtyRows, resolvedUpdatedBy ?? null);
+
+      try {
+        const savedItems = await postDistributionRows(resolvedEntityId, payloadRows);
+        dirtyRows.forEach(row => autoSaveQueue.delete(row.id));
+        set(currentState => ({
+          rows: applySaveResults(currentState.rows, payloadRows, savedItems, 'saved'),
+          isSavingDistributions: false,
+          saveError: null,
+          saveSuccess:
+            savedItems.length > 0
+              ? `Saved ${savedItems.length} distribution row${savedItems.length === 1 ? '' : 's'}.`
+              : 'No distribution rows were changed.',
+          lastSavedCount: savedItems.length,
+        }));
+
+        return savedItems.length;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Failed to save distribution rows.';
         set({
           isSavingDistributions: false,
           saveError: message,
@@ -382,54 +653,6 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
         });
         return 0;
       }
-
-      const body = (await response.json()) as {
-        items?: DistributionSaveResponseItem[];
-      };
-      const savedItems = body.items ?? [];
-      const lookup = new Map<string, DistributionSaveResponseItem>();
-      savedItems.forEach(item => {
-        lookup.set(item.scoaAccountId, item);
-      });
-
-      const savedAccountIds = new Set(payloadRows.map(row => row.scoaAccountId));
-
-      set(currentState => ({
-        rows: currentState.rows.map(row => {
-          if (!savedAccountIds.has(row.accountId)) {
-            return row;
-          }
-          const match = lookup.get(row.accountId);
-          if (!match) {
-            return { ...row, isDirty: false };
-          }
-          return {
-            ...row,
-            presetId: match.presetGuid,
-            status: match.distributionStatus,
-            isDirty: false,
-          };
-        }),
-        isSavingDistributions: false,
-        saveError: null,
-        saveSuccess:
-          savedItems.length > 0
-            ? `Saved ${savedItems.length} distribution row${savedItems.length === 1 ? '' : 's'}.`
-            : 'No distribution rows were changed.',
-        lastSavedCount: savedItems.length,
-      }));
-
-      return savedItems.length;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to save distribution rows.';
-      set({
-        isSavingDistributions: false,
-        saveError: message,
-        saveSuccess: null,
-        lastSavedCount: 0,
-      });
-      return 0;
-    }
-  },
-}));
+    },
+  };
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import type {
   DistributionOperationShare,
@@ -6,6 +6,7 @@ import type {
   MappingPresetLibraryEntry,
 } from '../../types';
 import type { DistributionOperationCatalogItem } from '../../store/distributionStore';
+import { useDistributionStore } from '../../store/distributionStore';
 
 export type DistributionOperationDraft = DistributionOperationShare & {
   draftId: string;
@@ -79,6 +80,10 @@ export default function DistributionSplitRow({
   const [percentageInputs, setPercentageInputs] = useState<
     Record<string, string>
   >(() => buildPercentageState(operationsDraft));
+  const queueAutoSave = useDistributionStore(state => state.queueAutoSave);
+  const triggerImmediateAutoSave = useCallback(() => {
+    queueAutoSave([row.id], { immediate: true });
+  }, [queueAutoSave, row.id]);
 
   useEffect(() => {
     setPercentageInputs(prev => {
@@ -216,6 +221,7 @@ export default function DistributionSplitRow({
       ...prev,
       [draftId]: formatPercentageLabel(normalizedValue),
     }));
+    triggerImmediateAutoSave();
   };
 
   const handleNotesChange = (draftId: string, value: string) => {
@@ -352,6 +358,7 @@ export default function DistributionSplitRow({
                       onChange={event =>
                         handleNotesChange(operation.draftId, event.target.value)
                       }
+                      onBlur={triggerImmediateAutoSave}
                       placeholder="Optional notes"
                       className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                     />
