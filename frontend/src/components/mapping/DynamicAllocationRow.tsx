@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { AlertTriangle, Calculator, Layers, XCircle } from 'lucide-react';
-import type { GLAccountMappingRow } from '../../types';
+import type { GLAccountMappingRow, MappingPresetLibraryEntry } from '../../types';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   allocateDynamic,
@@ -14,6 +14,7 @@ interface DynamicAllocationRowProps {
   colSpan: number;
   panelId: string;
   onOpenBuilder: () => void;
+  presetOptions: MappingPresetLibraryEntry[];
 }
 
 const pluralize = (value: number, noun: string) =>
@@ -47,6 +48,7 @@ const DynamicAllocationRow = ({
   colSpan,
   panelId,
   onOpenBuilder,
+  presetOptions,
 }: DynamicAllocationRowProps) => {
   const headingId = `${panelId}-heading`;
 
@@ -73,6 +75,17 @@ const DynamicAllocationRow = ({
     getActivePresetForSource: state.getActivePresetForSource,
     setActivePresetForSource: state.setActivePresetForSource,
   }));
+
+  useEffect(() => {
+    if (!account.presetId) {
+      return;
+    }
+    const activePreset = getActivePresetForSource(account.id);
+    if (activePreset?.id === account.presetId) {
+      return;
+    }
+    setActivePresetForSource(account.id, account.presetId);
+  }, [account.id, account.presetId, getActivePresetForSource, setActivePresetForSource]);
 
   const allocation = useMemo(
     () => allocations.find(item => item.sourceAccount.id === account.id),
@@ -290,7 +303,7 @@ const DynamicAllocationRow = ({
                   className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   <option value="">No preset selected</option>
-                  {presets.map(preset => (
+                  {presetOptions.map(preset => (
                     <option key={preset.id} value={preset.id}>
                       {preset.name}
                     </option>

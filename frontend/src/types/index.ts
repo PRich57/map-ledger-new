@@ -487,10 +487,29 @@ export interface MappingSplitDefinition {
   id: string;
   targetId: string;
   targetName: string;
-  allocationType: 'percentage' | 'amount';
+  allocationType: 'percentage' | 'amount' | 'dynamic';
   allocationValue: number;
   notes?: string;
   isExclusion?: boolean;
+  basisDatapoint?: string | null;
+  isCalculated?: boolean | null;
+  recordId?: number | null;
+}
+
+export interface MappingPresetDetail {
+  targetDatapoint: string;
+  basisDatapoint?: string | null;
+  isCalculated?: boolean | null;
+  specifiedPct?: number | null;
+}
+
+export interface MappingPresetLibraryEntry {
+  id: string;
+  entityId: string;
+  name: string;
+  type: MappingType;
+  description?: string | null;
+  presetDetails: MappingPresetDetail[];
 }
 
 export type DistributionType = 'direct' | 'percentage' | 'dynamic';
@@ -518,6 +537,29 @@ export interface DistributionRow {
   status: DistributionStatus;
 }
 
+export interface DistributionSaveOperation {
+  operationCd: string;
+  allocation?: number | null;
+  notes?: string | null;
+}
+
+export interface DistributionSaveRowInput {
+  scoaAccountId: string;
+  distributionType: DistributionType;
+  presetGuid?: string | null;
+  presetDescription?: string | null;
+  distributionStatus?: DistributionStatus;
+  operations?: DistributionSaveOperation[];
+  updatedBy?: string | null;
+}
+
+export interface DistributionSaveResponseItem {
+  scoaAccountId: string;
+  distributionType: DistributionType;
+  distributionStatus: DistributionStatus;
+  presetGuid: string;
+}
+
 export interface GLAccountMappingRow {
   id: string;
   entityId: string | null;
@@ -542,6 +584,32 @@ export interface GLAccountMappingRow {
   dynamicExclusionAmount?: number;
   glMonth?: string; // GL month in YYYY-MM format
   requiresEntityAssignment?: boolean;
+}
+
+export interface MappingSaveInput {
+  entityId: string;
+  entityAccountId: string;
+  accountName?: string | null;
+  polarity?: MappingPolarity | null;
+  mappingType?: MappingType | null;
+  mappingStatus?: MappingStatus | null;
+  presetId?: string | null;
+  exclusionPct?: number | null;
+  netChange?: number | null;
+  glMonth?: string | null;
+  updatedBy?: string | null;
+  splitDefinitions?: {
+    targetId?: string | null;
+    allocationType?: 'percentage' | 'amount' | 'dynamic';
+    allocationValue?: number | null;
+    basisDatapoint?: string | null;
+    isCalculated?: boolean | null;
+    isExclusion?: boolean | null;
+  }[];
+}
+
+export interface MappingSaveRequest {
+  items: MappingSaveInput[];
 }
 
 export interface GLUpload {

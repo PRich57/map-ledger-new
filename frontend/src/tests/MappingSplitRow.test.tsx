@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from './testUtils';
 import MappingSplitRow from '../components/mapping/MappingSplitRow';
-import type { GLAccountMappingRow, TargetScoaOption } from '../types';
+import type {
+  GLAccountMappingRow,
+  MappingPresetLibraryEntry,
+  TargetScoaOption,
+} from '../types';
 
 const targetOptions: TargetScoaOption[] = [
   { id: 'target-a', value: 'target-a', label: 'Target A' },
@@ -42,12 +46,26 @@ const buildAccount = (): GLAccountMappingRow => ({
 
 const renderSplitRow = () => {
   const onUpdateSplit = jest.fn();
+  const onApplyPreset = jest.fn();
+  const presetOptions: MappingPresetLibraryEntry[] = [
+    {
+      id: 'preset-1',
+      entityId: 'entity-1',
+      name: 'Default percentage preset',
+      type: 'percentage',
+      description: null,
+      presetDetails: [],
+    },
+  ];
   render(
     <table>
       <tbody>
         <MappingSplitRow
           account={buildAccount()}
           targetOptions={targetOptions}
+          presetOptions={presetOptions}
+          selectedPresetId={null}
+          onApplyPreset={onApplyPreset}
           colSpan={1}
           panelId="panel-id"
           onAddSplit={jest.fn()}

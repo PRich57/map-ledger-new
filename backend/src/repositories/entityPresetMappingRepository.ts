@@ -6,11 +6,13 @@ export interface EntityPresetMappingInput {
   targetDatapoint: string;
   appliedPct?: number | null;
   updatedBy?: string | null;
+  recordId?: number | null;
 }
 
 export interface EntityPresetMappingRow extends EntityPresetMappingInput {
   insertedDttm?: string | null;
   updatedDttm?: string | null;
+  recordId?: number | null;
 }
 
 const TABLE_NAME = 'ml.ENTITY_PRESET_MAPPING';
@@ -48,6 +50,7 @@ const mapRow = (row: {
   inserted_dttm?: Date | string | null;
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
+  record_id?: number | null;
 }): EntityPresetMappingRow => ({
   presetGuid: row.preset_guid,
   basisDatapoint: row.basis_datapoint,
@@ -65,6 +68,7 @@ const mapRow = (row: {
       ? row.updated_dttm.toISOString()
       : row.updated_dttm ?? null,
   updatedBy: row.updated_by ?? null,
+  recordId: row.record_id ?? null,
 });
 
 export const listEntityPresetMappings = async (
@@ -87,6 +91,7 @@ export const listEntityPresetMappings = async (
     basis_datapoint: string | null;
     target_datapoint: string;
     applied_pct?: number | null;
+    record_id?: number | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
@@ -96,6 +101,7 @@ export const listEntityPresetMappings = async (
       BASIS_DATAPOINT as basis_datapoint,
       TARGET_DATAPOINT as target_datapoint,
       APPLIED_PCT as applied_pct,
+      RECORD_ID as record_id,
       INSERTED_DTTM as inserted_dttm,
       UPDATED_DTTM as updated_dttm,
       UPDATED_BY as updated_by
@@ -122,9 +128,7 @@ export const createEntityPresetMappings = async (
       params[`basisDatapoint${index}`] = normalizeText(input.basisDatapoint);
       params[`targetDatapoint${index}`] = normalizeText(input.targetDatapoint);
       params[`appliedPct${index}`] = normalizeAppliedPct(input.appliedPct);
-      params[`updatedBy${index}`] = normalizeText(input.updatedBy);
-
-      return `(@presetGuid${index}, @basisDatapoint${index}, @targetDatapoint${index}, @appliedPct${index}, @updatedBy${index})`;
+      return `(@presetGuid${index}, @basisDatapoint${index}, @targetDatapoint${index}, @appliedPct${index})`;
     })
     .join(', ');
 
@@ -133,6 +137,7 @@ export const createEntityPresetMappings = async (
     basis_datapoint: string | null;
     target_datapoint: string;
     applied_pct?: number | null;
+    record_id?: number | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
@@ -141,14 +146,14 @@ export const createEntityPresetMappings = async (
       PRESET_GUID,
       BASIS_DATAPOINT,
       TARGET_DATAPOINT,
-      APPLIED_PCT,
-      UPDATED_BY
+      APPLIED_PCT
     )
     OUTPUT
       INSERTED.PRESET_GUID as preset_guid,
       INSERTED.BASIS_DATAPOINT as basis_datapoint,
       INSERTED.TARGET_DATAPOINT as target_datapoint,
       INSERTED.APPLIED_PCT as applied_pct,
+      INSERTED.RECORD_ID as record_id,
       INSERTED.INSERTED_DTTM as inserted_dttm,
       INSERTED.UPDATED_DTTM as updated_dttm,
       INSERTED.UPDATED_BY as updated_by
@@ -174,3 +179,56 @@ export const deleteEntityPresetMappings = async (
 
   return result.rowsAffected?.[0] ?? 0;
 };
+
+export const updateEntityPresetMappingRecord = async (
+  recordId: number,
+  updates: Partial<Omit<EntityPresetMappingInput, 'presetGuid'>> & {
+    updatedBy?: string | null;
+  },
+): Promise<void> => {
+  if (!recordId || recordId <= 0) {
+    return;
+  }
+
+  await runQuery(
+    `UPDATE ${TABLE_NAME}
+    SET
+      BASIS_DATAPOINT = ISNULL(@basisDatapoint, BASIS_DATAPOINT),
+      TARGET_DATAPOINT = ISNULL(@targetDatapoint, TARGET_DATAPOINT),
+      APPLIED_PCT = ISNULL(@appliedPct, APPLIED_PCT),
+      UPDATED_BY = @updatedBy,
+      UPDATED_DTTM = SYSUTCDATETIME()
+    WHERE RECORD_ID = @recordId`,
+    {
+      recordId,
+      basisDatapoint: normalizeText(updates.basisDatapoint ?? undefined),
+      targetDatapoint: normalizeText(updates.targetDatapoint ?? undefined),
+      appliedPct: normalizeAppliedPct(updates.appliedPct),
+      updatedBy: normalizeText(updates.updatedBy),
+    }
+  );
+};
+
+export const deleteEntityPresetMappingRecords = async (
+  recordIds: number[],
+): Promise<number> => {
+  const normalizedIds = recordIds.filter((id) => Number.isFinite(id) && id > 0);
+  if (!normalizedIds.length) {
+    return 0;
+  }
+
+  const placeholders = normalizedIds.map((_, index) => `@id${index}`).join(', ');
+  const params: Record<string, number> = {};
+  normalizedIds.forEach((id, index) => {
+    params[`id${index}`] = id;
+  });
+
+  const result = await runQuery(
+    `DELETE FROM ${TABLE_NAME} WHERE RECORD_ID IN (${placeholders})`,
+    params,
+  );
+
+  return result.rowsAffected?.[0] ?? 0;
+};
+
+export default listEntityPresetMappings;

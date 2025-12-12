@@ -20,10 +20,6 @@ jest.mock('../store/authStore', () => ({
     selector({ user: { email: 'tester@example.com', id: 'user-1' } }),
 }));
 
-jest.mock('../utils/getClientTemplateMapping', () => ({
-  getClientTemplateMapping: jest.fn(async () => null),
-}));
-
 jest.mock('../utils/parseTrialBalanceWorkbook', () => ({
   parseTrialBalanceWorkbook: jest.fn(async () => []),
 }));

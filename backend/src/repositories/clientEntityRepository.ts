@@ -146,9 +146,7 @@ export const createClientEntity = async (
       CLIENT_ID,
       ENTITY_NAME,
       ENTITY_DISPLAY_NAME,
-      ENTITY_STATUS,
-      INSERTED_BY,
-      UPDATED_BY
+      ENTITY_STATUS
     )
     OUTPUT
       inserted.ENTITY_ID as entity_id,
@@ -161,13 +159,12 @@ export const createClientEntity = async (
       inserted.UPDATED_BY as updated_by,
       inserted.DELETED_DTTM as deleted_dttm,
       inserted.DELETED_BY as deleted_by
-    VALUES (@clientId, @entityName, @entityDisplayName, @entityStatus, @updatedBy, @updatedBy);`,
+    VALUES (@clientId, @entityName, @entityDisplayName, @entityStatus);`,
     {
       clientId,
       entityName,
       entityDisplayName,
       entityStatus,
-      updatedBy,
     },
   );
 

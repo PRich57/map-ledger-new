@@ -11,6 +11,7 @@ jest.mock('../src/repositories/clientFileEntityRepository', () => ({
 }));
 jest.mock('../src/repositories/clientEntityRepository', () => ({
   listClientEntities: jest.fn(),
+  createClientEntity: jest.fn(),
 }));
 jest.mock('../src/repositories/clientFileRepository', () => ({
   getClientFileByGuid: jest.fn(),
@@ -23,7 +24,10 @@ import {
   insertClientFileEntity,
   listClientFileEntities,
 } from '../src/repositories/clientFileEntityRepository';
-import { listClientEntities } from '../src/repositories/clientEntityRepository';
+import {
+  listClientEntities,
+  createClientEntity,
+} from '../src/repositories/clientEntityRepository';
 import { getClientFileByGuid } from '../src/repositories/clientFileRepository';
 
 const basePayload = {
@@ -54,6 +58,8 @@ describe('fileRecords.ingestFileRecordsHandler', () => {
     insertClientFileSheet as jest.MockedFunction<typeof insertClientFileSheet>;
   const mockInsertClientFileEntity =
     insertClientFileEntity as jest.MockedFunction<typeof insertClientFileEntity>;
+  const mockListClientEntities = listClientEntities as jest.MockedFunction<typeof listClientEntities>;
+  const mockCreateClientEntity = createClientEntity as jest.MockedFunction<typeof createClientEntity>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -63,6 +69,8 @@ describe('fileRecords.ingestFileRecordsHandler', () => {
       sheetName: basePayload.sheets[0].sheetName,
     } as any);
     mockInsertClientFileEntity.mockResolvedValue({} as any);
+    mockListClientEntities.mockResolvedValue([] as any);
+    mockCreateClientEntity.mockResolvedValue(null as any);
   });
 
   it('ingests records when a valid GUID is provided', async () => {
@@ -99,6 +107,82 @@ describe('fileRecords.ingestFileRecordsHandler', () => {
     expect(mockInsertFileRecords).not.toHaveBeenCalled();
     expect(mockInsertClientFileSheet).not.toHaveBeenCalled();
     expect(mockInsertClientFileEntity).not.toHaveBeenCalled();
+  });
+
+  it('creates missing client entities and uses their IDs for file rows', async () => {
+    const payload = {
+      ...basePayload,
+      clientId: 'cli-2',
+      headerMap: {
+        ...basePayload.headerMap,
+        Entity: 'Entity',
+      },
+      sheets: [
+        {
+          sheetName: 'Sheet1',
+          rows: [
+            {
+              'Account ID': '100',
+              'Account Name': 'Cash',
+              Amount: 50,
+              Entity: 'Test Region',
+            },
+          ],
+        },
+      ],
+      entities: [
+        {
+          id: 'test-region',
+          name: 'Test Region',
+          aliases: [],
+          isSelected: true,
+        },
+      ],
+    };
+
+    const createdEntity = {
+      entityId: '999',
+      clientId: payload.clientId,
+      entityName: 'Test Region',
+      entityDisplayName: 'Test Region',
+      entityStatus: 'ACTIVE',
+      aliases: [],
+    };
+
+    mockCreateClientEntity.mockResolvedValue(createdEntity as any);
+    mockInsertFileRecords.mockResolvedValue([
+      {
+        recordId: 1,
+        fileUploadGuid: payload.fileUploadGuid,
+        accountId: '100',
+        accountName: 'Cash',
+        activityAmount: 50,
+        entityId: '999',
+      },
+    ]);
+
+    const request = { json: jest.fn().mockResolvedValue(payload) } as any;
+    const context = { warn: jest.fn(), info: jest.fn(), error: jest.fn() } as any;
+
+    const response = await ingestFileRecordsHandler(request, context);
+
+    expect(mockCreateClientEntity).toHaveBeenCalledWith({
+      clientId: payload.clientId,
+      entityName: 'Test Region',
+      entityDisplayName: 'Test Region',
+    });
+    expect(mockInsertClientFileEntity).toHaveBeenCalledWith({
+      fileUploadGuid: payload.fileUploadGuid,
+      entityId: 999,
+      isSelected: false,
+    });
+    expect(mockInsertFileRecords).toHaveBeenCalledWith(
+      payload.fileUploadGuid,
+      expect.arrayContaining([
+        expect.objectContaining({ entityId: '999' }),
+      ]),
+    );
+    expect(response.status).toBe(201);
   });
 });
 

@@ -17,7 +17,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import MappingToolbar from './MappingToolbar';
-import { selectPresetSummaries, useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import {
   getAccountExcludedAmount,
   selectFilteredAccounts,
@@ -55,7 +55,6 @@ type SortKey =
   | 'mappingType'
   | 'targetScoa'
   | 'polarity'
-  | 'presetId'
   | 'aiConfidence';
 
 type SortDirection = 'asc' | 'desc';
@@ -112,7 +111,6 @@ const COLUMN_DEFINITIONS: { key: SortKey; label: string }[] = [
   { key: 'mappingType', label: 'Mapping Type' },
   { key: 'targetScoa', label: 'Target SCoA' },
   { key: 'polarity', label: 'Polarity' },
-  { key: 'presetId', label: 'Preset' },
   { key: 'aiConfidence', label: 'Confidence' },
   { key: 'status', label: 'Status' },
 ];
@@ -152,7 +150,6 @@ export default function MappingTable() {
       results: state.results,
     })
   );
-  const presetOptions = useRatioAllocationStore(selectPresetSummaries);
   const datapoints = useTemplateStore((state) => state.datapoints);
   const coaOptions = useMemo<TargetScoaOption[]>(
     () => buildTargetScoaOptions(datapoints),
@@ -163,11 +160,22 @@ export default function MappingTable() {
   const activePeriod = useMappingStore((state) => state.activePeriod);
   const searchTerm = useMappingStore(selectSearchTerm);
   const activeStatuses = useMappingStore(selectActiveStatuses);
+  const dirtyMappingIds = useMappingStore((state) => state.dirtyMappingIds);
+  const rowSaveStatuses = useMappingStore((state) => state.rowSaveStatuses);
   const updateTarget = useMappingStore((state) => state.updateTarget);
   const updateMappingType = useMappingStore((state) => state.updateMappingType);
   const updatePolarity = useMappingStore((state) => state.updatePolarity);
   const applyPresetToAccounts = useMappingStore(
     (state) => state.applyPresetToAccounts
+  );
+  const presetLibrary = useMappingStore(state => state.presetLibrary);
+  const percentagePresetOptions = useMemo(
+    () => presetLibrary.filter(entry => entry.type === 'percentage'),
+    [presetLibrary],
+  );
+  const dynamicPresetOptions = useMemo(
+    () => presetLibrary.filter(entry => entry.type === 'dynamic'),
+    [presetLibrary],
   );
   const addSplitDefinition = useMappingStore(
     (state) => state.addSplitDefinition
@@ -477,6 +485,7 @@ export default function MappingTable() {
               }
 
               const isSelected = selectedIds.has(account.id);
+              const isDirty = dirtyMappingIds.has(account.id);
               const targetScoa =
                 account.manualCOAId ?? account.suggestedCOAId ?? '';
               const requiresSplit =
@@ -512,6 +521,11 @@ export default function MappingTable() {
               const hasDynamicExclusionOverride =
                 account.mappingType === 'dynamic' && Boolean(dynamicExclusion);
 
+              const rowSaveStatus = rowSaveStatuses[account.id];
+              const isRowSaving = rowSaveStatus?.status === 'saving';
+              const rowSaveError =
+                rowSaveStatus?.status === 'error' ? rowSaveStatus.message : undefined;
+
               const rowKey = `${account.id}-${account.entityId}-${account.glMonth ?? 'no-period'}-${index}`;
 
               return (
@@ -531,6 +545,7 @@ export default function MappingTable() {
                     className={
                       isSelected ? 'bg-blue-50 dark:bg-slate-800/50' : undefined
                     }
+                    data-dirty={isDirty ? 'true' : undefined}
                   >
                     <td className="px-3 py-4">
                       <input
@@ -675,30 +690,6 @@ export default function MappingTable() {
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 py-4">
-                      <label
-                        className="sr-only"
-                        htmlFor={`preset-${account.id}`}
-                      >
-                        Select preset for {account.accountName}
-                      </label>
-                      <select
-                        id={`preset-${account.id}`}
-                        value={account.presetId ?? ''}
-                        onChange={(event) => {
-                          const nextValue = event.target.value || null;
-                          applyPresetToAccounts([account.id], nextValue);
-                        }}
-                        className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      >
-                        <option value="">No preset</option>
-                        {presetOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
                     <td
                       className={`px-3 py-4 text-slate-700 dark:text-slate-200 ${COLUMN_WIDTH_CLASSES.aiConfidence ?? ''}`}
                     >
@@ -721,14 +712,33 @@ export default function MappingTable() {
                     </td>
                     <td className="px-3 py-4">
                       <div className="flex flex-col gap-2">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${STATUS_STYLES[displayStatus]}`}
-                          role="status"
-                          aria-label={`Status ${statusLabel}`}
-                        >
-                          <StatusIcon className="h-3 w-3" aria-hidden="true" />
-                          {statusLabel}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${STATUS_STYLES[displayStatus]}`}
+                            role="status"
+                            aria-label={`Status ${statusLabel}`}
+                          >
+                            <StatusIcon className="h-3 w-3" aria-hidden="true" />
+                            {statusLabel}
+                          </span>
+                          {isRowSaving && (
+                            <span
+                              className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                              aria-live="polite"
+                            >
+                              <span
+                                className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent"
+                                aria-hidden="true"
+                              />
+                              Saving changes
+                            </span>
+                          )}
+                        </div>
+                        {rowSaveError && (
+                          <span className="text-xs text-rose-600 dark:text-rose-300">
+                            Save failed{rowSaveError ? `: ${rowSaveError}` : ''}
+                          </span>
+                        )}
                         {account.mappingType === 'dynamic' ? (
                           <>
                             {hasDynamicIssue && (
@@ -757,30 +767,36 @@ export default function MappingTable() {
                       </div>
                     </td>
                   </tr>
-                  {requiresSplit && isExpanded && (
-                    account.mappingType === 'dynamic' ? (
-                      <DynamicAllocationRow
-                        account={account}
-                        colSpan={COLUMN_DEFINITIONS.length + 2}
-                        panelId={`split-panel-${account.id}`}
-                        onOpenBuilder={() => setActiveDynamicAccountId(account.id)}
-                      />
-                    ) : (
-                      <MappingSplitRow
-                        account={account}
-                        targetOptions={coaOptions}
-                        colSpan={COLUMN_DEFINITIONS.length + 2}
-                        panelId={`split-panel-${account.id}`}
-                        onAddSplit={() => addSplitDefinition(account.id)}
-                        onUpdateSplit={(splitId, updates) =>
-                          updateSplitDefinition(account.id, splitId, updates)
-                        }
-                        onRemoveSplit={(splitId) =>
-                          removeSplitDefinition(account.id, splitId)
-                        }
-                      />
-                    )
-                  )}
+                      {requiresSplit && isExpanded && (
+                        account.mappingType === 'dynamic' ? (
+                          <DynamicAllocationRow
+                            account={account}
+                            colSpan={COLUMN_DEFINITIONS.length + 2}
+                            panelId={`split-panel-${account.id}`}
+                            onOpenBuilder={() => setActiveDynamicAccountId(account.id)}
+                            presetOptions={dynamicPresetOptions}
+                          />
+                        ) : (
+                        <MappingSplitRow
+                          account={account}
+                          targetOptions={coaOptions}
+                          presetOptions={percentagePresetOptions}
+                          selectedPresetId={account.presetId ?? null}
+                          onApplyPreset={(presetId) =>
+                            applyPresetToAccounts([account.id], presetId)
+                          }
+                          colSpan={COLUMN_DEFINITIONS.length + 2}
+                          panelId={`split-panel-${account.id}`}
+                          onAddSplit={() => addSplitDefinition(account.id)}
+                          onUpdateSplit={(splitId, updates) =>
+                            updateSplitDefinition(account.id, splitId, updates)
+                          }
+                          onRemoveSplit={(splitId) =>
+                            removeSplitDefinition(account.id, splitId)
+                          }
+                        />
+                      )
+                    )}
                 </Fragment>
               );
             })}
@@ -798,11 +814,11 @@ export default function MappingTable() {
         </table>
       </div>
       {activeDynamicAccountId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4">
           <div
             role="dialog"
             aria-modal="true"
-            className="relative w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl dark:bg-slate-900"
+            className="relative w-full max-w-[94rem] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
           >
             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
               <div>
@@ -822,7 +838,7 @@ export default function MappingTable() {
                 <X className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
-            <div className="max-h-[80vh] overflow-y-auto p-6">
+            <div className="max-h-[92vh] overflow-y-auto px-6 py-8">
               <RatioAllocationManager
                 initialSourceAccountId={activeDynamicAccountId}
                 onDone={() => setActiveDynamicAccountId(null)}
@@ -861,8 +877,6 @@ function getSortValue(
       return account.manualCOAId ?? account.suggestedCOAId ?? '';
     case 'polarity':
       return account.polarity;
-    case 'presetId':
-      return account.presetId ?? '';
     case 'aiConfidence':
       return account.aiConfidence ?? 0;
     default:

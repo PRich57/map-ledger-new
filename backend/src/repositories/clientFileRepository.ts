@@ -140,8 +140,15 @@ const normalizeYearMonthString = (value?: string): string | undefined => {
     return undefined;
   }
 
-  const normalized = normalizeMonth(value);
-  return normalized ?? value.trim();
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})(?:-(\d{1,2}))?$/.exec(trimmed);
+  if (!match) {
+    return trimmed;
+  }
+
+  const [, year, month, day] = match;
+  const normalizedDay = (day ?? '01').padStart(2, '0');
+  return `${year}-${month}-${normalizedDay}`;
 };
 
 const buildPeriodLabel = (

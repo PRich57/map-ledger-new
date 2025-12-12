@@ -7,16 +7,14 @@ Helper functions for data transformation.
 | Name | Type | Description |
 |------|------|-------------|
 | allocationCalculationService | function | Computes allocation ratios |
-| getClientTemplateMapping | function | Loads mapping configuration |
 | parseTrialBalanceWorkbook | function | Parses Excel GL data |
 | suggestColumnMatch | function | Finds likely column matches |
 
 ## Runbook Cross-References
-§4 Ingestion
+A4 Ingestion
 
 ## Common Errors
-- **Invalid column headers** — thrown when required fields like `AccountCode` or `Description` are missing. Handled by `parseTrialBalanceWorkbook`.
-- **Fetch failures** — `getClientTemplateMapping` rejects with `Error` when HTTP status is not OK.
+- **Invalid column headers** ƒ?" thrown when required fields like `AccountCode` or `Description` are missing. Handled by `parseTrialBalanceWorkbook`.
 
 ## File Format Assumptions
 - Trial balance uploads are Excel `.xlsx` workbooks with a single header row followed by data rows.
@@ -35,7 +33,7 @@ AccountCode,Description,Debit,Credit
 Headers must include account identifier and description fields; additional
 numeric columns are allowed in any order.
 
-## Multi‑Sheet Parsing
+## Multiƒ?`Sheet Parsing
 `parseTrialBalanceWorkbook.ts` iterates over every worksheet in the uploaded
 workbook. For each sheet it:
 

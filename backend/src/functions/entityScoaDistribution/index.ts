@@ -41,14 +41,16 @@ const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
       continue;
     }
 
+    const presetGuid =
+      parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
+      parseGuid((entry as Record<string, unknown>)?.presetId) ??
+      null;
+
     inputs.push({
       entityId,
       scoaAccountId,
       distributionType,
-      presetId:
-        parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
-        parseGuid((entry as Record<string, unknown>)?.presetId) ??
-        null,
+      presetGuid,
       distributionStatus: normalizeText((entry as Record<string, unknown>)?.distributionStatus),
       updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
     });
@@ -104,7 +106,7 @@ const updateHandler = async (
     const entityId = getFirstStringValue(body?.entityId);
     const scoaAccountId = getFirstStringValue(body?.scoaAccountId);
     const distributionType = getFirstStringValue(body?.distributionType);
-    const presetId =
+    const presetGuid =
       parseGuid(body?.presetGuid) ?? parseGuid(body?.presetId);
 
     if (!entityId || !scoaAccountId || !distributionType) {
@@ -112,7 +114,7 @@ const updateHandler = async (
     }
 
     const updated = await updateEntityScoaDistribution(entityId, scoaAccountId, distributionType, {
-      presetId: presetId ?? undefined,
+      presetGuid: presetGuid ?? undefined,
       distributionStatus: normalizeText(body?.distributionStatus),
       updatedBy: normalizeText(body?.updatedBy),
     });

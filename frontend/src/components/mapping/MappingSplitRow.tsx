@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import type {
   GLAccountMappingRow,
+  MappingPresetLibraryEntry,
   MappingSplitDefinition,
   TargetScoaOption,
 } from '../../types';
@@ -16,6 +17,9 @@ interface MappingSplitRowProps {
   onAddSplit: () => void;
   onUpdateSplit: (splitId: string, updates: Partial<MappingSplitDefinition>) => void;
   onRemoveSplit: (splitId: string) => void;
+  presetOptions: MappingPresetLibraryEntry[];
+  selectedPresetId: string | null;
+  onApplyPreset: (presetId: string | null) => void;
 }
 
 const amountFormatter = new Intl.NumberFormat('en-US', {
@@ -60,6 +64,9 @@ export default function MappingSplitRow({
   onAddSplit,
   onUpdateSplit,
   onRemoveSplit,
+  presetOptions,
+  selectedPresetId,
+  onApplyPreset,
 }: MappingSplitRowProps) {
   const headingId = panelId ? `${panelId}-heading` : undefined;
 
@@ -241,14 +248,36 @@ export default function MappingSplitRow({
                 Ensure 100% allocation across targets.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onAddSplit}
-              className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus:ring-offset-slate-900"
-            >
-              <Plus className="h-4 w-4" />
-              Add split
-            </button>
+            <div className="flex items-center gap-2">
+              <label
+                className="text-xs font-medium text-slate-600 dark:text-slate-300"
+                htmlFor={`split-preset-${account.id}`}
+              >
+                Preset
+              </label>
+              <select
+                id={`split-preset-${account.id}`}
+                value={selectedPresetId ?? ''}
+                onChange={(event) => onApplyPreset(event.target.value || null)}
+                disabled={presetOptions.length === 0}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <option value="">Custom allocation</option>
+                {presetOptions.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={onAddSplit}
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus:ring-offset-slate-900"
+              >
+                <Plus className="h-4 w-4" />
+                Add split
+              </button>
+            </div>
           </div>
 
           {splitRows.length > 0 ? (

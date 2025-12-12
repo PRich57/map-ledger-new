@@ -2,10 +2,16 @@ import { create } from 'zustand';
 import type {
   DistributionOperationShare,
   DistributionRow,
+  DistributionSaveOperation,
+  DistributionSaveResponseItem,
+  DistributionSaveRowInput,
   DistributionStatus,
   DistributionType,
   StandardScoaSummary,
 } from '../types';
+
+const env = import.meta.env;
+const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
 
 export interface DistributionOperationCatalogItem {
   id: string;
@@ -36,6 +42,14 @@ interface DistributionState {
     },
   ) => void;
   applyPresetToRows: (ids: string[], presetId: string | null) => void;
+  isSavingDistributions: boolean;
+  saveError: string | null;
+  saveSuccess: string | null;
+  lastSavedCount: number;
+  saveDistributions: (
+    entityId: string | null,
+    updatedBy: string | null,
+  ) => Promise<number>;
 }
 
 const deriveDistributionStatus = (
@@ -68,6 +82,26 @@ const applyDistributionStatus = (row: DistributionRow): DistributionRow => ({
   status: deriveDistributionStatus(row.type, row.operations),
 });
 
+const createBlankPercentageOperation = (): DistributionOperationShare => ({
+  id: '',
+  name: '',
+  allocation: 0,
+});
+
+const ensureMinimumPercentageOperations = (
+  operations: DistributionRow['operations'],
+  minimum = 2,
+): DistributionRow['operations'] => {
+  const normalized = operations.map(operation => ({ ...operation }));
+  if (normalized.length >= minimum) {
+    return normalized;
+  }
+  const placeholders = Array.from({ length: minimum - normalized.length }, () =>
+    createBlankPercentageOperation(),
+  );
+  return [...normalized, ...placeholders];
+};
+
 const clampOperationsForType = (
   type: DistributionType,
   operations: DistributionRow['operations'],
@@ -87,10 +121,12 @@ const clampOperationsForType = (
   }
 
   if (type === 'percentage') {
-    return operations.map((operation, index) => ({
+    const normalized = operations.map((operation, index) => ({
       ...operation,
-      allocation: typeof operation.allocation === 'number' ? operation.allocation : index === 0 ? 100 : 0,
+      allocation:
+        typeof operation.allocation === 'number' ? operation.allocation : index === 0 ? 100 : 0,
     }));
+    return ensureMinimumPercentageOperations(normalized);
   }
 
   return operations.map(operation => ({
@@ -107,6 +143,10 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
   operationsCatalog: [],
   searchTerm: '',
   statusFilters: [],
+  isSavingDistributions: false,
+  saveError: null,
+  saveSuccess: null,
+  lastSavedCount: 0,
   syncRowsFromStandardTargets: summaries =>
     set(state => {
       const existingByTarget = new Map(
@@ -239,5 +279,129 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
         ),
       };
     });
+  },
+  saveDistributions: async (entityId, updatedBy) => {
+    const state = _get();
+
+    if (!entityId) {
+      set({
+        saveError: 'Select an entity before saving the distributions.',
+        saveSuccess: null,
+        lastSavedCount: 0,
+      });
+      return 0;
+    }
+
+    if (state.rows.length === 0) {
+      set({
+        saveError: 'No distribution rows are available to save.',
+        saveSuccess: null,
+        lastSavedCount: 0,
+      });
+      return 0;
+    }
+
+    set({
+      isSavingDistributions: true,
+      saveError: null,
+      saveSuccess: null,
+    });
+
+    const buildOperationPayload = (
+      operation: DistributionOperationShare,
+    ): DistributionSaveOperation | null => {
+      const candidate = (operation.id ?? operation.code ?? '').trim().toUpperCase();
+      if (!candidate) {
+        return null;
+      }
+      const allocation =
+        typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
+          ? Math.max(0, Math.min(100, operation.allocation))
+          : null;
+      return {
+        operationCd: candidate,
+        allocation,
+        notes: operation.notes ?? null,
+      };
+    };
+
+    const payloadRows: DistributionSaveRowInput[] = state.rows.map(row => ({
+      scoaAccountId: row.accountId,
+      distributionType: row.type,
+      presetGuid: row.presetId ?? null,
+      presetDescription: row.description ?? row.accountId,
+      distributionStatus: row.status,
+      operations: row.operations
+        .map(buildOperationPayload)
+        .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
+      updatedBy,
+    }));
+
+    const requestBody = {
+      entityId,
+      items: payloadRows,
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/entityDistributions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      if (!response.ok) {
+        const message = await response
+          .text()
+          .catch(() => 'Unable to save distribution rows.');
+        set({
+          isSavingDistributions: false,
+          saveError: message,
+          saveSuccess: null,
+          lastSavedCount: 0,
+        });
+        return 0;
+      }
+
+      const body = (await response.json()) as {
+        items?: DistributionSaveResponseItem[];
+      };
+      const savedItems = body.items ?? [];
+      const lookup = new Map<string, DistributionSaveResponseItem>();
+      savedItems.forEach(item => {
+        lookup.set(item.scoaAccountId, item);
+      });
+
+      set(currentState => ({
+        rows: currentState.rows.map(row => {
+          const match = lookup.get(row.accountId);
+          if (!match) {
+            return row;
+          }
+          return {
+            ...row,
+            presetId: match.presetGuid,
+            status: match.distributionStatus,
+          };
+        }),
+        isSavingDistributions: false,
+        saveError: null,
+        saveSuccess:
+          savedItems.length > 0
+            ? `Saved ${savedItems.length} distribution row${savedItems.length === 1 ? '' : 's'}.`
+            : 'No distribution rows were changed.',
+        lastSavedCount: savedItems.length,
+      }));
+
+      return savedItems.length;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to save distribution rows.';
+      set({
+        isSavingDistributions: false,
+        saveError: message,
+        saveSuccess: null,
+        lastSavedCount: 0,
+      });
+      return 0;
+    }
   },
 }));

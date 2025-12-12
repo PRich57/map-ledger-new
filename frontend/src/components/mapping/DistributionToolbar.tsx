@@ -1,6 +1,11 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import {
+  selectActiveEntityId,
+  useMappingStore,
+} from '../../store/mappingStore';
+import { useOrganizationStore } from '../../store/organizationStore';
+import {
   selectPresetSummaries,
   useRatioAllocationStore,
 } from '../../store/ratioAllocationStore';
@@ -28,6 +33,11 @@ export default function DistributionToolbar() {
   const operationsCatalog = useDistributionStore(state => state.operationsCatalog);
   const applyBatchDistribution = useDistributionStore(state => state.applyBatchDistribution);
   const applyPresetToRows = useDistributionStore(state => state.applyPresetToRows);
+  const rowsCount = useDistributionStore(state => state.rows.length);
+  const isSavingDistributions = useDistributionStore(state => state.isSavingDistributions);
+  const saveError = useDistributionStore(state => state.saveError);
+  const saveSuccess = useDistributionStore(state => state.saveSuccess);
+  const saveDistributions = useDistributionStore(state => state.saveDistributions);
   const presetOptions = useRatioAllocationStore(selectPresetSummaries);
   const { selectedIds, clearSelection } = useDistributionSelectionStore();
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
@@ -38,6 +48,15 @@ export default function DistributionToolbar() {
   const searchLabelId = 'distribution-search';
 
   const selectedIdList = useMemo(() => Array.from(selectedIds), [selectedIds]);
+
+  const activeEntityId = useMappingStore(selectActiveEntityId);
+  const currentEmail = useOrganizationStore(state => state.currentEmail);
+  const handleSaveDistributions = () => {
+    if (isSavingDistributions || rowsCount === 0) {
+      return;
+    }
+    saveDistributions(activeEntityId, currentEmail ?? null);
+  };
 
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
@@ -147,7 +166,29 @@ export default function DistributionToolbar() {
             >
               Apply preset
             </button>
+            <button
+              type="button"
+              onClick={handleSaveDistributions}
+              disabled={isSavingDistributions || rowsCount === 0}
+              className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                isSavingDistributions || rowsCount === 0
+                  ? 'bg-slate-200 text-slate-500 focus:ring-0 dark:bg-slate-800 dark:text-slate-500'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500'
+              }`}
+            >
+              {isSavingDistributions ? 'Saving distributions...' : 'Save distributions'}
+            </button>
           </div>
+          {(saveError || saveSuccess) && (
+            <div className="space-y-1" role="status" aria-live="polite">
+              {saveError && (
+                <p className="text-xs text-rose-600 dark:text-rose-300">{saveError}</p>
+              )}
+              {!saveError && saveSuccess && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300">{saveSuccess}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

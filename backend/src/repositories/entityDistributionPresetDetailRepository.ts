@@ -1,7 +1,7 @@
 import { runQuery } from '../utils/sqlClient';
 
 export interface EntityDistributionPresetDetailInput {
-  presetId: string;
+  presetGuid: string;
   operationCd: string;
   isCalculated?: boolean | null;
   specifiedPct?: number | null;
@@ -51,7 +51,7 @@ const normalizeSpecifiedPct = (value?: number | null): number | null => {
 };
 
 const mapRow = (row: {
-  preset_id: string;
+  preset_guid: string;
   operation_cd: string;
   is_calculated?: number | boolean | null;
   specified_pct?: number | null;
@@ -59,7 +59,7 @@ const mapRow = (row: {
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
 }): EntityDistributionPresetDetailRow => ({
-  presetId: row.preset_id,
+  presetGuid: row.preset_guid,
   operationCd: row.operation_cd,
   isCalculated: typeof row.is_calculated === 'boolean'
     ? row.is_calculated
@@ -82,22 +82,22 @@ const mapRow = (row: {
 });
 
 export const listEntityDistributionPresetDetails = async (
-  presetId?: string
+  presetGuid?: string
 ): Promise<EntityDistributionPresetDetailRow[]> => {
   const params: Record<string, unknown> = {};
   const filters: string[] = [];
 
-  const normalizedPreset = normalizeGuid(presetId ?? null);
+  const normalizedPreset = normalizeGuid(presetGuid ?? null);
 
   if (normalizedPreset) {
-    params.presetId = normalizedPreset;
-    filters.push('PRESET_GUID = @presetId');
+    params.presetGuid = normalizedPreset;
+    filters.push('PRESET_GUID = @presetGuid');
   }
 
   const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   const result = await runQuery<{
-    preset_id: string;
+    preset_guid: string;
     operation_cd: string;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
@@ -106,7 +106,7 @@ export const listEntityDistributionPresetDetails = async (
     updated_by?: string | null;
   }>(
     `SELECT
-      PRESET_GUID as preset_id,
+      PRESET_GUID as preset_guid,
       OPERATION_CD as operation_cd,
       IS_CALCULATED as is_calculated,
       SPECIFIED_PCT as specified_pct,
@@ -132,18 +132,16 @@ export const createEntityDistributionPresetDetails = async (
   const params: Record<string, unknown> = {};
   const valuesClause = inputs
     .map((input, index) => {
-      params[`presetId${index}`] = normalizeGuid(input.presetId);
+      params[`presetGuid${index}`] = normalizeGuid(input.presetGuid);
       params[`operationCd${index}`] = normalizeText(input.operationCd);
       params[`isCalculated${index}`] = toBit(input.isCalculated);
       params[`specifiedPct${index}`] = normalizeSpecifiedPct(input.specifiedPct);
-      params[`updatedBy${index}`] = normalizeText(input.updatedBy);
-
-      return `(@presetId${index}, @operationCd${index}, @isCalculated${index}, @specifiedPct${index}, NULL, @updatedBy${index})`;
+      return `(@presetGuid${index}, @operationCd${index}, @isCalculated${index}, @specifiedPct${index})`;
     })
     .join(', ');
 
   const result = await runQuery<{
-    preset_id: string;
+    preset_guid: string;
     operation_cd: string;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
@@ -155,12 +153,10 @@ export const createEntityDistributionPresetDetails = async (
       PRESET_GUID,
       OPERATION_CD,
       IS_CALCULATED,
-      SPECIFIED_PCT,
-      UPDATED_DTTM,
-      UPDATED_BY
+      SPECIFIED_PCT
     )
     OUTPUT
-      INSERTED.PRESET_GUID as preset_id,
+      INSERTED.PRESET_GUID as preset_guid,
       INSERTED.OPERATION_CD as operation_cd,
       INSERTED.IS_CALCULATED as is_calculated,
       INSERTED.SPECIFIED_PCT as specified_pct,
@@ -175,11 +171,11 @@ export const createEntityDistributionPresetDetails = async (
 };
 
 export const updateEntityDistributionPresetDetail = async (
-  presetId: string,
+  presetGuid: string,
   operationCd: string,
-  updates: Partial<Omit<EntityDistributionPresetDetailInput, 'presetId' | 'operationCd'>>
+  updates: Partial<Omit<EntityDistributionPresetDetailInput, 'presetGuid' | 'operationCd'>>
 ): Promise<EntityDistributionPresetDetailRow | null> => {
-  const normalizedPreset = normalizeGuid(presetId);
+  const normalizedPreset = normalizeGuid(presetGuid);
 
   if (!normalizedPreset || !operationCd) {
     return null;
@@ -192,10 +188,10 @@ export const updateEntityDistributionPresetDetail = async (
       SPECIFIED_PCT = ISNULL(@specifiedPct, SPECIFIED_PCT),
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
-    WHERE PRESET_GUID = @presetId
+    WHERE PRESET_GUID = @presetGuid
       AND OPERATION_CD = @operationCd`,
     {
-      presetId: normalizedPreset,
+      presetGuid: normalizedPreset,
       operationCd,
       isCalculated: toBit(updates.isCalculated ?? null),
       specifiedPct: normalizeSpecifiedPct(updates.specifiedPct),
@@ -203,8 +199,31 @@ export const updateEntityDistributionPresetDetail = async (
     }
   );
 
-  const updatedRows = await listEntityDistributionPresetDetails(presetId);
+  const updatedRows = await listEntityDistributionPresetDetails(presetGuid);
   return updatedRows.find((row) => row.operationCd === operationCd) ?? null;
+};
+
+export const deleteEntityDistributionPresetDetail = async (
+  presetGuid: string,
+  operationCd: string
+): Promise<number> => {
+  const normalizedPreset = normalizeGuid(presetGuid);
+  const normalizedOperationCd = normalizeText(operationCd);
+  if (!normalizedPreset || !normalizedOperationCd) {
+    return 0;
+  }
+
+  const result = await runQuery(
+    `DELETE FROM ${TABLE_NAME}
+    WHERE PRESET_GUID = @presetGuid
+      AND OPERATION_CD = @operationCd`,
+    {
+      presetGuid: normalizedPreset,
+      operationCd: normalizedOperationCd,
+    }
+  );
+
+  return result.rowsAffected?.[0] ?? 0;
 };
 
 export default listEntityDistributionPresetDetails;

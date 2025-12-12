@@ -1,4 +1,5 @@
 import { runQuery } from '../utils/sqlClient';
+import type { EntityMappingPresetDetailRow } from './entityMappingPresetDetailRepository';
 
 export interface EntityMappingPresetInput {
   entityId: string;
@@ -15,6 +16,10 @@ export interface EntityMappingPresetRow
   updatedBy?: string | null;
 }
 
+export interface EntityMappingPresetWithDetailsRow extends EntityMappingPresetRow {
+  presetDetails?: EntityMappingPresetDetailRow[];
+}
+
 const TABLE_NAME = 'ml.ENTITY_MAPPING_PRESETS';
 
 const normalizeText = (value?: string | null): string | null => {
@@ -23,6 +28,33 @@ const normalizeText = (value?: string | null): string | null => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizePresetTypeValue = (value?: string | null): string => {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return 'direct';
+  }
+  const lower = normalized.toLowerCase();
+  switch (lower) {
+    case 'dynamic':
+      return 'dynamic';
+    case 'percentage':
+      return 'percentage';
+    case 'direct':
+      return 'direct';
+    case 'exclude':
+    case 'excluded':
+      return 'excluded';
+    case 'p':
+      return 'percentage';
+    case 'd':
+      return 'dynamic';
+    case 'x':
+      return 'excluded';
+    default:
+      return lower;
+  }
 };
 
 const normalizePresetGuid = (value?: string | null): string | null => {
@@ -72,7 +104,7 @@ export const listEntityMappingPresets = async (
   return (result.recordset ?? []).map((row) => ({
     presetGuid: row.preset_guid,
     entityId: row.entity_id,
-    presetType: row.preset_type,
+    presetType: normalizePresetTypeValue(row.preset_type),
     presetDescription: row.preset_description ?? null,
     insertedDttm:
       row.inserted_dttm instanceof Date
@@ -144,7 +176,7 @@ export const createEntityMappingPreset = async (
   return {
     presetGuid: row.preset_guid,
     entityId: row.entity_id,
-    presetType: row.preset_type,
+    presetType: normalizePresetTypeValue(row.preset_type),
     presetDescription: row.preset_description ?? null,
     insertedDttm:
       row.inserted_dttm instanceof Date
@@ -189,3 +221,135 @@ export const updateEntityMappingPreset = async (
 };
 
 export default listEntityMappingPresets;
+
+const mapPresetDetailRow = (row: {
+  preset_guid: string;
+  basisDatapoint?: string | null;
+  targetDatapoint?: string | null;
+  isCalculated?: number | boolean | null;
+  specifiedPct?: number | null;
+}): EntityMappingPresetDetailRow => ({
+  presetGuid: row.preset_guid,
+  basisDatapoint: row.basisDatapoint ?? null,
+  targetDatapoint: row.targetDatapoint ?? '',
+  isCalculated:
+    typeof row.isCalculated === 'boolean'
+      ? row.isCalculated
+      : row.isCalculated === null || row.isCalculated === undefined
+        ? null
+        : Boolean(row.isCalculated),
+  specifiedPct:
+    row.specifiedPct !== null && row.specifiedPct !== undefined
+      ? row.specifiedPct * 100
+      : null,
+  insertedDttm: null,
+  updatedDttm: null,
+  updatedBy: null,
+});
+
+export const listEntityMappingPresetsWithDetails = async (
+  entityId?: string
+): Promise<EntityMappingPresetWithDetailsRow[]> => {
+  const params: Record<string, unknown> = {};
+  const filters: string[] = [];
+
+  if (entityId) {
+    params.entityId = entityId;
+    filters.push('emp.ENTITY_ID = @entityId');
+  }
+
+  const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+  const result = await runQuery<{
+    preset_guid: string;
+    entity_id: string;
+    preset_type: string;
+    preset_description?: string | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+    basisDatapoint?: string | null;
+    targetDatapoint?: string | null;
+    isCalculated?: number | boolean | null;
+    specifiedPct?: number | null;
+  }>(
+    `SELECT
+      emp.PRESET_GUID as preset_guid,
+      emp.ENTITY_ID as entity_id,
+      emp.PRESET_TYPE as preset_type,
+      emp.PRESET_DESCRIPTION as preset_description,
+      emp.INSERTED_DTTM as inserted_dttm,
+      emp.UPDATED_DTTM as updated_dttm,
+      emp.UPDATED_BY as updated_by,
+      emd.BASIS_DATAPOINT as basisDatapoint,
+      emd.TARGET_DATAPOINT as targetDatapoint,
+      emd.IS_CALCULATED as isCalculated,
+      emd.SPECIFIED_PCT as specifiedPct
+    FROM ${TABLE_NAME} emp
+    LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
+    ${whereClause}
+    ORDER BY emp.PRESET_GUID ASC`,
+    params
+  );
+
+  const rows = (result.recordset ?? []).map((row) => ({
+    preset_guid: row.preset_guid,
+    entity_id: row.entity_id,
+    preset_type: row.preset_type,
+    preset_description: row.preset_description ?? null,
+    inserted_dttm:
+      row.inserted_dttm instanceof Date
+        ? row.inserted_dttm.toISOString()
+        : row.inserted_dttm ?? null,
+    updated_dttm:
+      row.updated_dttm instanceof Date
+        ? row.updated_dttm.toISOString()
+        : row.updated_dttm ?? null,
+    updated_by: row.updated_by ?? null,
+    basisDatapoint: row.basisDatapoint,
+    targetDatapoint: row.targetDatapoint,
+    isCalculated: row.isCalculated,
+    specifiedPct: row.specifiedPct,
+  }));
+
+  const grouped = new Map<
+    string,
+    {
+      base: EntityMappingPresetRow;
+      details: EntityMappingPresetDetailRow[];
+    }
+  >();
+
+  rows.forEach((row) => {
+    const key = row.preset_guid;
+    const base: EntityMappingPresetRow = {
+    presetGuid: row.preset_guid,
+    entityId: row.entity_id,
+    presetType: normalizePresetTypeValue(row.preset_type),
+      presetDescription: row.preset_description,
+      insertedDttm: row.inserted_dttm,
+      updatedDttm: row.updated_dttm,
+      updatedBy: row.updated_by ?? null,
+    };
+
+    const detail = mapPresetDetailRow(row);
+
+    const existing = grouped.get(key);
+    if (existing) {
+      if (detail.targetDatapoint) {
+        existing.details.push(detail);
+      }
+      return;
+    }
+
+    grouped.set(key, {
+      base,
+      details: detail.targetDatapoint ? [detail] : [],
+    });
+  });
+
+  return Array.from(grouped.values()).map(({ base, details }) => ({
+    ...base,
+    presetDetails: details,
+  }));
+};

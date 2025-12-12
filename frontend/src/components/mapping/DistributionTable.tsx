@@ -12,12 +12,15 @@ import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientStore } from '../../store/clientStore';
 import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
 import DistributionToolbar from './DistributionToolbar';
-import DistributionSplitRow from './DistributionSplitRow';
+import DistributionSplitRow, {
+  type DistributionOperationDraft,
+} from './DistributionSplitRow';
 import type {
   DistributionOperationShare,
   DistributionRow,
   DistributionStatus,
   DistributionType,
+  MappingPresetLibraryEntry,
 } from '../../types';
 
 interface DistributionTableProps {
@@ -41,7 +44,7 @@ const TYPE_OPTIONS: { value: DistributionType; label: string }[] = [
   { value: 'dynamic', label: 'Dynamic' },
 ];
 
-type SortKey = 'accountId' | 'description' | 'activity' | 'type' | 'operations' | 'preset' | 'status';
+type SortKey = 'accountId' | 'description' | 'activity' | 'type' | 'operations' | 'status';
 type SortDirection = 'asc' | 'desc';
 
 const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: 'right' }[] = [
@@ -50,7 +53,6 @@ const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'activity', label: 'Activity', align: 'right' },
   { key: 'type', label: 'Distribution Type' },
   { key: 'operations', label: 'Target Operation' },
-  { key: 'preset', label: 'Preset' },
   { key: 'status', label: 'Status', align: 'right' },
 ];
 
@@ -60,7 +62,6 @@ const COLUMN_WIDTH_CLASSES: Partial<Record<SortKey, string>> = {
   activity: 'min-w-[11rem]',
   type: 'w-44',
   operations: 'min-w-[20rem]',
-  preset: 'w-40',
   status: 'w-32',
 };
 
@@ -95,18 +96,27 @@ const formatOperationLabel = (operation: DistributionOperationShare) => {
 };
 
 const formatOperations = (row: DistributionRow) => {
-  if (!row.operations.length) {
+  const validOperations = row.operations.filter(operation => Boolean(operation.id?.trim()));
+  if (!validOperations.length) {
     return 'No operations assigned';
   }
 
   if (row.type === 'percentage') {
-    return row.operations
+    return validOperations
       .map(operation => `${formatOperationLabel(operation)} (${operation.allocation ?? 0}%)`)
       .join(', ');
   }
 
-  return row.operations.map(operation => formatOperationLabel(operation)).join(', ');
+  return validOperations.map(operation => formatOperationLabel(operation)).join(', ');
 };
+
+const createDraftId = () => `op-draft-${Math.random().toString(36).slice(2, 9)}`;
+
+const toDraftOperations = (operations: DistributionOperationShare[]): DistributionOperationDraft[] =>
+  operations.map(operation => ({
+    ...operation,
+    draftId: operation.id || createDraftId(),
+  }));
 
 const operationsAreEqual = (
   previous: DistributionOperationShare[],
@@ -144,8 +154,6 @@ const getSortValue = (row: DistributionRow, key: SortKey): string | number => {
       return row.type;
     case 'operations':
       return formatOperations(row);
-    case 'preset':
-      return row.presetId ?? '';
     case 'status':
       return row.status;
     default:
@@ -205,7 +213,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
 
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set());
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
-  const [operationsDraft, setOperationsDraft] = useState<DistributionOperationShare[]>([]);
+  const [operationsDraft, setOperationsDraft] = useState<DistributionOperationDraft[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
   const [activeDynamicAccountId, setActiveDynamicAccountId] = useState<string | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -217,6 +225,11 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     getActivePresetForSource: state.getActivePresetForSource,
   }));
   const presetOptions = useRatioAllocationStore(selectPresetSummaries);
+  const presetLibrary = useMappingStore(state => state.presetLibrary);
+  const percentagePresetOptions = useMemo<MappingPresetLibraryEntry[]>(
+    () => presetLibrary.filter(entry => entry.type === 'percentage'),
+    [presetLibrary],
+  );
 
   const operationTargetCatalog = useMemo(
     () =>
@@ -288,7 +301,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     }
     setExpandedRows(new Set([targetRow.id]));
     setEditingRowId(targetRow.id);
-    setOperationsDraft(targetRow.operations.map(operation => ({ ...operation })));
+    setOperationsDraft(toDraftOperations(targetRow.operations));
   }, [focusMappingId, rows]);
 
   useEffect(() => {
@@ -325,7 +338,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     if (autoOpenedId) {
       const targetRow = rows.find(item => item.id === autoOpenedId);
       if (targetRow) {
-        setOperationsDraft(targetRow.operations.map(operation => ({ ...operation })));
+        setOperationsDraft(toDraftOperations(targetRow.operations));
       }
     }
     previousTypesRef.current = new Map(rows.map(row => [row.id, row.type]));
@@ -408,7 +421,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     }
     setExpandedRows(new Set([row.id]));
     setEditingRowId(row.id);
-    setOperationsDraft(row.operations.map(operation => ({ ...operation })));
+    setOperationsDraft(toDraftOperations(row.operations));
   };
 
   useEffect(() => {
@@ -597,24 +610,6 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                         </div>
                       )}
                     </td>
-                    <td className={`px-3 py-4 ${COLUMN_WIDTH_CLASSES.preset ?? ''}`}>
-                      <label htmlFor={`distribution-preset-${row.id}`} className="sr-only">
-                        Select preset
-                      </label>
-                      <select
-                        id={`distribution-preset-${row.id}`}
-                        value={row.presetId ?? ''}
-                        onChange={event => updateRowPreset(row.id, event.target.value ? event.target.value : null)}
-                        className="w-full min-w-[8rem] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                      >
-                        <option value="">No preset</option>
-                        {presetOptions.map(option => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
                     <td className={`px-3 py-4 text-right ${COLUMN_WIDTH_CLASSES.status ?? ''}`}>
                       {(() => {
                         const StatusIcon = STATUS_ICONS[row.status];
@@ -636,6 +631,9 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                             operationsCatalog={operationsCatalog}
                             operationsDraft={operationsDraft}
                             setOperationsDraft={setOperationsDraft}
+                            presetOptions={percentagePresetOptions}
+                            selectedPresetId={row.presetId ?? null}
+                            onApplyPreset={presetId => updateRowPreset(row.id, presetId)}
                           />
                         </div>
                       </td>

@@ -32,6 +32,12 @@ const createId = (): string => {
 };
 
 
+
+type DynamicAllocationMutation = {
+  accountId: string;
+  timestamp: number;
+};
+
 const getTargetNameById = (targetId: string): string => {
   const option = findChartOfAccountOption(targetId);
   return option?.label ?? targetId;
@@ -225,6 +231,7 @@ export type RatioAllocationState = {
   results: AllocationResult[];
   validationErrors: DynamicAllocationValidationIssue[];
   auditLog: DynamicAllocationAuditRecord[];
+  lastDynamicMutation: DynamicAllocationMutation | null;
   hydrate: (payload: RatioAllocationHydrationPayload) => void;
   setBasisAccounts: (basisAccounts: DynamicBasisAccount[]) => void;
   getOrCreateAllocation: (sourceAccountId: string) => RatioAllocation;
@@ -290,6 +297,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
   results: [],
   validationErrors: [],
   auditLog: [],
+  lastDynamicMutation: null,
 
   hydrate: payload => {
     set(state => {
@@ -327,6 +335,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         sourceAccounts: payload.sourceAccounts ?? state.sourceAccounts,
         availablePeriods,
         selectedPeriod,
+        lastDynamicMutation: null,
       };
     });
   },
@@ -1189,8 +1198,9 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     });
   },
   toggleTargetExclusion: (allocationId, datapointId, presetId) => {
-    set(state => ({
-      allocations: state.allocations.map(allocation => {
+    set(state => {
+      let mutatedAccountId: string | null = null;
+      const allocations = state.allocations.map(allocation => {
         if (allocation.id !== allocationId) {
           return allocation;
         }
@@ -1211,6 +1221,8 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
           matchesTarget(target) ? { ...target, isExclusion: !target.isExclusion } : target,
         );
 
+        mutatedAccountId = allocation.sourceAccount.id;
+
         return synchronizeAllocationTargets(
           {
             ...allocation,
@@ -1220,8 +1232,20 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
           state.basisAccounts,
           state.selectedPeriod,
         );
-      }),
-    }));
+      });
+
+      if (!mutatedAccountId) {
+        return state;
+      }
+
+      return {
+        allocations,
+        lastDynamicMutation: {
+          accountId: mutatedAccountId,
+          timestamp: Date.now(),
+        },
+      };
+    });
   },
   createGroup: ({ label, memberAccountIds, targetId }) => {
     set(state => {

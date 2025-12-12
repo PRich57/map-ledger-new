@@ -37,7 +37,7 @@ describe('entityMappingPresetDetailRepository', () => {
         basis_datapoint: null,
         target_datapoint: detail.targetDatapoint,
         is_calculated: null,
-        specified_pct: detail.specifiedPct,
+        specified_pct: detail.specifiedPct / 100,
         inserted_dttm: new Date('2025-01-01T00:00:00Z'),
         updated_dttm: new Date('2025-01-01T00:00:00Z'),
         updated_by: 'tester',
@@ -48,8 +48,8 @@ describe('entityMappingPresetDetailRepository', () => {
     expect(mockedRunQuery).toHaveBeenCalledTimes(1);
 
     const params = mockedRunQuery.mock.calls[0][1] as Record<string, unknown>;
-    expect(params.specifiedPct0).toBe(40.75);
-    expect(params.specifiedPct1).toBe(59.25);
+    expect(params.specifiedPct0).toBe(0.4075);
+    expect(params.specifiedPct1).toBe(0.5925);
     expect(result.map((row) => row.specifiedPct)).toEqual([40.75, 59.25]);
   });
 
@@ -63,7 +63,7 @@ describe('entityMappingPresetDetailRepository', () => {
             basis_datapoint: null,
             target_datapoint: 'target-update',
             is_calculated: null,
-            specified_pct: 40.75,
+            specified_pct: 0.4075,
             inserted_dttm: new Date('2025-02-01T00:00:00Z'),
             updated_dttm: new Date('2025-02-01T00:00:00Z'),
             updated_by: 'updater',
@@ -77,7 +77,7 @@ describe('entityMappingPresetDetailRepository', () => {
     });
 
     const updateParams = mockedRunQuery.mock.calls[0][1] as Record<string, unknown>;
-    expect(updateParams.specifiedPct).toBe(40.75);
+    expect(updateParams.specifiedPct).toBe(0.4075);
     expect(result?.specifiedPct).toBe(40.75);
   });
 });

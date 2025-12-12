@@ -1,5 +1,6 @@
 import type { ChangeEvent, KeyboardEvent } from 'react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 type Option = { id: string; value: string; label: string };
 
@@ -19,6 +20,14 @@ interface SearchableSelectProps<TOption extends Option> {
 
 const baseInputClasses =
   'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
+
+type MenuStyles = {
+  top: number;
+  left: number;
+  width: number;
+};
+
+const DROPDOWN_VERTICAL_OFFSET = 4;
 
 export default function SearchableSelect<TOption extends Option>({
   id,
@@ -43,6 +52,8 @@ export default function SearchableSelect<TOption extends Option>({
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuStyles, setMenuStyles] = useState<MenuStyles | null>(null);
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
@@ -73,15 +84,54 @@ export default function SearchableSelect<TOption extends Option>({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-        onBlur?.();
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target)) {
+        return;
       }
+      if (menuRef.current?.contains(target)) {
+        return;
+      }
+      setIsOpen(false);
+      onBlur?.();
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onBlur]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setMenuStyles(null);
+      return undefined;
+    }
+
+    if (typeof window === 'undefined') {
+      setMenuStyles(null);
+      return undefined;
+    }
+
+    const updateMenuPosition = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setMenuStyles(null);
+        return;
+      }
+      setMenuStyles({
+        top: rect.bottom + DROPDOWN_VERTICAL_OFFSET,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener('scroll', updateMenuPosition, true);
+    window.addEventListener('resize', updateMenuPosition);
+
+    return () => {
+      window.removeEventListener('scroll', updateMenuPosition, true);
+      window.removeEventListener('resize', updateMenuPosition);
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -126,6 +176,58 @@ export default function SearchableSelect<TOption extends Option>({
 
   const activeOption = filteredOptions[highlightedIndex];
   const activeDescendant = activeOption ? `${resolvedId}-option-${valueSelector(activeOption)}` : undefined;
+  const portalContainer = typeof document !== 'undefined' ? document.body : null;
+  const dropdownMenu =
+    isOpen && !disabled && menuStyles ? (
+      <div
+        ref={menuRef}
+        role="presentation"
+        className="z-50 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        style={{
+          position: 'fixed',
+          top: menuStyles.top,
+          left: menuStyles.left,
+          width: menuStyles.width,
+          zIndex: 1000,
+        }}
+      >
+        <ul
+          id={listboxId}
+          role="listbox"
+          className="max-h-60 overflow-y-auto py-1 text-sm"
+          aria-label="Search results"
+        >
+          {filteredOptions.length === 0 ? (
+            <li className="px-3 py-2 text-slate-500 dark:text-slate-400">{noOptionsMessage}</li>
+          ) : (
+            filteredOptions.map((option, index) => {
+              const optionId = `${resolvedId}-option-${valueSelector(option)}`;
+              const isActive = index === highlightedIndex;
+
+              return (
+                <li key={optionId} role="option" id={optionId} aria-selected={valueSelector(option) === value}>
+                  <button
+                    type="button"
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => handleSelect(option)}
+                    className={`flex w-full items-start gap-2 px-3 py-2 text-left transition ${
+                      isActive
+                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100'
+                        : 'text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex-1">{labelSelector(option)}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{valueSelector(option)}</span>
+                  </button>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      </div>
+    ) : null;
+  const renderedDropdown =
+    dropdownMenu && portalContainer ? createPortal(dropdownMenu, portalContainer) : dropdownMenu;
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
@@ -159,46 +261,7 @@ export default function SearchableSelect<TOption extends Option>({
           Clear
         </button>
       ) : null}
-      {isOpen && !disabled ? (
-        <div
-          role="presentation"
-          className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
-        >
-          <ul
-            id={listboxId}
-            role="listbox"
-            className="max-h-60 overflow-y-auto py-1 text-sm"
-            aria-label="Search results"
-          >
-            {filteredOptions.length === 0 ? (
-              <li className="px-3 py-2 text-slate-500 dark:text-slate-400">{noOptionsMessage}</li>
-            ) : (
-              filteredOptions.map((option, index) => {
-                const optionId = `${resolvedId}-option-${valueSelector(option)}`;
-                const isActive = index === highlightedIndex;
-
-                return (
-                  <li key={optionId} role="option" id={optionId} aria-selected={valueSelector(option) === value}>
-                    <button
-                      type="button"
-                      onMouseDown={event => event.preventDefault()}
-                      onClick={() => handleSelect(option)}
-                      className={`flex w-full items-start gap-2 px-3 py-2 text-left transition ${
-                        isActive
-                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100'
-                          : 'text-slate-700 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <span className="flex-1">{labelSelector(option)}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{valueSelector(option)}</span>
-                    </button>
-                  </li>
-                );
-              })
-            )}
-          </ul>
-        </div>
-      ) : null}
+      {renderedDropdown}
     </div>
   );
 }

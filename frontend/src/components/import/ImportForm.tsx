@@ -11,10 +11,6 @@ import {
 import parseCurrencyValue from '../../utils/parseCurrencyValue';
 import ColumnMatcher from './ColumnMatcher';
 import {
-  getClientTemplateMapping,
-  ClientTemplateConfig,
-} from '../../utils/getClientTemplateMapping';
-import {
   fetchClientHeaderMappings,
   saveClientHeaderMappings,
 } from '../../utils/clientHeaderMappings';
@@ -709,10 +705,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         return;
       }
 
-      const clientConfig: ClientTemplateConfig | null =
-        await getClientTemplateMapping(clientId);
-      console.log('Fetched client config:', clientConfig);
-
       const parsed = await parseTrialBalanceWorkbook(file); // Future: pass config to this function
       if (parsed.length === 0)
         throw new Error('No valid data found in any sheet.');
@@ -1030,14 +1022,14 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
             <div className="space-y-4 rounded-md border border-blue-200 bg-blue-50 p-4">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-medium text-blue-900">Entity assignment</h3>
+                  <h3 className="text-sm font-semibold text-blue-900">Entity assignment</h3>
                   <p className="text-sm text-blue-800">
                     Duplicate account IDs were found within the same GL month. Assign{' '}
                     {requiredEntityCount} entity
                     {requiredEntityCount > 1 ? ' groups' : ' group'} before moving on to mapping.
                   </p>
                 </div>
-                <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-medium text-blue-800">
+                <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-100 shadow-sm">
                   Minimum required: {requiredEntityCount}
                 </span>
               </div>
@@ -1049,7 +1041,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                 </p>
               )}
 
-              <div className="grid gap-3">
+              <div className="space-y-4">
                 {resolvedAssignments.map((assignment) => {
                   const summary = entitySlotSummaries.find((slot) => slot.slot === assignment.slot);
                   const glMonthSummary = summary?.glMonths.join(', ') || 'Unspecified month';
@@ -1058,25 +1050,30 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   return (
                     <div
                       key={assignment.slot}
-                      className="rounded-md border border-blue-200 bg-white p-3 shadow-sm"
+                      className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-[0_10px_30px_rgba(2,6,23,0.65)]"
                     >
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">Entity group {assignment.slot}</p>
-                          <p className="text-xs text-gray-600">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-100">Entity group {assignment.slot}</p>
+                          <p className="text-xs text-slate-400">
                             Months: {glMonthSummary} · Accounts: {accountSummary}
                           </p>
                         </div>
-                        <span className="text-xs text-gray-500">{summary?.rowCount ?? 0} rows</span>
+                        <span className="text-xs font-medium text-slate-400 sm:text-right">
+                          {summary?.rowCount ?? 0} rows
+                        </span>
                       </div>
 
-                      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                         <Select
                           label="Choose an entity"
                           value={assignment.isCustom ? '__custom__' : assignment.entityId}
                           onChange={(e) => handleAssignmentSelection(assignment.slot, e.target.value)}
                           disabled={!clientId || isLoadingClients || isLoadingEntities}
                           required
+                          className="min-w-0"
+                          labelClassName="text-slate-200"
+                          selectClassName="bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-400 focus:ring-blue-400/60"
                         >
                           <option value="">Select an entity</option>
                           {entityOptions.map((entity) => (
@@ -1087,8 +1084,11 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                           <option value="__custom__">Type a new entity</option>
                         </Select>
 
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor={`custom-entity-${assignment.slot}`}>
+                        <div className="space-y-1">
+                          <label
+                            className="block text-sm font-medium text-slate-200"
+                            htmlFor={`custom-entity-${assignment.slot}`}
+                          >
                             Entity name
                           </label>
                           <input
@@ -1097,7 +1097,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                             value={assignment.name}
                             onChange={(e) => handleCustomEntityNameChange(assignment.slot, e.target.value)}
                             placeholder="Enter an entity name"
-                            className="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400/60"
                           />
                         </div>
                       </div>
@@ -1105,7 +1105,6 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   );
                 })}
               </div>
-
               {!isEntitySelectionComplete && (
                 <p className="text-sm text-amber-700">
                   Assign an entity name to every group to enable mapping.

@@ -9,9 +9,13 @@ import { useMappingSelectionStore } from '../../store/mappingSelectionStore';
 import { useTemplateStore } from '../../store/templateStore';
 import type { GLAccountMappingRow } from '../../types';
 import { buildTargetScoaOptions } from '../../utils/targetScoaOptions';
+import { trackMappingSaveTriggered } from '../../utils/telemetry';
 import BatchMapModal from './BatchMapModal';
 import PresetModal from './PresetModal';
 import BatchExclude from './BatchExclude';
+
+export const SAVE_ROW_LIMIT = 200;
+export const SAVE_WARNING_THRESHOLD = 150;
 
 const STATUS_DEFINITIONS: {
   value: GLAccountMappingRow['status'];
@@ -51,8 +55,19 @@ export default function MappingToolbar() {
   const applyBatchMapping = useMappingStore(state => state.applyBatchMapping);
   const applyPresetToAccounts = useMappingStore(state => state.applyPresetToAccounts);
   const saveMappings = useMappingStore(state => state.saveMappings);
+  const dirtyMappingIds = useMappingStore(state => state.dirtyMappingIds);
   const isSavingMappings = useMappingStore(state => state.isSavingMappings);
   const saveError = useMappingStore(state => state.saveError);
+  const rowSaveStatuses = useMappingStore(state => state.rowSaveStatuses);
+  const savingRowsCount = useMemo(
+    () =>
+      Object.values(rowSaveStatuses).filter(
+        entry => entry.status === 'saving',
+      ).length,
+    [rowSaveStatuses],
+  );
+  const dirtyRowsToSave = dirtyMappingIds.size;
+  const showLargeSaveWarning = dirtyRowsToSave >= SAVE_WARNING_THRESHOLD;
   const { selectedIds, clearSelection } = useMappingSelectionStore();
   const datapoints = useTemplateStore(state => state.datapoints);
   const coaOptions = useMemo(() => buildTargetScoaOptions(datapoints), [datapoints]);
@@ -117,7 +132,20 @@ export default function MappingToolbar() {
 
   const handleSaveProgress = async () => {
     setSaveSuccess(null);
-    const savedCount = await saveMappings();
+    const dirtyRows = dirtyRowsToSave;
+    const startTime = Date.now();
+    const savedCount = await saveMappings(Array.from(dirtyMappingIds));
+    const elapsedMs = Date.now() - startTime;
+
+    if (dirtyRows > 0) {
+      trackMappingSaveTriggered({
+        dirtyRows,
+        elapsedMs,
+        savedRows: savedCount,
+        eventSource: 'MappingToolbar',
+      });
+    }
+
     if (savedCount > 0) {
       setSaveSuccess(`Saved ${savedCount} mapped row${savedCount === 1 ? '' : 's'} for later.`);
       setFinalizeError(null);
@@ -200,6 +228,20 @@ export default function MappingToolbar() {
         <span className="text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
           {hasSelection ? `${selectedCount} row${selectedCount === 1 ? '' : 's'} selected` : 'No rows selected'}
         </span>
+        {showLargeSaveWarning && (
+          <p
+            className="text-xs text-amber-600 dark:text-amber-300"
+            role="status"
+            aria-live="polite"
+          >
+            {`Saving ${dirtyRowsToSave} rows at once may exceed the ${SAVE_ROW_LIMIT}-row limit. Consider using batch edits or saving in smaller chunks.`}
+          </p>
+        )}
+        {isSavingMappings && savingRowsCount > 0 && (
+          <span className="text-xs text-slate-500 dark:text-slate-400" aria-live="polite">
+            Saving {savingRowsCount} row{savingRowsCount === 1 ? '' : 's'}…
+          </span>
+        )}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -271,7 +313,11 @@ export default function MappingToolbar() {
             }`}
             disabled={isSavingMappings}
           >
-            {isSavingMappings ? 'Saving…' : 'Save progress'}
+            {isSavingMappings
+              ? savingRowsCount > 0
+                ? `Saving ${savingRowsCount} row${savingRowsCount === 1 ? '' : 's'}…`
+                : 'Saving…'
+              : 'Save progress'}
           </button>
         </div>
         {(finalizeError || saveError || saveSuccess) && (

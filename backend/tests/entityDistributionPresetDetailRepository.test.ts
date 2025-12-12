@@ -20,12 +20,12 @@ describe('entityDistributionPresetDetailRepository', () => {
   it('persists 100%/20% splits without scaling and returns the stored values', async () => {
     const inputs = [
       {
-        presetId: 'dist-preset-1',
+        presetGuid: 'dist-preset-1',
         operationCd: 'OP1',
         specifiedPct: 100,
       },
       {
-        presetId: 'dist-preset-1',
+        presetGuid: 'dist-preset-1',
         operationCd: 'OP2',
         specifiedPct: 20,
       },
@@ -33,10 +33,10 @@ describe('entityDistributionPresetDetailRepository', () => {
 
     mockedRunQuery.mockResolvedValueOnce({
       recordset: inputs.map((detail) => ({
-        preset_id: detail.presetId,
+        preset_guid: detail.presetGuid,
         operation_cd: detail.operationCd,
         is_calculated: null,
-        specified_pct: detail.specifiedPct,
+        specified_pct: detail.specifiedPct / 100,
         inserted_dttm: new Date('2025-03-01T00:00:00Z'),
         updated_dttm: new Date('2025-03-01T00:00:00Z'),
         updated_by: 'tester',
@@ -47,8 +47,8 @@ describe('entityDistributionPresetDetailRepository', () => {
     expect(mockedRunQuery).toHaveBeenCalledTimes(1);
 
     const params = mockedRunQuery.mock.calls[0][1] as Record<string, unknown>;
-    expect(params.specifiedPct0).toBe(100);
-    expect(params.specifiedPct1).toBe(20);
+    expect(params.specifiedPct0).toBe(1);
+    expect(params.specifiedPct1).toBe(0.2);
     expect(result.map((row) => row.specifiedPct)).toEqual([100, 20]);
   });
 
@@ -61,7 +61,7 @@ describe('entityDistributionPresetDetailRepository', () => {
             preset_id: 'dist-preset-2',
             operation_cd: 'OP-update',
             is_calculated: null,
-            specified_pct: 100,
+            specified_pct: 1,
             inserted_dttm: new Date('2025-04-01T00:00:00Z'),
             updated_dttm: new Date('2025-04-01T00:00:00Z'),
             updated_by: 'updater',
@@ -75,7 +75,7 @@ describe('entityDistributionPresetDetailRepository', () => {
     });
 
     const updateParams = mockedRunQuery.mock.calls[0][1] as Record<string, unknown>;
-    expect(updateParams.specifiedPct).toBe(100);
+    expect(updateParams.specifiedPct).toBe(1);
     expect(result?.specifiedPct).toBe(100);
   });
 });

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import sql, { ConnectionPool, config as SqlConfig, IResult } from 'mssql';
 
 const logPrefix = '[sqlClient]';
@@ -26,6 +27,15 @@ const logError = (...args: unknown[]) => {
   }
   // eslint-disable-next-line no-console
   console.error(logPrefix, ...args);
+};
+
+const queryCounter = new AsyncLocalStorage<{ count: number }>();
+
+const incrementQueryCount = () => {
+  const store = queryCounter.getStore();
+  if (store) {
+    store.count += 1;
+  }
 };
 
 let connectionPromise: Promise<ConnectionPool> | null = null;
@@ -422,6 +432,8 @@ export const runQuery = async <TRecord = Record<string, unknown>>(query: string,
     parameters,
   });
 
+  incrementQueryCount();
+
   const startTime = Date.now();
   try {
     const result = await request.query<TRecord>(query);
@@ -450,4 +462,22 @@ export const runQuery = async <TRecord = Record<string, unknown>>(query: string,
   }
 };
 
-export default { getSqlPool, runQuery };
+export const withQueryTracking = async <T>(fn: () => Promise<T>): Promise<{ result: T; queryCount: number }> => {
+  const store = { count: 0 };
+
+  try {
+    const result = await queryCounter.run(store, fn);
+    return { result, queryCount: store.count };
+  } catch (error) {
+    if (typeof error === 'object' && error !== null) {
+      (error as { queryCount?: number }).queryCount = store.count;
+      throw error;
+    }
+
+    const wrapped = new Error(String(error));
+    (wrapped as { queryCount?: number }).queryCount = store.count;
+    throw wrapped;
+  }
+};
+
+export default { getSqlPool, runQuery, withQueryTracking };

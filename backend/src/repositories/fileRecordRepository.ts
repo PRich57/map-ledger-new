@@ -1,4 +1,4 @@
-import { normalizeGlMonth } from '../utils/glMonth';
+import { normalizeGlMonth, isValidNormalizedMonth } from '../utils/glMonth';
 import { runQuery } from '../utils/sqlClient';
 
 const logPrefix = '[fileRecordRepository]';
@@ -17,22 +17,12 @@ const toSqlCompatibleGlMonth = (glMonth?: string | null): string | null => {
   }
 
   const normalizedMonth = normalizeGlMonth(glMonth);
-  if (!normalizedMonth) {
+  if (!normalizedMonth || !isValidNormalizedMonth(normalizedMonth)) {
     logWarn('Unable to normalize glMonth value; skipping assignment', { glMonth });
     return null;
   }
 
-  const isoDate = `${normalizedMonth}-01`;
-  const parsed = new Date(isoDate);
-  if (Number.isNaN(parsed.getTime())) {
-    logWarn('Normalized glMonth is not a valid date; skipping assignment', {
-      glMonth,
-      normalizedMonth,
-    });
-    return null;
-  }
-
-  return isoDate;
+  return normalizedMonth;
 };
 
 export interface FileRecordInput {

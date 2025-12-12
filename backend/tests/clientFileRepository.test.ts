@@ -51,6 +51,30 @@ describe('clientFileRepository.saveClientFileMetadata', () => {
     });
   });
 
+  it('normalizes month-only periods to the first day before inserting', async () => {
+    mockedRunQuery.mockResolvedValueOnce({ recordset: [{ file_upload_guid: guid }] } as any);
+
+    const record: NewClientFileRecord = {
+      clientId: 'client-1',
+      insertedBy: 'uploader@example.com',
+      sourceFileName: 'file.csv',
+      fileStorageUri: 'https://storage.example.com/file.csv',
+      status: 'completed',
+      glPeriodStart: '2024-01',
+      glPeriodEnd: '2024-02',
+    };
+
+    await saveClientFileMetadata(record);
+
+    expect(mockedRunQuery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        glPeriodStart: '2024-01-01',
+        glPeriodEnd: '2024-02-01',
+      })
+    );
+  });
+
   it('returns last-step timestamps only when provided', async () => {
     mockedRunQuery.mockResolvedValueOnce({ recordset: [{ file_upload_guid: guid }] } as any);
 
@@ -67,28 +91,6 @@ describe('clientFileRepository.saveClientFileMetadata', () => {
     expect(saved.id).toBe(guid);
     expect(saved.lastStepCompletedDttm).toBeUndefined();
     expect(mockedRunQuery).toHaveBeenCalledTimes(1);
-  });
-
-  it('persists GL periods as year-month strings', async () => {
-    mockedRunQuery.mockResolvedValueOnce({ recordset: [{ file_upload_guid: guid }] } as any);
-
-    const record: NewClientFileRecord = {
-      clientId: 'client-1',
-      insertedBy: 'uploader@example.com',
-      sourceFileName: 'file.csv',
-      fileStorageUri: 'https://storage.example.com/file.csv',
-      status: 'completed',
-      glPeriodStart: '2024-03-15',
-      glPeriodEnd: '2024-04',
-    };
-
-    await saveClientFileMetadata(record);
-
-    expect(mockedRunQuery).toHaveBeenCalledTimes(1);
-    expect(mockedRunQuery.mock.calls[0][1]).toMatchObject({
-      glPeriodStart: '2024-03',
-      glPeriodEnd: '2024-04',
-    });
   });
 });
 

@@ -28,9 +28,12 @@ interface MappingSuggestionRow {
     id: string;
     targetId: string;
     targetName: string;
-    allocationType: 'percentage' | 'amount';
+    allocationType: 'percentage' | 'amount' | 'dynamic';
     allocationValue: number;
     notes?: string;
+    basisDatapoint?: string;
+    isCalculated?: boolean;
+    isExclusion?: boolean;
   }[];
   entities: { id: string; entity: string; balance: number }[];
   glMonth?: string | null;
@@ -92,32 +95,34 @@ const mapToSuggestion = (
       Boolean(detail.targetDatapoint),
   );
 
-  return {
-    id: `${fileUploadGuid}-${row.recordId ?? row.entityAccountId}`,
-    entityId,
-    entityName: entityId,
+    return {
+      id: `${fileUploadGuid}-${row.recordId ?? row.entityAccountId}`,
+      entityId,
+      entityName: entityId,
     accountId: row.entityAccountId,
     accountName: row.accountName ?? row.entityAccountId,
     activity,
     netChange: activity,
-    status,
-    mappingType,
-    polarity,
-    presetId,
-    exclusionPct: row.exclusionPct ?? null,
+      status,
+      mappingType,
+      polarity,
+      presetId,
+      exclusionPct: row.exclusionPct ?? null,
     splitDefinitions: hydratedDetails.map((detail, index) => {
-      // Check if this is an exclusion split
       const isExclusionSplit = detail.targetDatapoint.toLowerCase() === 'excluded';
+      const isDynamicSplit = detail.isCalculated === true;
 
       return {
         id: `${presetId ?? 'preset'}-${index}`,
         targetId: isExclusionSplit ? '' : detail.targetDatapoint,
         targetName: isExclusionSplit ? 'Exclusion' : detail.targetDatapoint,
-        allocationType: 'percentage',
+        allocationType: isDynamicSplit ? 'dynamic' : 'percentage',
         allocationValue: detail.specifiedPct ?? 0,
-        notes: isExclusionSplit ? 'Excluded amount' : (detail.basisDatapoint ?? undefined),
+        notes: isExclusionSplit ? 'Excluded amount' : undefined,
+        basisDatapoint: detail.basisDatapoint ?? undefined,
         isCalculated: detail.isCalculated ?? undefined,
         isExclusion: isExclusionSplit,
+        recordId: detail.recordId ?? undefined,
       };
     }),
     entities: [

@@ -3,16 +3,24 @@ import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import type {
   DistributionOperationShare,
   DistributionRow,
+  MappingPresetLibraryEntry,
 } from '../../types';
 import type { DistributionOperationCatalogItem } from '../../store/distributionStore';
+
+export type DistributionOperationDraft = DistributionOperationShare & {
+  draftId: string;
+};
 
 interface DistributionSplitRowProps {
   row: DistributionRow;
   operationsCatalog: DistributionOperationCatalogItem[];
-  operationsDraft: DistributionOperationShare[];
+  operationsDraft: DistributionOperationDraft[];
   setOperationsDraft: React.Dispatch<
-    React.SetStateAction<DistributionOperationShare[]>
+    React.SetStateAction<DistributionOperationDraft[]>
   >;
+  presetOptions: MappingPresetLibraryEntry[];
+  selectedPresetId: string | null;
+  onApplyPreset: (presetId: string | null) => void;
 }
 
 const amountFormatter = new Intl.NumberFormat('en-US', {
@@ -49,22 +57,24 @@ const parsePercentageInput = (value: string): number | null => {
   return parsed;
 };
 
-const buildPercentageState = (drafts: DistributionOperationShare[]) => {
+const buildPercentageState = (drafts: DistributionOperationDraft[]) => {
   const entries: Record<string, string> = {};
   drafts.forEach(operation => {
-    if (!operation.id) {
-      return;
-    }
-    entries[operation.id] = formatPercentageLabel(operation.allocation ?? 0);
+    entries[operation.draftId] = formatPercentageLabel(operation.allocation ?? 0);
   });
   return entries;
 };
+
+const createDraftId = () => `op-draft-${Math.random().toString(36).slice(2, 9)}`;
 
 export default function DistributionSplitRow({
   row,
   operationsCatalog,
   operationsDraft,
   setOperationsDraft,
+  presetOptions,
+  selectedPresetId,
+  onApplyPreset,
 }: DistributionSplitRowProps) {
   const [percentageInputs, setPercentageInputs] = useState<
     Record<string, string>
@@ -126,6 +136,17 @@ export default function DistributionSplitRow({
     [operationsCatalog, usedOperationIds],
   );
 
+  const updateOperationByDraft = (
+    draftId: string,
+    updates: Partial<DistributionOperationDraft>,
+  ) => {
+    setOperationsDraft(prev =>
+      prev.map(operation =>
+        operation.draftId === draftId ? { ...operation, ...updates } : operation,
+      ),
+    );
+  };
+
   const handleAddOperation = () => {
     if (availableOptions.length === 0) {
       return;
@@ -134,6 +155,7 @@ export default function DistributionSplitRow({
     setOperationsDraft(prev => [
       ...prev,
       {
+        draftId: createDraftId(),
         id: selectedOption.id,
         name: selectedOption.name,
         allocation: prev.length === 0 ? 100 : 0,
@@ -141,91 +163,71 @@ export default function DistributionSplitRow({
     ]);
   };
 
-  const handleRemoveOperation = (operationId: string) => {
-    setOperationsDraft(prev => prev.filter(operation => operation.id !== operationId));
+  const handleRemoveOperation = (draftId: string) => {
+    setOperationsDraft(prev => prev.filter(operation => operation.draftId !== draftId));
     setPercentageInputs(prev => {
-      if (!prev[operationId]) {
+      if (!prev[draftId]) {
         return prev;
       }
       const next = { ...prev };
-      delete next[operationId];
+      delete next[draftId];
       return next;
     });
   };
 
-  const handleTargetChange = (operationId: string, value: string) => {
+  const handleTargetChange = (draftId: string, value: string) => {
     if (!value) {
-      handleRemoveOperation(operationId);
+      handleRemoveOperation(draftId);
       return;
     }
     const selected = operationsCatalog.find(option => option.id === value);
-    setOperationsDraft(prev =>
-      prev.map(operation =>
-        operation.id === operationId
-          ? {
-              ...operation,
-              id: selected?.id ?? value,
-              name: selected?.name ?? value,
-            }
-          : operation,
-      ),
-    );
+    updateOperationByDraft(draftId, {
+      id: selected?.id ?? value,
+      name: selected?.name ?? value,
+    });
   };
 
-  const updateAllocation = (operationId: string, normalizedValue: number) => {
-    setOperationsDraft(prev =>
-      prev.map(operation =>
-        operation.id === operationId
-          ? { ...operation, allocation: normalizedValue }
-          : operation,
-      ),
-    );
+  const updateAllocation = (draftId: string, normalizedValue: number) => {
+    updateOperationByDraft(draftId, { allocation: normalizedValue });
   };
 
-  const handlePercentageChange = (operationId: string, value: string) => {
+  const handlePercentageChange = (draftId: string, value: string) => {
     setPercentageInputs(prev => ({
       ...prev,
-      [operationId]: value,
+      [draftId]: value,
     }));
   };
 
-  const handlePercentageBlur = (operationId: string, rawValue: string) => {
+  const handlePercentageBlur = (draftId: string, rawValue: string) => {
     const parsedValue = parsePercentageInput(rawValue);
     if (parsedValue === null) {
+      const currentValue =
+        operationsDraft.find(operation => operation.draftId === draftId)?.allocation ?? 0;
       setPercentageInputs(prev => ({
         ...prev,
-        [operationId]: formatPercentageLabel(
-          operationsDraft.find(operation => operation.id === operationId)?.allocation ?? 0,
-        ),
+        [draftId]: formatPercentageLabel(currentValue),
       }));
       return;
     }
 
     const normalizedValue = roundToTwoDecimals(clampPercentage(parsedValue));
-    updateAllocation(operationId, normalizedValue);
+    updateAllocation(draftId, normalizedValue);
     setPercentageInputs(prev => ({
       ...prev,
-      [operationId]: formatPercentageLabel(normalizedValue),
+      [draftId]: formatPercentageLabel(normalizedValue),
     }));
   };
 
-  const handleNotesChange = (operationId: string, value: string) => {
-    setOperationsDraft(prev =>
-      prev.map(operation =>
-        operation.id === operationId ? { ...operation, notes: value || undefined } : operation,
-      ),
-    );
+  const handleNotesChange = (draftId: string, value: string) => {
+    updateOperationByDraft(draftId, { notes: value || undefined });
   };
 
-  const optionsForOperation = (operationId: string) => {
+  const optionsForOperation = (operation: DistributionOperationDraft) => {
     const filtered = operationsCatalog.filter(
-      option => option.id === operationId || !usedOperationIds.has(option.id),
+      option => option.id === operation.id || !usedOperationIds.has(option.id),
     );
-    if (!filtered.some(option => option.id === operationId) && operationId) {
-      const existing = operationsDraft.find(operation => operation.id === operationId);
-      if (existing) {
-        filtered.unshift({ id: operationId, name: existing.name ?? operationId });
-      }
+    if (!filtered.some(option => option.id === operation.id) && operation.id) {
+      filtered.unshift({ id: operation.id, name: operation.name ?? operation.id });
     }
     return filtered;
   };
@@ -237,15 +239,35 @@ export default function DistributionSplitRow({
           <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Allocation splits</p>
           <p className="text-xs text-slate-500 dark:text-slate-400">Ensure 100% allocation across targets.</p>
         </div>
-        <button
-          type="button"
-          onClick={handleAddOperation}
-          disabled={availableOptions.length === 0}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus:ring-offset-slate-900"
-        >
-          <Plus className="h-4 w-4" />
-          Add split
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-300">
+            <label htmlFor={`distribution-preset-${row.id}`} className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Preset
+            </label>
+            <select
+              id={`distribution-preset-${row.id}`}
+              value={selectedPresetId ?? ''}
+              onChange={event => onApplyPreset(event.target.value || null)}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">Custom allocation</option>
+              {presetOptions.map(option => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={handleAddOperation}
+            disabled={availableOptions.length === 0}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:focus:ring-offset-slate-900"
+          >
+            <Plus className="h-4 w-4" />
+            Add split
+          </button>
+        </div>
       </div>
 
       {operationsCatalog.length === 0 && (
@@ -271,38 +293,45 @@ export default function DistributionSplitRow({
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
               {operationsDraft.map(operation => (
-                <tr key={operation.id}>
+                <tr key={operation.draftId}>
                   <td className="px-3 py-2">
-                    <label className="sr-only" htmlFor={`distribution-operation-${operation.id}`}>
-                      Select target
+                    <label className="sr-only" htmlFor={`distribution-operation-${operation.draftId}`}
+                      >Select target
                     </label>
                     <select
-                      id={`distribution-operation-${operation.id}`}
+                      id={`distribution-operation-${operation.draftId}`}
                       value={operation.id}
-                      onChange={event => handleTargetChange(operation.id, event.target.value)}
+                      onChange={event => handleTargetChange(operation.draftId, event.target.value)}
                       className="w-full rounded-md border border-slate-300 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                     >
                       <option value="">Select target</option>
-                      {optionsForOperation(operation.id).map(option => (
+                      {optionsForOperation(operation).map(option => (
                         <option key={option.id} value={option.id}>
                           {option.name && option.name !== option.id
-                            ? `${option.id} – ${option.name}`
+                            ? `${option.id} - ${option.name}`
                             : option.id}
                         </option>
                       ))}
                     </select>
                   </td>
                   <td className="px-3 py-2">
-                    <label className="sr-only" htmlFor={`distribution-percentage-${operation.id}`}>
-                      Enter allocation percentage
+                    <label className="sr-only" htmlFor={`distribution-percentage-${operation.draftId}`}
+                      >Enter allocation percentage
                     </label>
                     <input
-                      id={`distribution-percentage-${operation.id}`}
+                      id={`distribution-percentage-${operation.draftId}`}
                       type="text"
                       inputMode="decimal"
-                      value={percentageInputs[operation.id] ?? formatPercentageLabel(operation.allocation ?? 0)}
-                      onChange={event => handlePercentageChange(operation.id, event.target.value)}
-                      onBlur={event => handlePercentageBlur(operation.id, event.target.value)}
+                      value={
+                        percentageInputs[operation.draftId] ??
+                        formatPercentageLabel(operation.allocation ?? 0)
+                      }
+                      onChange={event =>
+                        handlePercentageChange(operation.draftId, event.target.value)
+                      }
+                      onBlur={event =>
+                        handlePercentageBlur(operation.draftId, event.target.value)
+                      }
                       className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                     />
                     <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">%</span>
@@ -313,14 +342,16 @@ export default function DistributionSplitRow({
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    <label className="sr-only" htmlFor={`distribution-notes-${operation.id}`}>
-                      Enter operation notes
+                    <label className="sr-only" htmlFor={`distribution-notes-${operation.draftId}`}
+                      >Enter operation notes
                     </label>
                     <input
-                      id={`distribution-notes-${operation.id}`}
+                      id={`distribution-notes-${operation.draftId}`}
                       type="text"
                       value={operation.notes ?? ''}
-                      onChange={event => handleNotesChange(operation.id, event.target.value)}
+                      onChange={event =>
+                        handleNotesChange(operation.draftId, event.target.value)
+                      }
                       placeholder="Optional notes"
                       className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                     />
@@ -328,7 +359,7 @@ export default function DistributionSplitRow({
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"
-                      onClick={() => handleRemoveOperation(operation.id)}
+                      onClick={() => handleRemoveOperation(operation.draftId)}
                       className="inline-flex items-center rounded-md border border-transparent bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700 transition hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50 dark:focus:ring-offset-slate-900"
                     >
                       <Trash2 className="mr-1 h-4 w-4" />

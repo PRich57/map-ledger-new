@@ -4,6 +4,7 @@ import { buildErrorResponse } from '../datapointConfigs/utils';
 import { getFirstStringValue } from '../../utils/requestParsers';
 import {
   createEntityDistributionPresetDetails,
+  deleteEntityDistributionPresetDetail,
   listEntityDistributionPresetDetails,
   updateEntityDistributionPresetDetail,
   EntityDistributionPresetDetailInput,
@@ -60,17 +61,17 @@ const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] =>
   const inputs: EntityDistributionPresetDetailInput[] = [];
 
   for (const entry of payload) {
-    const presetId =
+    const presetGuid =
       parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
       parseGuid((entry as Record<string, unknown>)?.presetId);
     const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
 
-    if (!presetId || !operationCd) {
+    if (!presetGuid || !operationCd) {
       continue;
     }
 
     inputs.push({
-      presetId,
+      presetGuid,
       operationCd,
       isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated) ?? null,
       specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
@@ -86,10 +87,10 @@ const listHandler = async (
   context: InvocationContext
 ): Promise<HttpResponseInit> => {
   try {
-    const presetId =
+    const presetGuid =
       parseGuid(request.query.get('presetGuid')) ??
       parseGuid(request.query.get('presetId'));
-    const items = await listEntityDistributionPresetDetails(presetId);
+    const items = await listEntityDistributionPresetDetails(presetGuid);
     return json({ items });
   } catch (error) {
     context.error('Failed to list entity distribution preset details', error);
@@ -123,15 +124,15 @@ const updateHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const body = await readJson(request);
-    const presetId =
+    const presetGuid =
       parseGuid(body?.presetGuid) ?? parseGuid(body?.presetId);
     const operationCd = getFirstStringValue(body?.operationCd);
 
-    if (!presetId || !operationCd) {
+    if (!presetGuid || !operationCd) {
       return json({ message: 'presetGuid and operationCd are required' }, 400);
     }
 
-    const updated = await updateEntityDistributionPresetDetail(presetId, operationCd, {
+    const updated = await updateEntityDistributionPresetDetail(presetGuid, operationCd, {
       isCalculated: normalizeBool(body?.isCalculated) ?? undefined,
       specifiedPct: parseNumber(body?.specifiedPct),
       updatedBy: normalizeText(body?.updatedBy),
@@ -145,6 +146,40 @@ const updateHandler = async (
   } catch (error) {
     context.error('Failed to update entity distribution preset detail', error);
     return json(buildErrorResponse('Failed to update entity distribution preset detail', error), 500);
+  }
+};
+
+const deleteHandler = async (
+  request: HttpRequest,
+  context: InvocationContext
+): Promise<HttpResponseInit> => {
+  try {
+    const body = await readJson(request).catch(() => null);
+    const presetGuid =
+      parseGuid(request.query.get('presetGuid')) ??
+      parseGuid(request.query.get('presetId')) ??
+      parseGuid((body as Record<string, unknown>)?.presetGuid) ??
+      parseGuid((body as Record<string, unknown>)?.presetId);
+    const operationCd =
+      getFirstStringValue(request.query.get('operationCd')) ??
+      getFirstStringValue((body as Record<string, unknown>)?.operationCd);
+
+    if (!presetGuid || !operationCd) {
+      return json({ message: 'presetGuid and operationCd are required' }, 400);
+    }
+
+    const deleted = await deleteEntityDistributionPresetDetail(presetGuid, operationCd);
+    if (!deleted) {
+      return json({ message: 'Preset detail not found' }, 404);
+    }
+
+    return json({ deleted });
+  } catch (error) {
+    context.error('Failed to delete entity distribution preset detail', error);
+    return json(
+      buildErrorResponse('Failed to delete entity distribution preset detail', error),
+      500
+    );
   }
 };
 
@@ -167,6 +202,13 @@ app.http('entityDistributionPresetDetails-update', {
   authLevel: 'anonymous',
   route: 'entityDistributionPresetDetails',
   handler: updateHandler,
+});
+
+app.http('entityDistributionPresetDetails-delete', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'entityDistributionPresetDetails',
+  handler: deleteHandler,
 });
 
 export default listHandler;

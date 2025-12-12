@@ -29,7 +29,7 @@ const toSqlMonth = (value?: string | null): string | null => {
     return null;
   }
   const normalized = normalizeGlMonth(value);
-  return normalized ? `${normalized}-01` : null;
+  return normalized || null;
 };
 
 const mapRow = (row: {
@@ -103,9 +103,7 @@ export const insertEntityScoaActivity = async (
       params[`scoaAccountId${index}`] = normalizeText(activity.scoaAccountId);
       params[`activityMonth${index}`] = toSqlMonth(activity.activityMonth);
       params[`activityValue${index}`] = activity.activityValue;
-      params[`updatedBy${index}`] = normalizeText(activity.updatedBy);
-
-      return `(@entityId${index}, @scoaAccountId${index}, @activityMonth${index}, @activityValue${index}, NULL, @updatedBy${index})`;
+      return `(@entityId${index}, @scoaAccountId${index}, @activityMonth${index}, @activityValue${index})`;
     })
     .join(', ');
 
@@ -122,9 +120,7 @@ export const insertEntityScoaActivity = async (
       ENTITY_ID,
       SCOA_ACCOUNT_ID,
       ACTIVITY_MONTH,
-      ACTIVITY_VALUE,
-      UPDATED_DTTM,
-      UPDATED_BY
+      ACTIVITY_VALUE
     )
     OUTPUT
       INSERTED.ENTITY_ID as entity_id,
@@ -198,7 +194,7 @@ export const upsertEntityScoaActivity = async (
         source.activity_month,
         source.activity_value,
         NULL,
-        source.updated_by
+        NULL
       )
     OUTPUT
       inserted.ENTITY_ID as entity_id,

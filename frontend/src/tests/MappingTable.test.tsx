@@ -1,6 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from './testUtils';
 import MappingTable from '../components/mapping/MappingTable';
-import { createInitialMappingAccounts, useMappingStore } from '../store/mappingStore';
+import {
+  createInitialMappingAccounts,
+  RowSaveMetadata,
+  useMappingStore,
+} from '../store/mappingStore';
+import {
+  SAVE_ROW_LIMIT,
+  SAVE_WARNING_THRESHOLD,
+} from '../components/mapping/MappingToolbar';
 import { COA_SEED_DATAPOINTS } from '../data/coaSeeds';
 import type { MappingSplitDefinition, TargetScoaOption } from '../types';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
@@ -11,6 +19,11 @@ const resetMappingStore = () => {
     accounts: createInitialMappingAccounts(),
     searchTerm: '',
     activeStatuses: [],
+    dirtyMappingIds: new Set<string>(),
+    rowSaveStatuses: {},
+    isSavingMappings: false,
+    saveError: null,
+    lastSavedCount: 0,
   });
 };
 
@@ -183,6 +196,16 @@ const seedDynamicPresetExclusions = () => {
   });
 };
 
+const buildLargeAccountSet = (count: number) => {
+  const sampleAccount = createInitialMappingAccounts()[0];
+  return Array.from({ length: count }, (_value, index) => ({
+    ...sampleAccount,
+    id: `${sampleAccount.id}-${index}`,
+    accountId: `${sampleAccount.accountId}-${index}`,
+    accountName: `${sampleAccount.accountName} ${index + 1}`,
+  }));
+};
+
 describe('MappingTable', () => {
   beforeEach(() => {
     resetMappingStore();
@@ -329,5 +352,103 @@ describe('MappingTable', () => {
 
     expect(within(fuelRow).getByText('Original: $65,000.00')).toBeInTheDocument();
     expect(within(fuelRow).getByText('40.00%')).toBeInTheDocument();
+  });
+
+  test('keeps the table interactive while saving large unmapped sets', () => {
+    const sampleAccount = createInitialMappingAccounts()[1];
+    const largeAccounts = Array.from({ length: 180 }, (_value, index) => ({
+      ...sampleAccount,
+      id: `${sampleAccount.id}-${index}`,
+      accountId: `${sampleAccount.accountId}-${index}`,
+      accountName: `${sampleAccount.accountName} ${index + 1}`,
+    }));
+    const dirtyChunk = largeAccounts.slice(0, 6).map(account => account.id);
+    const savingStatuses: Record<string, RowSaveMetadata> = {};
+    dirtyChunk.slice(0, 3).forEach(id => {
+      savingStatuses[id] = { status: 'saving' };
+    });
+
+    useMappingStore.setState({
+      accounts: largeAccounts,
+      dirtyMappingIds: new Set<string>(dirtyChunk),
+      rowSaveStatuses: savingStatuses,
+      isSavingMappings: true,
+      activeStatuses: [],
+    });
+
+    render(<MappingTable />);
+
+    const searchInput = screen.getByLabelText('Search mappings');
+    expect(searchInput).toBeEnabled();
+    fireEvent.change(searchInput, { target: { value: 'Fuel' } });
+    expect(useMappingStore.getState().searchTerm).toBe('Fuel');
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(5);
+  });
+
+  test('shows per-row saving and error indicators', () => {
+    const errorMessage = 'Entity conflict detected';
+    useMappingStore.setState({
+      dirtyMappingIds: new Set(['acct-1', 'acct-2']),
+      rowSaveStatuses: {
+        'acct-1': { status: 'saving' },
+        'acct-2': { status: 'error', message: errorMessage },
+      },
+      isSavingMappings: true,
+    });
+
+    render(<MappingTable />);
+
+    const savingRow = screen.getByText('Linehaul Revenue').closest('tr');
+    expect(savingRow).toBeTruthy();
+    if (!savingRow) {
+      throw new Error('Linehaul Revenue row must exist');
+    }
+    expect(within(savingRow).getByText(/Saving changes/i)).toBeInTheDocument();
+
+    const errorRow = screen.getByText('Payroll Taxes').closest('tr');
+    expect(errorRow).toBeTruthy();
+    if (!errorRow) {
+      throw new Error('Payroll Taxes row must exist');
+    }
+    expect(within(errorRow).getByText(`Save failed: ${errorMessage}`)).toBeInTheDocument();
+  });
+
+  test('warns when saving a large batch of rows', () => {
+    const rowsToSave = SAVE_WARNING_THRESHOLD + 10;
+    const largeAccounts = buildLargeAccountSet(rowsToSave);
+    useMappingStore.setState({
+      accounts: largeAccounts,
+      dirtyMappingIds: new Set(largeAccounts.map(account => account.id)),
+      rowSaveStatuses: {},
+      isSavingMappings: false,
+      saveError: null,
+      lastSavedCount: 0,
+    });
+
+    render(<MappingTable />);
+
+    const warningMessage = `Saving ${rowsToSave} rows at once may exceed the ${SAVE_ROW_LIMIT}-row limit. Consider using batch edits or saving in smaller chunks.`;
+    expect(screen.getByText(warningMessage)).toBeInTheDocument();
+  });
+
+  test('does not warn when save size remains under the threshold', () => {
+    const accounts = buildLargeAccountSet(SAVE_WARNING_THRESHOLD + 5);
+    const rowsToSave = Math.max(1, SAVE_WARNING_THRESHOLD - 5);
+    useMappingStore.setState({
+      accounts,
+      dirtyMappingIds: new Set(accounts.slice(0, rowsToSave).map(account => account.id)),
+      rowSaveStatuses: {},
+      isSavingMappings: false,
+      saveError: null,
+      lastSavedCount: 0,
+    });
+
+    render(<MappingTable />);
+
+    expect(
+      screen.queryByText(
+        /may exceed the \d+-row limit\. Consider using batch edits or saving in smaller chunks\./,
+      ),
+    ).not.toBeInTheDocument();
   });
 });

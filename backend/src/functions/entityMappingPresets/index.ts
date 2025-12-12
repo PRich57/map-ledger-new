@@ -5,7 +5,7 @@ import { buildErrorResponse } from '../datapointConfigs/utils';
 import { getFirstStringValue } from '../../utils/requestParsers';
 import {
   createEntityMappingPreset,
-  listEntityMappingPresets,
+  listEntityMappingPresetsWithDetails,
   updateEntityMappingPreset,
 } from '../../repositories/entityMappingPresetRepository';
 
@@ -69,7 +69,7 @@ const listHandler = async (
 ): Promise<HttpResponseInit> => {
   try {
     const entityId = getFirstStringValue(request.query.get('entityId'));
-    const presets = await listEntityMappingPresets(entityId ?? undefined);
+    const presets = await listEntityMappingPresetsWithDetails(entityId ?? undefined);
     return json({ items: presets });
   } catch (error) {
     context.error('Failed to list entity mapping presets', error);

@@ -16,7 +16,11 @@ import {
   NewClientFileEntityInput,
 } from '../../repositories/clientFileEntityRepository';
 import { listClientFileEntities } from '../../repositories/clientFileEntityRepository';
-import { listClientEntities } from '../../repositories/clientEntityRepository';
+import {
+  ClientEntityRecord,
+  createClientEntity,
+  listClientEntities,
+} from '../../repositories/clientEntityRepository';
 import { buildErrorResponse } from '../datapointConfigs/utils';
 import {
   detectGlMonthFromRow,
@@ -147,6 +151,34 @@ const normalizeEntityValue = (value: string | undefined | null): string => {
   return slug.length > 0 ? slug : normalized;
 };
 
+const normalizeEntityLookupKey = (value?: string | null): string | null => {
+  const normalized = normalizeEntityValue(value ?? '');
+  return normalized.length > 0 ? normalized : null;
+};
+
+const addEntityToLookup = (
+  entity: ClientEntityRecord,
+  lookup: Map<string, ClientEntityRecord>,
+) => {
+  const candidates = [
+    entity.entityId,
+    entity.entityDisplayName,
+    entity.entityName,
+    ...(entity.aliases ?? []),
+  ];
+
+  candidates.forEach((candidate) => {
+    const key = normalizeEntityLookupKey(candidate);
+    if (key && !lookup.has(key)) {
+      lookup.set(key, entity);
+    }
+  });
+};
+
+interface ResolvedIngestEntity extends IngestEntity {
+  id: string;
+}
+
 const matchEntity = (
   entityName: string | undefined,
   entities: IngestEntity[],
@@ -172,6 +204,109 @@ const matchEntity = (
   }
 
   return null;
+};
+
+const resolveIngestEntities = async (
+  context: InvocationContext,
+  clientId: string | undefined,
+  requested: IngestEntity[],
+): Promise<ResolvedIngestEntity[]> => {
+  if (requested.length === 0) {
+    return [];
+  }
+
+  if (!clientId) {
+    return requested.map((entity) => ({
+      ...entity,
+      id: entity.id ?? entity.name,
+    }));
+  }
+
+  const normalizedClientId = clientId.trim();
+
+  if (!normalizedClientId) {
+    return requested.map((entity) => ({
+      ...entity,
+      id: entity.id ?? entity.name,
+    }));
+  }
+
+  const existingEntities = await listClientEntities(normalizedClientId);
+  const entityById = new Map<string, ClientEntityRecord>();
+  const normalizedLookup = new Map<string, ClientEntityRecord>();
+
+  existingEntities.forEach((entity) => {
+    entityById.set(entity.entityId, entity);
+    addEntityToLookup(entity, normalizedLookup);
+  });
+
+  const createdEntities = new Map<string, ClientEntityRecord>();
+
+  const results: ResolvedIngestEntity[] = [];
+
+  for (const entity of requested) {
+    const trimmedName = entity.name.trim();
+    const preservedName = trimmedName || entity.name || '';
+    const nameKey = normalizeEntityLookupKey(preservedName);
+    const idKey = normalizeEntityLookupKey(entity.id);
+
+    let matched: ClientEntityRecord | undefined;
+
+    if (entity.id) {
+      matched = entityById.get(entity.id);
+    }
+
+    if (!matched && idKey) {
+      matched = normalizedLookup.get(idKey);
+    }
+
+    if (!matched && nameKey) {
+      matched = normalizedLookup.get(nameKey);
+    }
+
+    const creationKey = nameKey ?? idKey ?? normalizeEntityLookupKey(preservedName);
+
+    if (!matched && normalizedClientId && creationKey) {
+      matched = createdEntities.get(creationKey);
+      if (!matched) {
+        if (!preservedName) {
+          throw new Error('Entity name is required to create a new client entity');
+        }
+
+        const created = await createClientEntity({
+          clientId: normalizedClientId,
+          entityName: preservedName,
+          entityDisplayName: preservedName,
+        });
+
+        if (!created) {
+          throw new Error(`Failed to create client entity '${preservedName}'`);
+        }
+
+        matched = created;
+        createdEntities.set(creationKey, created);
+        entityById.set(created.entityId, created);
+        addEntityToLookup(created, normalizedLookup);
+        context.info('Created client entity for import', {
+          clientId: normalizedClientId,
+          entityId: created.entityId,
+          entityName: created.entityName,
+        });
+      }
+    }
+
+    const resolvedId = matched?.entityId ?? entity.id ?? preservedName;
+    const resolvedName =
+      matched?.entityDisplayName ?? matched?.entityName ?? preservedName;
+
+    results.push({
+      ...entity,
+      id: resolvedId,
+      name: resolvedName,
+    });
+  }
+
+  return results;
 };
 
 const detectGlMonth = (
@@ -488,7 +623,18 @@ export const ingestFileRecordsHandler = async (
       fileUploadGuid: payload.fileUploadGuid as string,
     };
 
-    const records = buildRecords(resolvedPayload);
+    const resolvedEntities = await resolveIngestEntities(
+      context,
+      resolvedPayload.clientId,
+      resolvedPayload.entities ?? [],
+    );
+
+    const payloadWithResolvedEntities: ResolvedIngestPayload = {
+      ...resolvedPayload,
+      entities: resolvedEntities,
+    };
+
+    const records = buildRecords(payloadWithResolvedEntities);
     if (records.length === 0) {
       context.warn('No valid records found to ingest', {
         fileUploadGuid: resolvedPayload.fileUploadGuid,
@@ -504,10 +650,10 @@ export const ingestFileRecordsHandler = async (
       sheetCount: payload.sheets.length,
     });
 
-    const sheetInserts = buildSheetInserts(resolvedPayload);
+    const sheetInserts = buildSheetInserts(payloadWithResolvedEntities);
     const existingFileRecords = await listFileRecords(resolvedPayload.fileUploadGuid);
     const entityInserts = buildEntityInserts(
-      resolvedPayload,
+      payloadWithResolvedEntities,
       records,
       existingFileRecords,
     );
