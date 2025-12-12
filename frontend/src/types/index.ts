@@ -536,6 +536,8 @@ export interface DistributionRow {
   notes?: string;
   status: DistributionStatus;
   isDirty?: boolean;
+  autoSaveState?: 'idle' | 'queued' | 'saving' | 'saved' | 'error';
+  autoSaveError?: string | null;
 }
 
 export interface DistributionSaveOperation {

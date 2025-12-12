@@ -38,6 +38,24 @@ const STATUS_BADGE_CLASSES: Record<DistributionStatus, string> = {
   Distributed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
 };
 
+type AutoSaveState = NonNullable<DistributionRow['autoSaveState']>;
+
+const AUTO_STATUS_LABELS: Record<AutoSaveState, string> = {
+  idle: 'Idle',
+  queued: 'Queued for auto-save',
+  saving: 'Auto-saving...',
+  saved: 'Saved',
+  error: 'Auto-save failed',
+};
+
+const AUTO_STATUS_CLASSES: Record<AutoSaveState, string> = {
+  idle: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  queued: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
+  saving: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
+  saved: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
+  error: 'bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-200',
+};
+
 const TYPE_OPTIONS: { value: DistributionType; label: string }[] = [
   { value: 'direct', label: 'Direct' },
   { value: 'percentage', label: 'Percentage' },
@@ -198,6 +216,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType,
     updateRowOperations,
     updateRowPreset,
+    queueAutoSave,
+    setSaveContext,
     setOperationsCatalog,
   } = useDistributionStore(state => ({
     rows: state.rows,
@@ -208,6 +228,8 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType: state.updateRowType,
     updateRowOperations: state.updateRowOperations,
     updateRowPreset: state.updateRowPreset,
+    queueAutoSave: state.queueAutoSave,
+    setSaveContext: state.setSaveContext,
     setOperationsCatalog: state.setOperationsCatalog,
   }));
 
@@ -290,6 +312,10 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   useEffect(() => {
     setOperationsCatalog(clientOperations);
   }, [clientOperations, setOperationsCatalog]);
+
+  useEffect(() => {
+    setSaveContext(activeEntityId ?? null, currentEmail ?? null);
+  }, [activeEntityId, currentEmail, setSaveContext]);
 
   useEffect(() => {
     if (!focusMappingId) {
@@ -455,6 +481,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowOperations(row.id, [
       { id: catalogItem.id, code: catalogItem.code, name: catalogItem.name },
     ]);
+    queueAutoSave([row.id], { immediate: true });
   };
 
   const getAriaSort = (columnKey: SortKey): 'ascending' | 'descending' | 'none' => {
@@ -613,11 +640,29 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
                     <td className={`px-3 py-4 text-right ${COLUMN_WIDTH_CLASSES.status ?? ''}`}>
                       {(() => {
                         const StatusIcon = STATUS_ICONS[row.status];
+                        const autoState = row.autoSaveState ?? 'idle';
+                        const shouldShowAutoBadge = autoState !== 'idle' || row.autoSaveError;
                         return (
-                          <span className={`inline-flex min-w-[7rem] items-center justify-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
-                            <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                            {statusLabel(row.status)}
-                          </span>
+                          <div className="flex flex-col items-end gap-1 text-right">
+                            <span className={`inline-flex min-w-[7rem] items-center justify-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${statusBadgeClass}`}>
+                              <StatusIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                              {statusLabel(row.status)}
+                            </span>
+                            {shouldShowAutoBadge && (
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium ${AUTO_STATUS_CLASSES[autoState]}`}
+                                role="status"
+                                aria-live="polite"
+                              >
+                                {AUTO_STATUS_LABELS[autoState]}
+                              </span>
+                            )}
+                            {row.autoSaveError && (
+                              <span className="text-[11px] font-medium text-rose-700 dark:text-rose-300" role="alert">
+                                {row.autoSaveError}
+                              </span>
+                            )}
+                          </div>
                         );
                       })()}
                     </td>
