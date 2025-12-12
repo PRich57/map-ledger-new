@@ -169,6 +169,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           presetId: existing?.presetId ?? null,
           notes: existing?.notes,
           status: existing?.status ?? 'Undistributed',
+          isDirty: existing?.isDirty ?? false,
         });
       });
       return { rows: nextRows };
@@ -192,6 +193,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           ...updates,
           operations: updates.operations ?? row.operations,
           type: updates.type ?? row.type,
+          isDirty: true,
         };
         return applyDistributionStatus(nextRow);
       }),
@@ -207,22 +209,29 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
           ...row,
           type,
           operations: nextOperations,
+          isDirty: true,
         });
       }),
     })),
   updateRowOperations: (id, operations) =>
     set(state => ({
       rows: state.rows.map(row =>
-        row.id === id ? applyDistributionStatus({ ...row, operations }) : row,
+        row.id === id
+          ? applyDistributionStatus({ ...row, operations, isDirty: true })
+          : row,
       ),
     })),
   updateRowPreset: (id, presetId) =>
     set(state => ({
-      rows: state.rows.map(row => (row.id === id ? { ...row, presetId: presetId ?? undefined } : row)),
+      rows: state.rows.map(row =>
+        row.id === id ? { ...row, presetId: presetId ?? undefined, isDirty: true } : row,
+      ),
     })),
   updateRowNotes: (id, notes) =>
     set(state => ({
-      rows: state.rows.map(row => (row.id === id ? { ...row, notes: notes || undefined } : row)),
+      rows: state.rows.map(row =>
+        row.id === id ? { ...row, notes: notes || undefined, isDirty: true } : row,
+      ),
     })),
   setOperationsCatalog: operations =>
     set({
@@ -262,7 +271,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
               nextRow = { ...nextRow, operations: [] };
             }
           }
-          return applyDistributionStatus(nextRow);
+          return applyDistributionStatus({ ...nextRow, isDirty: true });
         }),
       };
     });
@@ -275,7 +284,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
       const idSet = new Set(ids);
       return {
         rows: state.rows.map(row =>
-          idSet.has(row.id) ? { ...row, presetId: presetId ?? null } : row,
+          idSet.has(row.id) ? { ...row, presetId: presetId ?? null, isDirty: true } : row,
         ),
       };
     });
@@ -325,7 +334,19 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
       };
     };
 
-    const payloadRows: DistributionSaveRowInput[] = state.rows.map(row => ({
+    const dirtyRows = state.rows.filter(row => row.isDirty);
+
+    if (dirtyRows.length === 0) {
+      set({
+        isSavingDistributions: false,
+        saveError: null,
+        saveSuccess: 'No distribution rows have been modified.',
+        lastSavedCount: 0,
+      });
+      return 0;
+    }
+
+    const payloadRows: DistributionSaveRowInput[] = dirtyRows.map(row => ({
       scoaAccountId: row.accountId,
       distributionType: row.type,
       presetGuid: row.presetId ?? null,
@@ -339,6 +360,7 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
 
     const requestBody = {
       entityId,
+      changedRows: payloadRows,
       items: payloadRows,
     };
 
@@ -370,16 +392,22 @@ export const useDistributionStore = create<DistributionState>((set, _get) => ({
         lookup.set(item.scoaAccountId, item);
       });
 
+      const savedAccountIds = new Set(payloadRows.map(row => row.scoaAccountId));
+
       set(currentState => ({
         rows: currentState.rows.map(row => {
+          if (!savedAccountIds.has(row.accountId)) {
+            return row;
+          }
           const match = lookup.get(row.accountId);
           if (!match) {
-            return row;
+            return { ...row, isDirty: false };
           }
           return {
             ...row,
             presetId: match.presetGuid,
             status: match.distributionStatus,
+            isDirty: false,
           };
         }),
         isSavingDistributions: false,

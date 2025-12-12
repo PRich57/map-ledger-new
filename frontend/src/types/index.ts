@@ -535,6 +535,7 @@ export interface DistributionRow {
   presetId?: string | null;
   notes?: string;
   status: DistributionStatus;
+  isDirty?: boolean;
 }
 
 export interface DistributionSaveOperation {
