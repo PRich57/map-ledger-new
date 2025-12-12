@@ -20,7 +20,10 @@ import {
 import {
   deleteEntityScoaDistribution,
   insertEntityScoaDistributions,
+  listEntityScoaDistributions,
+  updateEntityScoaDistribution,
   type EntityScoaDistributionInput,
+  type EntityScoaDistributionRow,
 } from '../../repositories/entityScoaDistributionRepository';
 
 type DistributionType = 'direct' | 'percentage' | 'dynamic';
@@ -102,10 +105,10 @@ const buildRequestPayload = (payload: unknown): DistributionSaveRequest => {
   }
 
   const record = payload as Record<string, unknown>;
-  const candidateItems = Array.isArray(record.items)
-    ? record.items
-    : Array.isArray(record.changedRows)
-      ? record.changedRows
+  const candidateItems = Array.isArray(record.changedRows)
+    ? record.changedRows
+    : Array.isArray(record.items)
+      ? record.items
       : Array.isArray(payload)
         ? (payload as unknown[])
         : [];
@@ -188,7 +191,40 @@ const buildDetailInputs = (
     )
     .filter(
       (detail): detail is EntityDistributionPresetDetailInput => Boolean(detail),
+  );
+};
+
+const areDetailInputsEqual = (
+  current: EntityDistributionPresetDetailRow[],
+  target: EntityDistributionPresetDetailInput[],
+): boolean => {
+  if (current.length !== target.length) {
+    return false;
+  }
+
+  const currentMap = new Map<string, { pct: number | null; isCalculated: boolean | null }>();
+
+  current.forEach(detail => {
+    const key = detail.operationCd.toUpperCase();
+    currentMap.set(key, {
+      pct: detail.specifiedPct ?? null,
+      isCalculated: detail.isCalculated ?? null,
+    });
+  });
+
+  return target.every(detail => {
+    const key = detail.operationCd.toUpperCase();
+    const existing = currentMap.get(key);
+
+    if (!existing) {
+      return false;
+    }
+
+    return (
+      (detail.specifiedPct ?? null) === existing.pct &&
+      (detail.isCalculated ?? null) === existing.isCalculated
     );
+  });
 };
 
 const syncPresetDetails = async (
@@ -280,11 +316,18 @@ const saveHandler = async (
 
     const { result: saveResult, queryCount } = await withQueryTracking(async () => {
       const existingPresets = await listEntityDistributionPresetsWithDetails(entityId);
+      const existingDistributions = await listEntityScoaDistributions(entityId);
       const presetLookup = new Map<string, EntityDistributionPresetWithDetailsRow>();
+      const distributionLookup = new Map<string, EntityScoaDistributionRow>();
 
       existingPresets.forEach(preset => {
         const key = normalizePresetKey(entityId, preset.scoaAccountId);
         presetLookup.set(key, preset);
+      });
+
+      existingDistributions.forEach(distribution => {
+        const key = normalizePresetKey(entityId, distribution.scoaAccountId);
+        distributionLookup.set(key, distribution);
       });
 
       const savedItems: DistributionSaveResult[] = [];
@@ -297,6 +340,7 @@ const saveHandler = async (
         }
         const key = normalizePresetKey(entityId, normalizedScoa);
         const existingPreset = presetLookup.get(key);
+        const existingDistribution = distributionLookup.get(key);
         const resolvedPresetGuid =
           normalizeText(row.presetGuid) ??
           existingPreset?.presetGuid ??
@@ -311,6 +355,46 @@ const saveHandler = async (
           metric: null,
           presetGuid: resolvedPresetGuid,
         };
+
+        const detailInputs = buildDetailInputs(
+          row.operations,
+          resolvedPresetGuid,
+          normalizedType,
+          row.updatedBy ?? null,
+        );
+
+        const currentDetails =
+          existingPreset?.presetGuid === resolvedPresetGuid
+            ? existingPreset?.presetDetails ?? []
+            : [];
+        const detailsUnchanged = areDetailInputsEqual(currentDetails, detailInputs);
+
+        const presetNeedsUpdate =
+          !existingPreset ||
+          existingPreset.presetGuid !== resolvedPresetGuid ||
+          existingPreset.presetType !== normalizedType ||
+          (existingPreset.presetDescription ?? null) !== (presetDescription ?? null) ||
+          existingPreset.scoaAccountId !== normalizedScoa;
+
+        const normalizedStatus = normalizeDistributionStatus(row.distributionStatus);
+        const normalizedExistingDistributionType = normalizeDistributionType(
+          existingDistribution?.distributionType,
+        );
+        const distributionChanged =
+          normalizedExistingDistributionType !== normalizedType ||
+          normalizeDistributionStatus(existingDistribution?.distributionStatus) !==
+            normalizedStatus ||
+          (existingDistribution?.presetGuid ?? null) !== resolvedPresetGuid;
+
+        if (!presetNeedsUpdate && detailsUnchanged && !distributionChanged) {
+          savedItems.push({
+            scoaAccountId: normalizedScoa,
+            presetGuid: resolvedPresetGuid,
+            distributionType: normalizedType,
+            distributionStatus: normalizedStatus,
+          });
+          continue;
+        }
 
         const presetRow =
           existingPreset && existingPreset.presetGuid === resolvedPresetGuid
@@ -328,42 +412,77 @@ const saveHandler = async (
 
         const nextPreset: EntityDistributionPresetWithDetailsRow = {
           ...presetRow,
-          presetDetails: existingPreset?.presetDetails ?? [],
+          presetDetails: detailInputs.map(detail => ({
+            ...detail,
+            insertedDttm: null,
+            updatedDttm: null,
+          })),
         };
         presetLookup.set(key, nextPreset);
 
-        const detailInputs = buildDetailInputs(
-          row.operations,
-          resolvedPresetGuid,
-          normalizedType,
-          row.updatedBy ?? null,
-        );
+        if (!detailsUnchanged) {
+          await syncPresetDetails(
+            resolvedPresetGuid,
+            detailInputs,
+            existingPreset?.presetDetails ?? [],
+            row.updatedBy ?? null,
+          );
+        }
 
-        await syncPresetDetails(
-          resolvedPresetGuid,
-          detailInputs,
-          existingPreset?.presetDetails ?? [],
-          row.updatedBy ?? null,
-        );
+        let nextDistribution: EntityScoaDistributionRow | null =
+          existingDistribution ?? null;
 
-        await deleteEntityScoaDistribution(entityId, normalizedScoa);
+        if (distributionChanged) {
+          if (
+            existingDistribution &&
+            normalizedExistingDistributionType === normalizedType
+          ) {
+            nextDistribution = await updateEntityScoaDistribution(
+              entityId,
+              normalizedScoa,
+              normalizedType,
+              {
+                presetGuid: resolvedPresetGuid,
+                distributionStatus: normalizedStatus,
+                updatedBy: row.updatedBy ?? null,
+              },
+            );
+          } else {
+            if (existingDistribution) {
+              await deleteEntityScoaDistribution(entityId, normalizedScoa);
+            }
 
-        const distributionInput: EntityScoaDistributionInput = {
-          entityId,
-          scoaAccountId: normalizedScoa,
-          distributionType: normalizedType,
-          presetGuid: resolvedPresetGuid,
-          distributionStatus: normalizeDistributionStatus(row.distributionStatus),
-          updatedBy: row.updatedBy ?? null,
-        };
+            const distributionInput: EntityScoaDistributionInput = {
+              entityId,
+              scoaAccountId: normalizedScoa,
+              distributionType: normalizedType,
+              presetGuid: resolvedPresetGuid,
+              distributionStatus: normalizedStatus,
+              updatedBy: row.updatedBy ?? null,
+            };
 
-        await insertEntityScoaDistributions([distributionInput]);
+            const createdDistributions = await insertEntityScoaDistributions([
+              distributionInput,
+            ]);
+
+            nextDistribution =
+              createdDistributions[0] ?? ({
+                ...distributionInput,
+                insertedDttm: null,
+                updatedDttm: null,
+              } satisfies EntityScoaDistributionRow);
+          }
+        }
+
+        if (nextDistribution) {
+          distributionLookup.set(key, nextDistribution);
+        }
 
         savedItems.push({
           scoaAccountId: normalizedScoa,
           presetGuid: resolvedPresetGuid,
           distributionType: normalizedType,
-          distributionStatus: normalizeDistributionStatus(row.distributionStatus),
+          distributionStatus: normalizedStatus,
         });
       }
 
