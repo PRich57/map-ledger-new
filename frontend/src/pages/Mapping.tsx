@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import MappingHeader from '../components/mapping/MappingHeader';
 import StepTabs, { MappingStep } from '../components/mapping/StepTabs';
@@ -71,6 +71,7 @@ export default function Mapping() {
     () => new Set(availableEntities.map(entity => entity.id)),
     [availableEntities],
   );
+  const lastActiveEntityId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userEmail) {
@@ -140,11 +141,15 @@ export default function Mapping() {
       return;
     }
 
+    if (activeStep === 'review') {
+      return;
+    }
+
     const fallbackEntityId =
       normalizedEntityParam ??
       (activeEntityId && availableEntityIds.has(activeEntityId)
         ? activeEntityId
-        : null) ??
+        : lastActiveEntityId.current) ??
       availableEntities[0]?.id ??
       null;
 
@@ -153,6 +158,7 @@ export default function Mapping() {
     }
   }, [
     activeEntityId,
+    activeStep,
     availableEntities,
     availableEntityIds,
     normalizedEntityParam,
@@ -163,6 +169,8 @@ export default function Mapping() {
     if (!activeEntityId) {
       return;
     }
+
+    lastActiveEntityId.current = activeEntityId;
 
     const stageFromParams = stepParam(searchParams.get('stage'));
     setEntityStages(prev => {
@@ -185,7 +193,11 @@ export default function Mapping() {
     let shouldUpdate = false;
 
     if (currentEntityParam !== activeEntityId) {
-      next.set('entityId', activeEntityId);
+      if (activeEntityId) {
+        next.set('entityId', activeEntityId);
+      } else {
+        next.delete('entityId');
+      }
       shouldUpdate = true;
     }
 
@@ -198,6 +210,15 @@ export default function Mapping() {
       setSearchParams(next, { replace: true });
     }
   }, [activeEntityId, entityStages, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (activeStep !== 'review' || activeEntityId === null) {
+      return;
+    }
+
+    lastActiveEntityId.current = activeEntityId;
+    setActiveEntityId(null);
+  }, [activeEntityId, activeStep, setActiveEntityId]);
 
   const updateStage = useCallback(
     (step: MappingStep) => {
@@ -212,18 +233,20 @@ export default function Mapping() {
   );
 
   const handleStepChange = (step: MappingStep) => {
-    if (!activeEntityId) {
+    const targetEntityId = activeEntityId ?? lastActiveEntityId.current ?? availableEntities[0]?.id;
+    if (!targetEntityId) {
       return;
     }
 
     setEntityStages(prev => {
-      if (prev[activeEntityId] === step) {
+      if (prev[targetEntityId] === step) {
         return prev;
       }
-      return { ...prev, [activeEntityId]: step };
+      return { ...prev, [targetEntityId]: step };
     });
 
     updateStage(step);
+    setActiveEntityId(targetEntityId);
   };
 
   const resolveEntityStage = useCallback(
@@ -253,11 +276,13 @@ export default function Mapping() {
   return (
     <div data-testid="mapping-page" className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <MappingHeader clientId={activeClientId ?? undefined} glUploadId={uploadId} />
-      <EntityTabs
-        entities={availableEntities}
-        activeEntityId={activeEntityId}
-        onSelect={handleEntityChange}
-      />
+      {activeStep !== 'review' && (
+        <EntityTabs
+          entities={availableEntities}
+          activeEntityId={activeEntityId}
+          onSelect={handleEntityChange}
+        />
+      )}
       <SummaryCards />
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         {activeStep === 'mapping' && <MappingMonthHelper />}
