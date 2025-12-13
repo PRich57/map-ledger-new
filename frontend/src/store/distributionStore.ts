@@ -9,6 +9,9 @@ import type {
   DistributionType,
   StandardScoaSummary,
 } from '../types';
+import { selectAccounts, useMappingStore } from './mappingStore';
+import { buildDistributionActivityEntries } from '../utils/distributionActivity';
+import { persistDistributionActivity } from '../services/distributionActivityService';
 
 const env = import.meta.env;
 const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
@@ -323,6 +326,16 @@ export const useDistributionStore = create<DistributionState>((set, _get) => {
             ? `Auto-saved ${savedItems.length} row${savedItems.length === 1 ? '' : 's'}.`
             : 'No distribution rows were changed.',
       }));
+      try {
+        await persistActivityForRows(queuedRows, currentEntityId, currentUpdatedBy ?? null);
+      } catch (activityError) {
+        const message =
+          activityError instanceof Error
+            ? activityError.message
+            : 'Failed to persist distribution activity.';
+        console.error('Failed to persist distribution activity', activityError);
+        set({ autoSaveMessage: message });
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to auto-save distribution rows.';
@@ -344,14 +357,33 @@ export const useDistributionStore = create<DistributionState>((set, _get) => {
     }
   };
 
-  function scheduleAutoSave(immediate = false) {
-    if (autoSaveTimer) {
-      clearTimeout(autoSaveTimer);
-    }
-    autoSaveTimer = setTimeout(() => {
-      void runAutoSave();
-    }, immediate ? 0 : autoSaveDelay);
+function scheduleAutoSave(immediate = false) {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
   }
+  autoSaveTimer = setTimeout(() => {
+    void runAutoSave();
+  }, immediate ? 0 : autoSaveDelay);
+}
+
+const persistActivityForRows = async (
+  rows: DistributionRow[],
+  entityId: string | null,
+  updatedBy: string | null,
+) => {
+  if (!entityId || rows.length === 0) {
+    return;
+  }
+  const accounts = selectAccounts(useMappingStore.getState());
+  if (!accounts.length) {
+    return;
+  }
+  const entries = buildDistributionActivityEntries(rows, accounts);
+  if (!entries.length) {
+    return;
+  }
+  await persistDistributionActivity(entityId, entries, updatedBy);
+};
 
   return {
     rows: [],
@@ -640,6 +672,16 @@ export const useDistributionStore = create<DistributionState>((set, _get) => {
               : 'No distribution rows were changed.',
           lastSavedCount: savedItems.length,
         }));
+        try {
+          await persistActivityForRows(dirtyRows, resolvedEntityId, resolvedUpdatedBy ?? null);
+        } catch (activityError) {
+          const message =
+            activityError instanceof Error
+              ? activityError.message
+              : 'Failed to persist distribution activity.';
+          console.error('Failed to persist distribution activity', activityError);
+          set({ autoSaveMessage: message });
+        }
 
         return savedItems.length;
       } catch (error) {

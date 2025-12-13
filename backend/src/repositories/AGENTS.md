@@ -373,4 +373,6 @@ VALUES (
 
 For all of the new ml.ENTITY_* and ml.OPERATION_SCOA_ACTIVITY tables, leave UPDATED_DTTM and UPDATED_BY as NULL on insert. These fields are only to be populated when records are updated.
 
+All `GL_MONTH` and `ACTIVITY_MONTH` columns use the `DATE` data type and must hold the first day of the represented month (e.g., `2024-08-01`). Normalize inputs to a `YYYY-MM-01` pattern before persisting to enforce the updated schema.
+
 Do not include INSERTED_DTTM in insert statements for these tables. Each table automatically generates an INSERTED_DTTM timestamp when a record is inserted.

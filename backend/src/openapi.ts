@@ -48,6 +48,9 @@ const openApiSpec = {
     },
     '/file-records/ingest': {
       post: { summary: 'Ingest mapped file records for a file upload' }
+    },
+    '/distributionActivity': {
+      post: { summary: 'Persist SCOA activity entries for operations' }
     }
   }
 };

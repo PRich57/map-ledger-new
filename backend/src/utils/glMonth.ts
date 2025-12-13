@@ -34,8 +34,12 @@ const monthNameMap: Record<string, string> = {
   december: '12',
 };
 
+const formatMonthStart = (year: string | number, month: string): string => {
+  return `${year}-${month.padStart(2, '0')}-01`;
+};
+
 /**
- * Normalizes a date string to YYYY-MM format.
+ * Normalizes a date string to YYYY-MM-01 format.
  */
 export const normalizeGlMonth = (value: string): string => {
   if (!value) return '';
@@ -45,25 +49,25 @@ export const normalizeGlMonth = (value: string): string => {
   const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$/);
   if (isoMatch) {
     const [, year, rawMonth] = isoMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
+    return formatMonthStart(year, rawMonth);
   }
 
   const monthYearMatch = trimmed.match(/^(\d{1,2})[-/](\d{4})$/);
   if (monthYearMatch) {
     const [, rawMonth, year] = monthYearMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
+    return formatMonthStart(year, rawMonth);
   }
 
   const usMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (usMatch) {
     const [, rawMonth, , year] = usMatch;
-    return `${year}-${rawMonth.padStart(2, '0')}`;
+    return formatMonthStart(year, rawMonth);
   }
 
   const compactMatch = trimmed.match(/^(\d{4})(\d{2})$/);
   if (compactMatch) {
     const [, year, rawMonth] = compactMatch;
-    return `${year}-${rawMonth}`;
+    return formatMonthStart(year, rawMonth);
   }
 
   const textMatch = trimmed.match(/^([A-Za-z]{3,9})[\s-](\d{2,4})$/);
@@ -80,7 +84,7 @@ export const normalizeGlMonth = (value: string): string => {
               ? 2000 + numericYear
               : 1900 + numericYear
             : numericYear;
-        return `${year}-${month}`;
+        return formatMonthStart(year, month);
       }
     }
   }
@@ -88,21 +92,21 @@ export const normalizeGlMonth = (value: string): string => {
   const compactNamedMatch = trimmed.match(/^(\d{4})\s*M(\d{2})$/i);
   if (compactNamedMatch) {
     const [, year, rawMonth] = compactNamedMatch;
-    return `${year}-${rawMonth}`;
+    return formatMonthStart(year, rawMonth);
   }
 
   const parsed = new Date(trimmed);
   if (!Number.isNaN(parsed.getTime())) {
     const year = parsed.getFullYear();
     const month = (parsed.getMonth() + 1).toString().padStart(2, '0');
-    return `${year}-${month}`;
+    return formatMonthStart(year, month);
   }
 
   return '';
 };
 
 export const isValidNormalizedMonth = (value: string): boolean =>
-  /^\d{4}-\d{2}$/.test(value);
+  /^\d{4}-\d{2}-01$/.test(value);
 
 export const extractDateFromText = (text: string): string => {
   if (!text) return '';
@@ -117,11 +121,11 @@ export const extractDateFromText = (text: string): string => {
     const normalizedMonthName = monthName.toLowerCase();
     const month = monthNameMap[normalizedMonthName];
     if (month) {
-      const numericYear = parseInt(yearPart, 10);
-      if (!Number.isNaN(numericYear)) {
-        const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
-        return `${year}-${month}`;
-      }
+        const numericYear = parseInt(yearPart, 10);
+        if (!Number.isNaN(numericYear)) {
+          const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
+          return formatMonthStart(year, month);
+        }
     }
   }
 
@@ -131,7 +135,7 @@ export const extractDateFromText = (text: string): string => {
     const month = rawMonth.padStart(2, '0');
     const monthNum = parseInt(month, 10);
     if (monthNum >= 1 && monthNum <= 12) {
-      return `${year}-${month}`;
+      return formatMonthStart(year, month);
     }
   }
 
@@ -141,16 +145,16 @@ export const extractDateFromText = (text: string): string => {
     const normalizedMonthName = monthName.toLowerCase();
     const month = monthNameMap[normalizedMonthName];
     if (month) {
-      const numericYear = parseInt(yearPart, 10);
-      if (!Number.isNaN(numericYear)) {
-        const year =
-          yearPart.length === 2
-            ? numericYear < 50
-              ? 2000 + numericYear
-              : 1900 + numericYear
-            : numericYear;
-        return `${year}-${month}`;
-      }
+        const numericYear = parseInt(yearPart, 10);
+        if (!Number.isNaN(numericYear)) {
+          const year =
+            yearPart.length === 2
+              ? numericYear < 50
+                ? 2000 + numericYear
+                : 1900 + numericYear
+              : numericYear;
+          return formatMonthStart(year, month);
+        }
     }
   }
 
@@ -160,7 +164,7 @@ export const extractDateFromText = (text: string): string => {
     const normalizedMonthName = monthName.toLowerCase();
     const month = monthNameMap[normalizedMonthName];
     if (month) {
-      return `${year}-${month}`;
+      return formatMonthStart(year, month);
     }
   }
 
@@ -170,7 +174,7 @@ export const extractDateFromText = (text: string): string => {
     const month = rawMonth.padStart(2, '0');
     const monthNum = parseInt(month, 10);
     if (monthNum >= 1 && monthNum <= 12) {
-      return `${year}-${month}`;
+      return formatMonthStart(year, month);
     }
   }
 
@@ -179,7 +183,7 @@ export const extractDateFromText = (text: string): string => {
     const [, year, rawMonth] = compactMatch;
     const monthNum = parseInt(rawMonth, 10);
     if (monthNum >= 1 && monthNum <= 12) {
-      return `${year}-${rawMonth}`;
+      return formatMonthStart(year, rawMonth);
     }
   }
 
@@ -189,16 +193,16 @@ export const extractDateFromText = (text: string): string => {
     const normalizedMonthName = monthName.toLowerCase();
     const month = monthNameMap[normalizedMonthName];
     if (month) {
-      const numericYear = parseInt(yearPart, 10);
-      if (!Number.isNaN(numericYear)) {
-        const year =
-          yearPart.length === 2
-            ? numericYear < 50
-              ? 2000 + numericYear
-              : 1900 + numericYear
-            : numericYear;
-        return `${year}-${month}`;
-      }
+        const numericYear = parseInt(yearPart, 10);
+        if (!Number.isNaN(numericYear)) {
+          const year =
+            yearPart.length === 2
+              ? numericYear < 50
+                ? 2000 + numericYear
+                : 1900 + numericYear
+              : numericYear;
+          return formatMonthStart(year, month);
+        }
     }
   }
 
@@ -246,4 +250,3 @@ export const detectGlMonthFromRow = (row: Record<string, unknown>): string => {
 
   return normalizeCandidate(row.glMonth);
 };
-

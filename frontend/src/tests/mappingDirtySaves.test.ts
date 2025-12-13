@@ -89,9 +89,8 @@ describe('dirty save behavior', () => {
 
     useMappingStore.getState().updateNotes('acct-1', 'Updated note');
 
-    const savedCount = await useMappingStore.getState().saveMappings();
+    await useMappingStore.getState().flushAutoSaveQueue({ immediate: true });
 
-    expect(savedCount).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const body = JSON.parse(
@@ -102,6 +101,10 @@ describe('dirty save behavior', () => {
     expect(body.items?.[0]?.entityAccountId).toBe('1000');
     expect(useMappingStore.getState().dirtyMappingIds.has('acct-1')).toBe(false);
     expect(useMappingStore.getState().dirtyMappingIds.has('acct-2')).toBe(false);
+
+    const savedCount = await useMappingStore.getState().saveMappings();
+    expect(savedCount).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('sends all dirty rows for bulk updates', async () => {
@@ -128,9 +131,8 @@ describe('dirty save behavior', () => {
       expect.arrayContaining(['Mapped', 'Mapped']),
     );
 
-    const savedCount = await useMappingStore.getState().saveMappings();
+    await useMappingStore.getState().flushAutoSaveQueue({ immediate: true });
 
-    expect(savedCount).toBe(2);
     expect(useMappingStore.getState().saveError).toBeNull();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -141,31 +143,31 @@ describe('dirty save behavior', () => {
     expect(body.items).toHaveLength(2);
     const entityIds = body.items?.map(item => item.entityAccountId);
     expect(entityIds).toEqual(expect.arrayContaining(['1000', '2000']));
+
+    const savedCount = await useMappingStore.getState().saveMappings();
+    expect(savedCount).toBe(0);
   });
 
   it('does not trigger a save when no rows are dirty', async () => {
     const accounts = [buildAccount({ id: 'acct-1', accountId: '1000' })];
     resetStore(accounts);
 
-    const savedCount = await useMappingStore.getState().saveMappings();
+    await useMappingStore.getState().flushAutoSaveQueue({ immediate: true });
 
-    expect(savedCount).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(useMappingStore.getState().saveError).toBe('No changes ready to save.');
+    expect(useMappingStore.getState().saveError).toBeNull();
   });
 
   it('emits telemetry only when saves are attempted', async () => {
     const accounts = [buildAccount({ id: 'acct-1', accountId: '1000' })];
     resetStore(accounts);
 
-    const savedCount = await useMappingStore.getState().saveMappings();
-    expect(savedCount).toBe(0);
+    await useMappingStore.getState().flushAutoSaveQueue({ immediate: true });
     expect(mockedTrackMappingSaveAttempt).not.toHaveBeenCalled();
 
     useMappingStore.getState().updateNotes('acct-1', 'Updated note for telemetry');
 
-    const telemetrySavedCount = await useMappingStore.getState().saveMappings();
-    expect(telemetrySavedCount).toBe(1);
+    await useMappingStore.getState().flushAutoSaveQueue({ immediate: true });
     expect(mockedTrackMappingSaveAttempt).toHaveBeenCalledTimes(1);
     expect(mockedTrackMappingSaveAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -174,5 +176,6 @@ describe('dirty save behavior', () => {
         success: true,
       }),
     );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

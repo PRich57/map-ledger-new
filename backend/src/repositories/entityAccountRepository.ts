@@ -97,7 +97,7 @@ export const upsertEntityAccounts = async (
         source.account_id,
         source.account_name,
         NULL,
-        source.updated_by
+        NULL
       )
     OUTPUT
       inserted.ENTITY_ID as entity_id,

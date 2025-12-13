@@ -879,7 +879,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   };
 
   const downloadTemplate = () => {
-    const template = `GL_Month_Quarter,GL_Account,GL_Description,Net_Change\n2024-01,5000-000,Sample Expense,1000\n2024-01,5100-000,Another Expense,2000`;
+    const template = `GL_Month_Quarter,GL_Account,GL_Description,Net_Change\n2024-01-01,5000-000,Sample Expense,1000\n2024-01-01,5100-000,Another Expense,2000`;
     const blob = new Blob([template], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1019,23 +1019,23 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       {headerMap && combinedRows.length > 0 && (
         <div className="space-y-4">
           {requiredEntityCount > 0 && (
-            <div className="space-y-4 rounded-md border border-blue-200 bg-blue-50 p-4">
+            <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-900/5 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-none">
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-blue-900">Entity assignment</h3>
-                  <p className="text-sm text-blue-800">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Entity assignment</h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
                     Duplicate account IDs were found within the same GL month. Assign{' '}
                     {requiredEntityCount} entity
                     {requiredEntityCount > 1 ? ' groups' : ' group'} before moving on to mapping.
                   </p>
                 </div>
-                <span className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs font-medium text-slate-100 shadow-sm">
+                <span className="rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-200">
                   Minimum required: {requiredEntityCount}
                 </span>
               </div>
 
               {entityAssignmentNeedsCustom && (
-                <p className="text-xs text-blue-800">
+                <p className="text-xs text-slate-600 dark:text-slate-300">
                   Fewer than {requiredEntityCount} saved entities were found for this client. Type new entity names to
                   cover every group.
                 </p>
@@ -1050,13 +1050,13 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   return (
                     <div
                       key={assignment.slot}
-                      className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-[0_10px_30px_rgba(2,6,23,0.65)]"
+                      className="space-y-4 rounded-2xl border border-slate-200 bg-white/70 p-4 shadow-sm shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-none"
                     >
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-100">Entity group {assignment.slot}</p>
-                          <p className="text-xs text-slate-400">
-                            Months: {glMonthSummary} · Accounts: {accountSummary}
+                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Entity group {assignment.slot}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-300">
+                            Months: {glMonthSummary} | Accounts: {accountSummary}
                           </p>
                         </div>
                         <span className="text-xs font-medium text-slate-400 sm:text-right">
@@ -1072,8 +1072,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                           disabled={!clientId || isLoadingClients || isLoadingEntities}
                           required
                           className="min-w-0"
-                          labelClassName="text-slate-200"
-                          selectClassName="bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-400 focus:ring-blue-400/60"
+                          labelClassName="text-slate-800 dark:text-slate-200"
+                          selectClassName="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:ring-blue-400/60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                         >
                           <option value="">Select an entity</option>
                           {entityOptions.map((entity) => (
@@ -1086,7 +1086,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
                         <div className="space-y-1">
                           <label
-                            className="block text-sm font-medium text-slate-200"
+                            className="block text-sm font-medium text-slate-900 dark:text-slate-100"
                             htmlFor={`custom-entity-${assignment.slot}`}
                           >
                             Entity name
@@ -1097,7 +1097,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                             value={assignment.name}
                             onChange={(e) => handleCustomEntityNameChange(assignment.slot, e.target.value)}
                             placeholder="Enter an entity name"
-                            className="block w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400/60"
+                            className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400/60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                           />
                         </div>
                       </div>

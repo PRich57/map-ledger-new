@@ -3,6 +3,7 @@ import RatioAllocationBuilder, {
   type RatioAllocationTargetCatalogOption,
 } from './RatioAllocationBuilder';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import type { DynamicAllocationPresetContext } from '../../types';
 
 interface RatioAllocationManagerProps {
   initialSourceAccountId?: string | null;
@@ -12,6 +13,7 @@ interface RatioAllocationManagerProps {
   targetLabel?: string;
   targetPlaceholder?: string;
   targetEmptyLabel?: string;
+  presetContext?: DynamicAllocationPresetContext;
 }
 
 const RatioAllocationManager = ({
@@ -22,6 +24,7 @@ const RatioAllocationManager = ({
   targetLabel,
   targetPlaceholder,
   targetEmptyLabel,
+  presetContext,
 }: RatioAllocationManagerProps) => {
   const { getOrCreateAllocation } = useRatioAllocationStore();
 
@@ -47,6 +50,7 @@ const RatioAllocationManager = ({
         targetLabel={targetLabel}
         targetPlaceholder={targetPlaceholder}
         targetEmptyLabel={targetEmptyLabel}
+        presetContext={presetContext}
       />
 
       {onDone && (

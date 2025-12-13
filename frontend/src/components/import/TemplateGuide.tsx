@@ -3,8 +3,8 @@ import { FileSpreadsheet, AlertCircle, Download } from 'lucide-react';
 export default function TemplateGuide() {
   const downloadTemplate = () => {
     const template = `GL_Month_Quarter,GL_Account,GL_Description,Net_Change,User_Defined_Field_1,User_Defined_Field_2,User_Defined_Field_3
-2024-01,5000-000,Sample Expense,1000,,,
-2024-01,5100-000,Another Expense,2000,,,
+2024-01-01,5000-000,Sample Expense,1000,,,
+2024-01-01,5100-000,Another Expense,2000,,,
 `;
     const blob = new Blob([template], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -26,7 +26,7 @@ export default function TemplateGuide() {
             <h3 className="text-sm font-medium text-gray-900">Required CSV Format</h3>
             <p className="mt-1 text-sm text-gray-500">Your CSV file must include the following columns:</p>
             <ul className="mt-2 text-sm text-gray-500 list-disc list-inside space-y-1">
-              <li>GL_Month_Quarter (YYYY-MM or YYYY-Q#)</li>
+              <li>GL_Month_Quarter (YYYY-MM-01 or YYYY-Q#)</li>
               <li>GL_Account</li>
               <li>GL_Description</li>
               <li>Net_Change</li>

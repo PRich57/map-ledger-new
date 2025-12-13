@@ -276,21 +276,22 @@ export default function Mapping() {
   return (
     <div data-testid="mapping-page" className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <MappingHeader clientId={activeClientId ?? undefined} glUploadId={uploadId} />
+      <SummaryCards />
       {activeStep !== 'review' && (
         <EntityTabs
           entities={availableEntities}
           activeEntityId={activeEntityId}
           onSelect={handleEntityChange}
+          entityStages={entityStages}
         />
       )}
-      <SummaryCards />
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        {activeStep === 'mapping' && <MappingMonthHelper />}
         <StepTabs activeStep={activeStep} onStepChange={handleStepChange} />
         <section
           aria-label="Mapping workspace content"
           className="w-full border-t border-gray-200 p-6 dark:border-slate-700"
         >
+          {activeStep === 'mapping' && <MappingMonthHelper />}
           {activeStep === 'mapping' && <MappingTable />}
           {activeStep === 'reconcile' && <ReconcilePane />}
           {activeStep === 'distribution' && <DistributionTable />}

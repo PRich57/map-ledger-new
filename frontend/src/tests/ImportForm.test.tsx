@@ -47,32 +47,32 @@ describe('filterRowsByGlMonth', () => {
       description: 'Jan expense',
       netChange: 2500,
       entity: 'Northwind',
-      glMonth: '2024-11',
-      Gl_Month: '2024-01',
+      glMonth: '2024-11-01',
+      Gl_Month: '2024-01-01',
     },
     {
       accountId: '2000',
       description: 'Feb expense',
       netChange: 1800,
       entity: 'Northwind',
-      glMonth: '2024-11',
-      Gl_Month: '2024-02',
+      glMonth: '2024-11-01',
+      Gl_Month: '2024-02-01',
     },
   ];
 
   it('prioritizes row-level GL month values when filtering', () => {
-    const filtered = filterRowsByGlMonth(baseRows, '2024-02');
+    const filtered = filterRowsByGlMonth(baseRows, '2024-02-01');
     expect(filtered).toHaveLength(1);
     expect(filtered[0].accountId).toBe('2000');
-    expect(filtered[0].glMonth).toBe('2024-02');
+    expect(filtered[0].glMonth).toBe('2024-02-01');
   });
 
   it('retains all rows when no month is selected and normalizes values', () => {
     const filtered = filterRowsByGlMonth(baseRows, '');
     expect(filtered).toHaveLength(2);
     expect(filtered.map((row) => row.glMonth)).toEqual([
-      '2024-01',
-      '2024-02',
+      '2024-01-01',
+      '2024-02-01',
     ]);
   });
 });
@@ -80,18 +80,18 @@ describe('filterRowsByGlMonth', () => {
 describe('entity slot inference', () => {
   it('detects the maximum duplicate count across multiple GL months', () => {
     const rows: TrialBalanceRow[] = [
-      { accountId: '1000', description: 'Jan A', netChange: 10, entity: '', glMonth: '2024-01' },
-      { accountId: '1000', description: 'Jan B', netChange: 20, entity: '', glMonth: '2024-01' },
-      { accountId: '2000', description: 'Feb A', netChange: 30, entity: '', glMonth: '2024-02' },
-      { accountId: '2000', description: 'Feb B', netChange: 40, entity: '', glMonth: '2024-02' },
-      { accountId: '2000', description: 'Feb C', netChange: 50, entity: '', glMonth: '2024-02' },
+      { accountId: '1000', description: 'Jan A', netChange: 10, entity: '', glMonth: '2024-01-01' },
+      { accountId: '1000', description: 'Jan B', netChange: 20, entity: '', glMonth: '2024-01-01' },
+      { accountId: '2000', description: 'Feb A', netChange: 30, entity: '', glMonth: '2024-02-01' },
+      { accountId: '2000', description: 'Feb B', netChange: 40, entity: '', glMonth: '2024-02-01' },
+      { accountId: '2000', description: 'Feb C', netChange: 50, entity: '', glMonth: '2024-02-01' },
     ];
 
     const result = inferEntitySlotsFromRows(rows);
 
     expect(result.requiredEntities).toBe(3);
     expect(result.rowSlots).toEqual([1, 2, 1, 2, 3]);
-    expect(result.slotSummaries.find((summary) => summary.slot === 3)?.glMonths).toContain('2024-02');
+    expect(result.slotSummaries.find((summary) => summary.slot === 3)?.glMonths).toContain('2024-02-01');
   });
 });
 

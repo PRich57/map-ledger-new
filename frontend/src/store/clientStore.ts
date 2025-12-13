@@ -20,10 +20,12 @@ const initialState: Pick<ClientState, 'clients' | 'activeClientId' | 'isLoading'
 };
 
 const normalizeClientId = (clientId?: string | null): string | null => {
-  if (!clientId) {
+  if (clientId == null) {
     return null;
   }
-  const trimmed = clientId.trim();
+
+  const normalizedInput = typeof clientId === 'string' ? clientId : String(clientId);
+  const trimmed = normalizedInput.trim();
   return trimmed.length > 0 ? trimmed : null;
 };
 

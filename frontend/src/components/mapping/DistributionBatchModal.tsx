@@ -4,6 +4,7 @@ import type {
   DistributionType,
 } from '../../types';
 import type { DistributionOperationCatalogItem } from '../../store/distributionStore';
+import { getOperationLabel } from '../../utils/operationLabel';
 
 interface DistributionBatchModalProps {
   open: boolean;
@@ -28,10 +29,7 @@ const operationPlaceholderOptions = [
   { value: '__clear__', label: 'Clear operation' },
 ];
 
-const optionLabel = (operation: DistributionOperationCatalogItem) =>
-  operation.name && operation.name !== operation.id
-    ? `${operation.id} – ${operation.name}`
-    : operation.id;
+const optionLabel = (operation: DistributionOperationCatalogItem) => getOperationLabel(operation);
 
 export default function DistributionBatchModal({
   open,

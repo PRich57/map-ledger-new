@@ -47,7 +47,7 @@ describe('clientFiles.validateRecord', () => {
     const payload: ClientFileMetadataPayload = {
       ...basePayload,
       fileStorageUri: 'https://storage.example.com/blob.csv',
-      period: '2024-08',
+      period: '2024-08-01',
     };
 
     const { record, errors } = validateRecord(payload);

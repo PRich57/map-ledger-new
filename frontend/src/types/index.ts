@@ -371,6 +371,8 @@ export interface DynamicBasisAccount {
   valuesByPeriod?: Record<string, number>;
 }
 
+export type DynamicAllocationPresetContext = 'mapping' | 'distribution';
+
 export interface DynamicAllocationPresetRow {
   dynamicAccountId: string;
   targetAccountId: string;
@@ -381,6 +383,7 @@ export interface DynamicAllocationPreset {
   name: string;
   rows: DynamicAllocationPresetRow[];
   notes?: string;
+  context?: DynamicAllocationPresetContext;
 }
 
 export interface DynamicAllocationBasisMember {
@@ -585,7 +588,7 @@ export interface GLAccountMappingRow {
   splitDefinitions: MappingSplitDefinition[];
   entities: GLAccountEntityBreakdown[];
   dynamicExclusionAmount?: number;
-  glMonth?: string; // GL month in YYYY-MM format
+  glMonth?: string; // GL month in YYYY-MM-01 format
   requiresEntityAssignment?: boolean;
 }
 

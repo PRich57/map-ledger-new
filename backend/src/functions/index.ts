@@ -27,5 +27,6 @@ import './entityMappingPresets';
 import './entityScoaActivity';
 import './entityScoaDistribution';
 import './operationScoaActivity';
+import './distributionActivity';
 
 export default app;

@@ -93,6 +93,78 @@ function buildCombinedHeaders(headerRows: string[][]): string[] {
   });
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
+
+const extractRichTextValue = (richText: unknown): string => {
+  if (!Array.isArray(richText)) {
+    return '';
+  }
+
+  return richText
+    .map((segment) => {
+      if (!isRecord(segment)) {
+        return '';
+      }
+      const text = segment['text'];
+      return typeof text === 'string' ? text : '';
+    })
+    .join('');
+};
+
+const normalizeCellValue = (value: unknown): string | number | undefined => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'TRUE' : 'FALSE';
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (isRecord(value)) {
+    const recordValue = value as Record<string, unknown>;
+
+    if ('result' in recordValue) {
+      const resolved = normalizeCellValue(recordValue['result']);
+      if (resolved !== undefined) {
+        return resolved;
+      }
+    }
+
+    const richTextValue = extractRichTextValue(recordValue['richText']);
+    if (richTextValue.trim().length > 0) {
+      return richTextValue.trim();
+    }
+
+    const textValue = recordValue['text'];
+    if (typeof textValue === 'string' && textValue.trim().length > 0) {
+      return textValue.trim();
+    }
+
+    const hyperlinkValue = recordValue['hyperlink'];
+    if (typeof hyperlinkValue === 'string') {
+      if (typeof textValue === 'string' && textValue.trim().length > 0) {
+        return textValue.trim();
+      }
+      return hyperlinkValue.trim();
+    }
+  }
+
+  return undefined;
+};
+
 export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUpload[]> {
   const buffer = await file.arrayBuffer();
   const ExcelJS = await loadExcelJs();
@@ -165,14 +237,9 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
         const rowObj: ParsedRow = {};
         values.forEach((val, i) => {
           const key = headers[i] || `Column ${String.fromCharCode(65 + i)}`;
-          if (val !== null && val !== undefined) {
-            if (typeof val === 'string') {
-              rowObj[key] = val.trim();
-            } else if (typeof val === 'number') {
-              rowObj[key] = val;
-            } else {
-              rowObj[key] = val.toString();
-            }
+          const normalizedValue = normalizeCellValue(val);
+          if (normalizedValue !== undefined) {
+            rowObj[key] = normalizedValue;
           }
         });
         if (firstDataRowIndex === undefined) {

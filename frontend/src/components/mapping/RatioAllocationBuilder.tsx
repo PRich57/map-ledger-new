@@ -4,7 +4,10 @@ import { Card, CardContent, CardHeader } from '../ui/Card';
 import SearchableSelect from '../ui/SearchableSelect';
 import { useChartOfAccountsStore } from '../../store/chartOfAccountsStore';
 import { resolveTargetAccountId, useRatioAllocationStore } from '../../store/ratioAllocationStore';
-import type { DynamicAllocationPresetRow } from '../../types';
+import type {
+  DynamicAllocationPresetContext,
+  DynamicAllocationPresetRow,
+} from '../../types';
 import { getBasisValue, getGroupMembersWithValues } from '../../utils/dynamicAllocation';
 
 const formatCurrency = (value: number): string =>
@@ -22,6 +25,7 @@ interface RatioAllocationBuilderProps {
   targetLabel?: string;
   targetPlaceholder?: string;
   targetEmptyLabel?: string;
+  presetContext?: DynamicAllocationPresetContext;
 }
 
 const RatioAllocationBuilder = ({
@@ -31,6 +35,7 @@ const RatioAllocationBuilder = ({
   targetLabel = 'Target account',
   targetPlaceholder = 'Select target account',
   targetEmptyLabel = 'No target accounts available',
+  presetContext,
 }: RatioAllocationBuilderProps) => {
   const {
     allocations,
@@ -51,7 +56,6 @@ const RatioAllocationBuilder = ({
 
   const [selectedAllocationId, setSelectedAllocationId] = useState<string | null>(null);
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
-  const [newPresetName, setNewPresetName] = useState('');
   const [newPresetRows, setNewPresetRows] = useState<DynamicAllocationPresetRow[]>([]);
   const { options: chartOfAccountOptions } = useChartOfAccountsStore();
 
@@ -273,7 +277,6 @@ const RatioAllocationBuilder = ({
   useEffect(() => {
     if (!isCreatingPreset) {
       setNewPresetRows([]);
-      setNewPresetName('');
       return;
     }
     if (isCreatingPreset && newPresetRows.length === 0) {
@@ -366,23 +369,28 @@ const RatioAllocationBuilder = ({
 
   const handleCreatePreset = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedName = newPresetName.trim();
     const sanitizedRows = newPresetRows
       .map(row => ({
         dynamicAccountId: (row.dynamicAccountId ?? '').trim(),
         targetAccountId: (row.targetAccountId ?? '').trim(),
       }))
       .filter(row => row.dynamicAccountId && row.targetAccountId);
-    if (!trimmedName || sanitizedRows.length === 0 || sanitizedRows.length !== newPresetRows.length) {
+    if (sanitizedRows.length === 0 || sanitizedRows.length !== newPresetRows.length) {
       return;
     }
+    const presetName =
+      selectedAllocation?.sourceAccount.description?.trim() ||
+      selectedAllocation?.sourceAccount.number?.trim() ||
+      selectedAllocation?.sourceAccount.id?.trim() ||
+      'Dynamic preset';
+
     createPreset({
-      name: trimmedName,
+      name: presetName,
       rows: sanitizedRows,
       applyToAllocationId: selectedAllocation?.id,
+      context: presetContext,
     });
     setIsCreatingPreset(false);
-    setNewPresetName('');
     setNewPresetRows([]);
   };
 
@@ -419,17 +427,6 @@ const RatioAllocationBuilder = ({
 
           {isCreatingPreset && (
             <form onSubmit={handleCreatePreset} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-1 text-sm font-medium text-slate-700 dark:text-slate-200">
-                  Preset name
-                  <input
-                    value={newPresetName}
-                    onChange={event => setNewPresetName(event.target.value)}
-                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-                    placeholder="e.g. Regional operations pool"
-                  />
-                </label>
-              </div>
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full border-separate border-spacing-y-2">
                   <thead className="bg-slate-100 dark:bg-slate-800/40">
@@ -557,7 +554,6 @@ const RatioAllocationBuilder = ({
                   type="submit"
                   className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
                   disabled={
-                    !newPresetName.trim() ||
                     newPresetRows.length === 0 ||
                     newPresetRows.some(row => !row.dynamicAccountId || !row.targetAccountId)
                   }

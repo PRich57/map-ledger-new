@@ -46,6 +46,7 @@ export default function Import() {
   const orgError = useOrganizationStore((state) => state.error);
   const fetchFileRecords = useMappingStore((state) => state.fetchFileRecords);
   const activeClientId = useClientStore((state) => state.activeClientId);
+  const setActiveClientId = useClientStore((state) => state.setActiveClientId);
 
   useEffect(() => {
     if (user?.email) {
@@ -116,6 +117,8 @@ export default function Import() {
       setError('Unable to open mapping. Missing file identifier.');
       return;
     }
+
+    setActiveClientId(importItem.clientId ?? null);
 
     const entitiesFromImport: EntitySummary[] = (importItem.entities ?? [])
       .map((entity) => {
@@ -248,6 +251,7 @@ export default function Import() {
         id: entity.id,
         name: entity.displayName ?? entity.name,
         aliases: entity.aliases,
+        isSelected: true,
       }));
 
       const importId = crypto.randomUUID();
@@ -255,7 +259,9 @@ export default function Import() {
 
       // Use the first GL month for the import record, or a placeholder if none detected
       const primaryPeriod =
-        glMonths.length > 0 ? glMonths[0] : new Date().toISOString().slice(0, 7);
+        glMonths.length > 0
+          ? glMonths[0]
+          : `${new Date().toISOString().slice(0, 7)}-01`;
 
       const sheets =
         sheetSelections.length > 0

@@ -1,7 +1,17 @@
-import { fireEvent, render, screen } from './testUtils';
+import { fireEvent, render, screen, waitFor } from './testUtils';
 import ReviewPane from '../components/mapping/ReviewPane';
 import { useMappingStore } from '../store/mappingStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
+import { exportOperationScoaWorkbook } from '../utils/exportScoaActivity';
+
+jest.mock('../utils/exportScoaActivity', () => {
+  const actual = jest.requireActual('../utils/exportScoaActivity');
+  return {
+    __esModule: true,
+    ...actual,
+    exportOperationScoaWorkbook: jest.fn(async () => undefined),
+  };
+});
 
 const initialMappingSnapshot = (() => {
   const snapshot = useMappingStore.getState();
@@ -109,13 +119,17 @@ describe('ReviewPane', () => {
   beforeEach(() => {
     resetStores();
   });
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
-  test('shows KPI cards and publish log', () => {
+  test('renders per-operation sections and publish log', () => {
     render(<ReviewPane />);
 
-    expect(screen.getByText('Review readiness')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Operation Linehaul/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Operation Shared Services/i })).toBeInTheDocument();
     expect(screen.getByText('Publish log')).toBeInTheDocument();
-    expect(screen.getByText('Mapped accounts')).toBeInTheDocument();
+    expect(screen.getByText('Acme Freight')).toBeInTheDocument();
   });
 
   test('runs checks and updates status message', () => {
@@ -136,5 +150,28 @@ describe('ReviewPane', () => {
     fireEvent.click(publishButton);
 
     expect(screen.getByText('Mappings published successfully.')).toBeInTheDocument();
+  });
+
+  test('renders per-operation totals for mapped activity', () => {
+    render(<ReviewPane />);
+
+    expect(screen.getByText(/\$500,000 total mapped activity/i)).toBeInTheDocument();
+    expect(screen.getByText(/\$120,000 total mapped activity/i)).toBeInTheDocument();
+  });
+
+  test('exports SCoA activity when export button is clicked', async () => {
+    const mockedExport = exportOperationScoaWorkbook as jest.MockedFunction<
+      typeof exportOperationScoaWorkbook
+    >;
+    mockedExport.mockResolvedValue();
+
+    render(<ReviewPane />);
+
+    const exportButton = screen.getByRole('button', { name: /Download SCoA export/i });
+    fireEvent.click(exportButton);
+
+    await waitFor(() => {
+      expect(mockedExport).toHaveBeenCalled();
+    });
   });
 });

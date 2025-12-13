@@ -1,13 +1,16 @@
 import React from 'react';
+import { CheckCircle, Circle } from 'lucide-react';
+import type { MappingStep } from './StepTabs';
 import type { EntitySummary } from '../../types';
 
 interface EntityTabsProps {
   entities: EntitySummary[];
   activeEntityId: string | null;
   onSelect: (entityId: string) => void;
+  entityStages?: Record<string, MappingStep>;
 }
 
-const EntityTabs = ({ entities, activeEntityId, onSelect }: EntityTabsProps) => {
+const EntityTabs = ({ entities, activeEntityId, onSelect, entityStages }: EntityTabsProps) => {
   const tabs = React.useMemo<EntitySummary[]>(() => {
     const uniqueEntities = new Map(entities.map(entity => [entity.id, entity]));
     return Array.from(uniqueEntities.values());
@@ -23,12 +26,17 @@ const EntityTabs = ({ entities, activeEntityId, onSelect }: EntityTabsProps) => 
       >
         {tabs.map(tab => {
           const isActive = tab.id === activeEntityId;
+          const stage = entityStages?.[tab.id] ?? 'mapping';
+          const isComplete = stage === 'review';
+          const StatusIcon = isComplete ? CheckCircle : Circle;
+          const statusLabel = isComplete ? 'Complete' : 'Needs work';
           return (
             <button
               key={tab.id}
               type="button"
               role="tab"
               aria-selected={isActive}
+              aria-label={`${tab.name}, ${statusLabel}`}
               onClick={() => onSelect(tab.id)}
               className={`rounded-full border px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
                 isActive
@@ -36,7 +44,13 @@ const EntityTabs = ({ entities, activeEntityId, onSelect }: EntityTabsProps) => 
                   : 'border-gray-200 text-gray-700 hover:border-blue-200 hover:text-blue-700 dark:border-slate-700 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-100'
               }`}
             >
-              {tab.name}
+              <span className="inline-flex items-center gap-2">
+                <StatusIcon
+                  className={`h-4 w-4 ${isComplete ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-300'}`}
+                  aria-hidden="true"
+                />
+                {tab.name}
+              </span>
             </button>
           );
         })}

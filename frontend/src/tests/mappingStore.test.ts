@@ -307,7 +307,7 @@ describe('mappingStore selectors', () => {
         accountId: '1000',
         description: 'Test Account',
         netChange: 100,
-        glMonth: '2024-01',
+        glMonth: '2024-01-01',
       },
     ];
 
@@ -365,14 +365,14 @@ describe('mappingStore selectors', () => {
         description: 'Cash',
         entity: 'Entity One',
         netChange: 1250,
-        glMonth: '2024-01',
+        glMonth: '2024-01-01',
       },
       {
         accountId: '2000',
         description: 'Revenue',
         entity: 'Entity One',
         netChange: -1250,
-        glMonth: '2024-01',
+        glMonth: '2024-01-01',
       },
     ];
 
@@ -384,7 +384,7 @@ describe('mappingStore selectors', () => {
           clientId: 'cli-123',
           entityIds: ['ent-1'],
           entities: [{ id: 'ent-1', name: 'Entity One' }],
-          period: '2024-01',
+          period: '2024-01-01',
           rows,
         });
     });
@@ -415,14 +415,14 @@ describe('mappingStore selectors', () => {
         description: 'Revenue Item',
         entity: '',
         netChange: 1000,
-        glMonth: '2025-08',
+        glMonth: '2025-08-01',
       },
       {
         accountId: '4000',
         description: 'Revenue Item Duplicate',
         entity: '',
         netChange: 2000,
-        glMonth: '2025-08',
+        glMonth: '2025-08-01',
       },
     ];
 
@@ -432,7 +432,7 @@ describe('mappingStore selectors', () => {
         clientId: 'cli-123',
         entityIds: ['comp-1'],
         entities: [{ id: 'comp-1', name: 'AMX Inc.' }],
-        period: '2025-08',
+        period: '2025-08-01',
         rows,
       });
     });
@@ -467,7 +467,7 @@ describe('mappingStore selectors', () => {
     const accounts: GLAccountMappingRow[] = [
       buildMappingAccount({
         id: 'acct-jan',
-        glMonth: '2024-01',
+        glMonth: '2024-01-01',
         netChange: 150,
         activity: 150,
         accountName: 'Freight Revenue',
@@ -475,7 +475,7 @@ describe('mappingStore selectors', () => {
       }),
       buildMappingAccount({
         id: 'acct-feb',
-        glMonth: '2024-02',
+        glMonth: '2024-02-01',
         netChange: 0,
         activity: 0,
         accountName: 'Freight Revenue',
@@ -483,7 +483,7 @@ describe('mappingStore selectors', () => {
       }),
       buildMappingAccount({
         id: 'acct-mar',
-        glMonth: '2024-03',
+        glMonth: '2024-03-01',
         netChange: 275,
         activity: 275,
         accountName: 'COGS',
@@ -508,10 +508,71 @@ describe('mappingStore selectors', () => {
 
     expect(filtered).toHaveLength(2);
     expect(filtered[0]).toEqual(
-      expect.objectContaining({ accountId: '5000', glMonth: '2024-03', netChange: 275 }),
+      expect.objectContaining({ accountId: '5000', glMonth: '2024-03-01', netChange: 275 }),
     );
     expect(filtered[1]).toEqual(
-      expect.objectContaining({ accountId: '4000', glMonth: '2024-01', netChange: 150 }),
+      expect.objectContaining({ accountId: '4000', glMonth: '2024-01-01', netChange: 150 }),
     );
+  });
+
+  it('clears the mapping workspace when a client switch resets the import', () => {
+    const rows: TrialBalanceRow[] = [
+      {
+        accountId: '1000',
+        description: 'Cash',
+        entity: 'Reset Entity',
+        netChange: 500,
+        glMonth: '2024-05-01',
+      },
+      {
+        accountId: '2000',
+        description: 'Revenue',
+        entity: 'Reset Entity',
+        netChange: -500,
+        glMonth: '2024-05-01',
+      },
+    ];
+
+    act(() => {
+      useMappingStore.getState().loadImportedAccounts({
+        uploadId: 'import-reset',
+        clientId: 'client-reset',
+        entityIds: ['ent-reset'],
+        entities: [{ id: 'ent-reset', name: 'Reset Entity' }],
+        period: '2024-05-01',
+        rows,
+      });
+    });
+
+    expect(useMappingStore.getState().accounts.length).toBe(2);
+
+    act(() => {
+      useMappingStore.getState().clearWorkspace();
+    });
+
+    const state = useMappingStore.getState();
+    expect(state.accounts).toHaveLength(0);
+    expect(state.activeUploadId).toBeNull();
+    expect(state.activeClientId).toBeNull();
+    expect(state.activeEntities).toEqual([]);
+    expect(state.activeEntityIds).toEqual([]);
+    expect(state.activeEntityId).toBeNull();
+    expect(state.activePeriod).toBeNull();
+    expect(state.presetLibrary).toEqual([]);
+    expect(state.rowSaveStatuses).toEqual({});
+    expect(state.dirtyMappingIds.size).toBe(0);
+
+    const ratioState = useRatioAllocationStore.getState();
+    expect(ratioState.allocations).toHaveLength(0);
+    expect(ratioState.basisAccounts).toHaveLength(0);
+    expect(ratioState.presets).toHaveLength(0);
+    expect(ratioState.groups).toHaveLength(0);
+    expect(ratioState.sourceAccounts).toHaveLength(0);
+    expect(ratioState.availablePeriods).toHaveLength(0);
+    expect(ratioState.results).toHaveLength(0);
+    expect(ratioState.validationErrors).toHaveLength(0);
+    expect(ratioState.auditLog).toHaveLength(0);
+    expect(ratioState.selectedPeriod).toBeNull();
+    expect(ratioState.lastDynamicMutation).toBeNull();
   });
 });

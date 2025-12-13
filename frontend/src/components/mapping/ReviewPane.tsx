@@ -1,13 +1,21 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, History, Loader2 } from 'lucide-react';
-import { Card, CardContent, CardFooter, CardHeader } from '../ui/Card';
+import { AlertTriangle, CheckCircle2, Clock3, Download, History, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '../ui/Card';
+import { selectAccounts, selectSplitValidationIssues, useMappingStore } from '../../store/mappingStore';
 import {
-  selectAccounts,
-  selectSplitValidationIssues,
-  selectSummaryMetrics,
-  useMappingStore,
-} from '../../store/mappingStore';
+  type DistributionOperationCatalogItem,
+  type DistributionOperationShare,
+  type DistributionRow,
+  useDistributionStore,
+} from '../../store/distributionStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import { useOrganizationStore } from '../../store/organizationStore';
+import { useClientStore } from '../../store/clientStore';
+import { formatCurrencyAmount } from '../../utils/currency';
+import {
+  buildOperationScoaActivitySheets,
+  exportOperationScoaWorkbook,
+} from '../../utils/exportScoaActivity';
 
 interface PublishLogEntry {
   id: string;
@@ -18,26 +26,48 @@ interface PublishLogEntry {
 
 const createLogId = () => `log-${Math.random().toString(36).slice(2, 10)}`;
 
-const formatCurrency = (value: number) =>
-  value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const normalizeOperationKey = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed.toUpperCase() : '';
+};
 
-const formatCurrencyWithCents = (value: number) =>
-  value.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+const formatDistributionTypeLabel = (value: DistributionRow['type']) => {
+  if (!value) {
+    return '';
+  }
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+};
+
+const formatAllocationShare = (row: DistributionRow, share: DistributionOperationShare) => {
+  if (typeof share.allocation === 'number') {
+    return `${share.allocation}%`;
+  }
+  if (row.type === 'direct') {
+    return '100%';
+  }
+  if (row.type === 'dynamic') {
+    return 'Variable';
+  }
+  return '—';
+};
+
+type OperationReviewItem = {
+  row: DistributionRow;
+  share: DistributionOperationShare;
+};
+
+interface OperationReviewEntry {
+  operation: DistributionOperationCatalogItem;
+  items: OperationReviewItem[];
+}
 
 const ReviewPane = () => {
   const accounts = useMappingStore(selectAccounts);
-  const summary = useMappingStore(selectSummaryMetrics);
   const splitIssues = useMappingStore(selectSplitValidationIssues);
   const finalizeMappings = useMappingStore(state => state.finalizeMappings);
-  const { selectedPeriod, results, validationErrors, isProcessing, calculateAllocations } =
+  const { selectedPeriod, validationErrors, isProcessing, calculateAllocations } =
     useRatioAllocationStore(state => ({
       selectedPeriod: state.selectedPeriod,
-      results: state.results,
       validationErrors: state.validationErrors,
       isProcessing: state.isProcessing,
       calculateAllocations: state.calculateAllocations,
@@ -61,7 +91,7 @@ const ReviewPane = () => {
     return splitIssues.map(issue => {
       const account = accountLookup.get(issue.accountId);
       return {
-        accountName: account ? `${account.accountId} — ${account.accountName}` : issue.accountId,
+        accountName: account ? `${account.accountId} - ${account.accountName}` : issue.accountId,
         message: issue.message,
       };
     });
@@ -82,36 +112,81 @@ const ReviewPane = () => {
     [mappingWarnings, dynamicWarnings],
   );
 
-  const periodResults = useMemo(
-    () => (selectedPeriod ? results.filter(result => result.periodId === selectedPeriod) : []),
-    [results, selectedPeriod]
+  const activeClientId = useClientStore(state => state.activeClientId);
+  const companies = useOrganizationStore(state => state.companies);
+  const distributionRows = useDistributionStore(state => state.rows);
+
+  const distributedRows = useMemo(
+    () => distributionRows.filter(row => row.status === 'Distributed'),
+    [distributionRows],
   );
 
-  const flattenedPeriodResults = useMemo(
-    () =>
-      periodResults.flatMap(result =>
-        result.allocations.map(target => ({
-          key: `${result.allocationId}-${target.targetId}`,
-          sourceName: result.allocationName,
-          targetName: target.targetName,
-          basisValue: target.basisValue,
-          allocation: target.value,
-          percentage: target.percentage,
-        }))
-      ),
-    [periodResults]
-  );
+  const clientOperations = useMemo<DistributionOperationCatalogItem[]>(() => {
+    const map = new Map<string, DistributionOperationCatalogItem>();
+    companies.forEach(company => {
+      company.clients.forEach(client => {
+        if (activeClientId && client.id !== activeClientId) {
+          return;
+        }
+        client.operations.forEach(operation => {
+          const key = normalizeOperationKey(operation.code ?? operation.id);
+          if (!key) {
+            return;
+          }
+          if (map.has(key)) {
+            return;
+          }
+          const code = (operation.code || operation.id || '').trim();
+          const name = operation.name?.trim() || code || key;
+          map.set(key, {
+            id: code || key,
+            code: code || key,
+            name,
+          });
+        });
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [companies, activeClientId]);
 
-  const adjustmentSummaries = useMemo(
-    () =>
-      periodResults
-        .filter(result => result.adjustment && Math.abs(result.adjustment.amount) > 0)
-        .map(result => ({
-          allocationName: result.allocationName,
-          amount: result.adjustment?.amount ?? 0,
-        })),
-    [periodResults]
-  );
+  const operationReviewEntries = useMemo<OperationReviewEntry[]>(() => {
+    const entries = new Map<string, OperationReviewEntry>();
+    clientOperations.forEach(operation => {
+      const key = normalizeOperationKey(operation.code ?? operation.id);
+      if (!key) {
+        return;
+      }
+      entries.set(key, { operation, items: [] });
+    });
+
+    distributedRows.forEach(row => {
+      row.operations.forEach(share => {
+        const key = normalizeOperationKey(share.code ?? share.id ?? share.name);
+        if (!key) {
+          return;
+        }
+        let entry = entries.get(key);
+        if (!entry) {
+          const code = share.code?.trim() || share.id?.trim() || share.name?.trim() || key;
+          const name = share.name?.trim() || code || key;
+          entry = {
+            operation: { id: share.id || code, code, name },
+            items: [],
+          };
+          entries.set(key, entry);
+        }
+        entry.items.push({ row, share });
+      });
+    });
+
+    const sortedEntries = Array.from(entries.values()).sort((a, b) =>
+      a.operation.code.localeCompare(b.operation.code),
+    );
+    sortedEntries.forEach(entry => {
+      entry.items.sort((a, b) => a.row.accountId.localeCompare(b.row.accountId));
+    });
+    return sortedEntries;
+  }, [clientOperations, distributedRows]);
 
   const appendLog = (entry: Omit<PublishLogEntry, 'id' | 'timestamp'> & { timestamp?: string }) => {
     setPublishLog(previous => [
@@ -125,6 +200,8 @@ const ReviewPane = () => {
     ]);
   };
 
+  const [isExporting, setIsExporting] = useState(false);
+
   const handleRunChecks = async () => {
     if (selectedPeriod) {
       await calculateAllocations(selectedPeriod);
@@ -136,7 +213,7 @@ const ReviewPane = () => {
     const hasWarnings = splitIssues.length > 0 || dynamicIssues.length > 0;
     setStatusMessage(
       hasWarnings
-        ? 'Checks completed — resolve the warnings below before publishing.'
+        ? 'Checks completed - resolve the warnings below before publishing.'
         : 'Validation checks passed. You can publish your mappings.',
     );
     appendLog({
@@ -145,6 +222,26 @@ const ReviewPane = () => {
         ? 'Validation run flagged outstanding allocation warnings.'
         : 'Validation run completed without warnings.',
     });
+  };
+
+  const handleExportScoaActivity = async () => {
+    setIsExporting(true);
+    try {
+      const sheets = buildOperationScoaActivitySheets(accounts, distributionRows);
+      if (!sheets.length) {
+        setStatusMessage('No SCoA activity is available for export.');
+        return;
+      }
+      await exportOperationScoaWorkbook(sheets);
+      appendLog({ status: 'info', message: 'SCoA activity export downloaded.' });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to export SCoA activity.';
+      setStatusMessage(message);
+      appendLog({ status: 'error', message: 'Failed to export SCoA activity.' });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handlePublish = () => {
@@ -161,88 +258,62 @@ const ReviewPane = () => {
     });
   };
 
-  const kpis: { label: string; value: string; helper?: string }[] = [
-    { label: 'Total GL accounts', value: summary.totalAccounts.toLocaleString() },
-    {
-      label: 'Mapped accounts',
-      value: summary.mappedAccounts.toLocaleString(),
-      helper: `${Math.round((summary.mappedAccounts / Math.max(summary.totalAccounts, 1)) * 100)}% coverage`,
-    },
-    { label: 'Gross balance', value: formatCurrency(summary.grossTotal) },
-    {
-      label: 'Net after exclusions',
-      value: formatCurrency(summary.netTotal),
-      helper: `Excluded ${formatCurrency(summary.excludedTotal)}`,
-    },
-  ];
-
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Review readiness</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Confirm allocations, resolve outstanding warnings, and publish your mappings to the reporting environment.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {kpis.map(kpi => (
-              <div
-                key={kpi.label}
-                className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
-              >
-                <div className="text-sm font-medium text-gray-500 dark:text-gray-400">{kpi.label}</div>
-                <div className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{kpi.value}</div>
-                {kpi.helper && (
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{kpi.helper}</div>
-                )}
-              </div>
-            ))}
+      <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        {statusMessage && (
+          <div
+            className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-500/60 dark:bg-blue-500/10 dark:text-blue-100"
+            role="status"
+          >
+            {statusMessage}
           </div>
-          {statusMessage && (
-            <div
-              className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-500/60 dark:bg-blue-500/10 dark:text-blue-100"
-              role="status"
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            {selectedPeriod ? `Previewing allocations for ${selectedPeriod}.` : 'Choose a reporting period to run allocation checks.'}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleRunChecks}
+              className="inline-flex items-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:text-gray-200 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
             >
-              {statusMessage}
-            </div>
-          )}
-        </CardContent>
-        <CardFooter>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              {selectedPeriod ? `Previewing allocations for ${selectedPeriod}.` : 'Choose a reporting period to run allocation checks.'}
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleRunChecks}
-                className="inline-flex items-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:text-gray-200 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
-              >
-                {isProcessing ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />
-                )}
-                Run checks
-              </button>
-              <button
-                type="button"
-                onClick={handlePublish}
-                disabled={warnings.length > 0}
-                className={`inline-flex items-center rounded-md px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
-                  warnings.length > 0
-                    ? 'cursor-not-allowed bg-slate-200 text-slate-500 focus-visible:ring-0 dark:bg-slate-800 dark:text-slate-500'
-                    : 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500 dark:bg-emerald-500 dark:hover:bg-emerald-400'
-                }`}
-              >
-                Publish mappings
-              </button>
-            </div>
+              {isProcessing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />
+              )}
+              Run checks
+            </button>
+            <button
+              type="button"
+              onClick={handleExportScoaActivity}
+              disabled={isExporting}
+              className="inline-flex items-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-slate-600 dark:text-gray-200 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
+            >
+              {isExporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" aria-hidden="true" />
+              )}
+              Download SCoA export
+            </button>
+            <button
+              type="button"
+              onClick={handlePublish}
+              disabled={warnings.length > 0}
+              className={`inline-flex items-center rounded-md px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 ${
+                warnings.length > 0
+                  ? 'cursor-not-allowed bg-slate-200 text-slate-500 focus-visible:ring-0 dark:bg-slate-800 dark:text-slate-500'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500 dark:bg-emerald-500 dark:hover:bg-emerald-400'
+              }`}
+            >
+              Publish mappings
+            </button>
           </div>
-        </CardFooter>
-      </Card>
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-12">
         <Card className="lg:col-span-7">
@@ -329,67 +400,83 @@ const ReviewPane = () => {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Allocation preview</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Review allocation output for the selected reporting period before final publish.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {!selectedPeriod ? (
-            <p className="text-sm text-gray-500">Select a reporting period to preview calculated allocations.</p>
-          ) : flattenedPeriodResults.length === 0 ? (
-            <p className="text-sm text-gray-500">No allocation results generated yet for {selectedPeriod}.</p>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-slate-700">
-                  <thead className="bg-gray-50 text-left dark:bg-slate-800">
-                    <tr>
-                      <th scope="col" className="px-4 py-3 font-medium text-gray-500 dark:text-gray-300">
-                        Source allocation
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-gray-500 dark:text-gray-300">
-                        Target datapoint
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-gray-500 dark:text-gray-300">
-                        Basis value
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-gray-500 dark:text-gray-300">
-                        Allocated amount
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-gray-500 dark:text-gray-300">
-                        Percentage
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
-                    {flattenedPeriodResults.map(row => (
-                      <tr key={row.key}>
-                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{row.sourceName}</td>
-                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{row.targetName}</td>
-                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{formatCurrency(row.basisValue)}</td>
-                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{formatCurrencyWithCents(row.allocation)}</td>
-                        <td className="px-4 py-3 text-gray-900 dark:text-gray-100">{row.percentage.toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {adjustmentSummaries.length > 0 && (
-                <ul className="mt-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                  {adjustmentSummaries.map(summary => (
-                    <li key={summary.allocationName}>
-                      {summary.allocationName} adjusted by {formatCurrencyWithCents(summary.amount)} to balance rounding.
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {operationReviewEntries.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white/60 px-6 py-12 text-center text-sm text-slate-500 shadow-sm dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-400">
+          No operations are configured for the selected client yet. Choose a client with defined operations to review distributed activity.
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="rounded-lg border border-slate-200 bg-white px-6 py-4 text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+            Only distributions that reached the <span className="font-semibold text-slate-900 dark:text-white">Distributed</span> status appear below. Each table represents an operation assigned to the active client.
+          </div>
+          <div className="space-y-6">
+            {operationReviewEntries.map(entry => (
+              <Card key={entry.operation.code}>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                        Operation {entry.operation.code}
+                      </h3>
+                      {entry.operation.name && entry.operation.name !== entry.operation.code && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{entry.operation.name}</p>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+                      <thead className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Account</th>
+                          <th className="px-3 py-2 text-left">Description</th>
+                          <th className="px-3 py-2 text-right">Activity</th>
+                          <th className="px-3 py-2 text-left">Distribution</th>
+                          <th className="px-3 py-2 text-right">Share</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {entry.items.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={5}
+                              className="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-300"
+                            >
+                              No distributed activity has been mapped to this operation yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          entry.items.map(({ row, share }) => (
+                            <tr
+                              key={`${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`}
+                              className="bg-white text-slate-900 odd:bg-slate-50 even:bg-white dark:bg-slate-900 dark:text-slate-100 dark:odd:bg-slate-900/70 dark:even:bg-slate-900/55"
+                            >
+                              <td className="max-w-[8rem] truncate px-3 py-2 font-semibold text-slate-900 dark:text-slate-100">
+                                {row.accountId}
+                              </td>
+                              <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.description}</td>
+                              <td className="px-3 py-2 text-right font-mono text-slate-700 dark:text-slate-200">
+                                {formatCurrencyAmount(row.activity)}
+                              </td>
+                              <td className="px-3 py-2 text-slate-700 dark:text-slate-200">
+                                {formatDistributionTypeLabel(row.type)}
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">
+                                {formatAllocationShare(row, share)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -91,7 +91,7 @@ const dynamicPayload = {
       presetId: 'preset-dynamic',
       exclusionPct: null,
       netChange: 100,
-      glMonth: '2025-01',
+      glMonth: '2025-01-01',
       updatedBy: 'tester',
       splitDefinitions: [
         {

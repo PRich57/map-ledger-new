@@ -137,6 +137,86 @@ export const insertOperationScoaActivity = async (
   return (result.recordset ?? []).map(mapRow);
 };
 
+const normalizeOperationCode = (value?: string | null): string | null => {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.toUpperCase() : null;
+};
+
+const sanitizeActivityEntries = (
+  activities: OperationScoaActivityInput[],
+): OperationScoaActivityInput[] => {
+  const sanitizedEntries = activities.map<OperationScoaActivityInput | null>(entry => {
+    const operationCd = normalizeOperationCode(entry.operationCd);
+    const scoaAccountId = normalizeText(entry.scoaAccountId);
+    const activityMonth = toSqlMonth(entry.activityMonth);
+    const activityValue =
+      Number.isFinite(entry.activityValue) && entry.activityValue !== undefined
+        ? entry.activityValue
+        : NaN;
+    if (
+      !operationCd ||
+      !scoaAccountId ||
+      !activityMonth ||
+      !Number.isFinite(activityValue)
+    ) {
+      return null;
+    }
+    const result: OperationScoaActivityInput = {
+      operationCd,
+      scoaAccountId,
+      activityMonth,
+      activityValue,
+      updatedBy: normalizeText(entry.updatedBy),
+    };
+    return result;
+  });
+
+  return sanitizedEntries.filter((entry): entry is OperationScoaActivityInput => entry !== null);
+};
+
+const deleteOperationScoaActivityForKeys = async (
+  activities: OperationScoaActivityInput[],
+): Promise<void> => {
+  const uniqueKeys = new Map<string, OperationScoaActivityInput>();
+  activities.forEach(activity => {
+    const key = `${activity.operationCd}|||${activity.scoaAccountId}`;
+    if (!uniqueKeys.has(key)) {
+      uniqueKeys.set(key, activity);
+    }
+  });
+
+  if (!uniqueKeys.size) {
+    return;
+  }
+
+  const params: Record<string, unknown> = {};
+  const clauses = Array.from(uniqueKeys.values())
+    .map((activity, index) => {
+      params[`operationCdDelete${index}`] = activity.operationCd;
+      params[`scoaAccountIdDelete${index}`] = activity.scoaAccountId;
+      return `(OPERATION_CD = @operationCdDelete${index} AND SCOA_ACCOUNT_ID = @scoaAccountIdDelete${index})`;
+    })
+    .join(' OR ');
+
+  if (!clauses) {
+    return;
+  }
+
+  await runQuery(`DELETE FROM ${TABLE_NAME} WHERE ${clauses}`, params);
+};
+
+export const replaceOperationScoaActivity = async (
+  activities: OperationScoaActivityInput[],
+): Promise<void> => {
+  const normalized = sanitizeActivityEntries(activities);
+  if (!normalized.length) {
+    return;
+  }
+
+  await deleteOperationScoaActivityForKeys(normalized);
+  await insertOperationScoaActivity(normalized);
+};
+
 export const updateOperationScoaActivity = async (
   operationCd: string,
   scoaAccountId: string,

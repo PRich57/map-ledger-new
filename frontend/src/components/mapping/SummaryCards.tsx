@@ -46,17 +46,7 @@ const SummaryCards = () => {
     };
   }, [accounts, dynamicExclusionSummaries, excludedTotal, grossTotal]);
 
-  const { pendingAllocations, executedRules, totalTargets } = useMemo(() => {
-    const needsAllocation = accounts.filter(account => {
-      if (account.mappingType === 'direct' || account.mappingType === 'exclude') {
-        return false;
-      }
-      const hasDefinedSplit = account.splitDefinitions.length > 0;
-      const hasCalculatedAllocation = allocations.some(
-        allocation => allocation.sourceAccount.id === account.id
-      );
-      return !hasDefinedSplit && !hasCalculatedAllocation;
-    }).length;
+  const { executedRules, totalTargets } = useMemo(() => {
     const relevantResults = selectedPeriod
       ? results.filter(result => result.periodId === selectedPeriod)
       : [];
@@ -66,11 +56,13 @@ const SummaryCards = () => {
     );
 
     return {
-      pendingAllocations: needsAllocation,
       executedRules: relevantResults.length,
       totalTargets: totalTargetsForPeriod,
     };
-  }, [accounts, allocations, results, selectedPeriod]);
+  }, [results, selectedPeriod]);
+  const mappedCoverage = Math.round(
+    (mappedAccounts / Math.max(totalAccounts, 1)) * 100,
+  );
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -80,9 +72,13 @@ const SummaryCards = () => {
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{mappedAccounts} mapped</p>
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <p className="text-sm text-gray-500 dark:text-gray-400">Distribution rules</p>
-        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{allocations.length}</p>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{pendingAllocations} pending setup</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Mapped accounts</p>
+        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">
+          {mappedAccounts.toLocaleString()}
+        </p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {`${mappedCoverage}% coverage`}
+        </p>
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <p className="text-sm text-gray-500 dark:text-gray-400">Total balance</p>

@@ -93,6 +93,31 @@ const parseNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const parseBooleanValue = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) {
+      return undefined;
+    }
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0') {
+      return false;
+    }
+  }
+
+  return undefined;
+};
+
 const normalizeHeader = (value: string | null | undefined): string | null => {
   if (value === undefined || value === null) {
     return null;
@@ -488,30 +513,35 @@ const normalizePayload = (body: unknown): { payload: IngestPayload | null; error
             return null;
           }
 
-          const aliases = Array.isArray(raw.aliases)
-            ? (raw.aliases as unknown[])
-                .map((alias) => normalizeText(alias))
-                .filter((alias) => alias.length > 0)
-            : [];
+            const aliases = Array.isArray(raw.aliases)
+              ? (raw.aliases as unknown[])
+                  .map((alias) => normalizeText(alias))
+                  .filter((alias) => alias.length > 0)
+              : [];
 
-          const id = getFirstStringValue(raw.id);
+            const id = getFirstStringValue(raw.id);
 
-          const entity: IngestEntity = {
-            name,
-          };
+            const entity: IngestEntity = {
+              name,
+            };
 
-          if (id) {
-            entity.id = id;
-          }
+            if (id) {
+              entity.id = id;
+            }
 
-          if (aliases.length > 0) {
-            entity.aliases = aliases;
-          }
+            if (aliases.length > 0) {
+              entity.aliases = aliases;
+            }
 
-          return entity;
-        })
-        .filter((entity): entity is IngestEntity => entity !== null)
-    : [];
+            const isSelectedValue = parseBooleanValue(raw.isSelected);
+            if (isSelectedValue !== undefined) {
+              entity.isSelected = isSelectedValue;
+            }
+
+            return entity;
+          })
+          .filter((entity): entity is IngestEntity => entity !== null)
+      : [];
 
   return {
     payload: {

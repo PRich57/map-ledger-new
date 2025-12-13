@@ -98,9 +98,9 @@ export default function PreviewTable({
         <table className="min-w-full text-sm text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-900">
           <thead className="bg-gray-50 text-left dark:bg-slate-800">
             <tr>
-              {columnKeys.map((key) => (
+              {columnKeys.map((key, columnIndex) => (
                 <th
-                  key={`header-${key}`}
+                  key={`header-${columnIndex}-${key}`}
                   className="sticky top-0 border-b border-gray-200 bg-gray-50 p-2 font-medium text-gray-600 dark:border-slate-700 dark:bg-slate-800 dark:text-gray-300"
                   scope="col"
                 >
@@ -121,9 +121,9 @@ export default function PreviewTable({
                   key={`row-${rowIndex}`}
                   className={`${rowBackground} border-b border-gray-200 last:border-b-0 dark:border-slate-700 hover:bg-gray-100 dark:hover:bg-slate-800/70`}
                 >
-                  {columnKeys.map((key) => (
+                  {columnKeys.map((key, columnIndex) => (
                     <td
-                      key={`cell-${rowIndex}-${key}`}
+                      key={`cell-${rowIndex}-${columnIndex}-${key}`}
                       className="p-2 align-top text-gray-800 dark:text-gray-100"
                     >
                       {formatCellValue(row[key])}

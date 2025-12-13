@@ -7,6 +7,7 @@ import type {
 } from '../../types';
 import type { DistributionOperationCatalogItem } from '../../store/distributionStore';
 import { useDistributionStore } from '../../store/distributionStore';
+import { getOperationLabel } from '../../utils/operationLabel';
 
 export type DistributionOperationDraft = DistributionOperationShare & {
   draftId: string;
@@ -22,6 +23,7 @@ interface DistributionSplitRowProps {
   presetOptions: MappingPresetLibraryEntry[];
   selectedPresetId: string | null;
   onApplyPreset: (presetId: string | null) => void;
+  panelId?: string;
 }
 
 const amountFormatter = new Intl.NumberFormat('en-US', {
@@ -76,7 +78,9 @@ export default function DistributionSplitRow({
   presetOptions,
   selectedPresetId,
   onApplyPreset,
+  panelId,
 }: DistributionSplitRowProps) {
+  const headingId = panelId ? `${panelId}-heading` : undefined;
   const [percentageInputs, setPercentageInputs] = useState<
     Record<string, string>
   >(() => buildPercentageState(operationsDraft));
@@ -239,10 +243,20 @@ export default function DistributionSplitRow({
   };
 
   return (
-    <div className="space-y-4">
+    <div
+      id={panelId}
+      role="region"
+      aria-labelledby={headingId}
+      className="space-y-4"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Allocation splits</p>
+          <p
+            id={headingId}
+            className="text-sm font-semibold text-slate-700 dark:text-slate-200"
+          >
+            Allocation splits
+          </p>
           <p className="text-xs text-slate-500 dark:text-slate-400">Ensure 100% allocation across targets.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -312,11 +326,9 @@ export default function DistributionSplitRow({
                     >
                       <option value="">Select target</option>
                       {optionsForOperation(operation).map(option => (
-                        <option key={option.id} value={option.id}>
-                          {option.name && option.name !== option.id
-                            ? `${option.id} - ${option.name}`
-                            : option.id}
-                        </option>
+                      <option key={option.id} value={option.id}>
+                          {getOperationLabel(option)}
+                      </option>
                       ))}
                     </select>
                   </td>

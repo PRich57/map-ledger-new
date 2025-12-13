@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { ChangeEvent, useEffect, useMemo } from 'react';
 import { LogOut, Map, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { signOut, msalInstance } from '../utils/msal';
@@ -38,6 +38,9 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
   const activeClientId = useClientStore(state => state.activeClientId);
   const setActiveClientId = useClientStore(state => state.setActiveClientId);
   const setMappingActiveClientId = useMappingStore(state => state.setActiveClientId);
+  const mappingActiveClientId = useMappingStore(state => state.activeClientId);
+  const activeUploadId = useMappingStore(state => state.activeUploadId);
+  const clearMappingWorkspace = useMappingStore(state => state.clearWorkspace);
   const theme = useThemeStore((state) => state.theme);
   const toggleTheme = useThemeStore((state) => state.toggleTheme);
 
@@ -84,6 +87,32 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
     [activeClientId, clients],
   );
 
+  const handleClientChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextClientId = event.target.value;
+    if (nextClientId === activeClientId) {
+      return;
+    }
+
+    const destinationClient = clients.find(client => client.clientId === nextClientId);
+    const destinationLabel = destinationClient?.name ?? 'the selected client';
+    const originLabel = activeClient?.name ?? 'the current client';
+    const hasConflictingImport =
+      Boolean(activeUploadId) &&
+      (mappingActiveClientId === null || mappingActiveClientId !== nextClientId);
+
+    if (hasConflictingImport) {
+      const confirmed = window.confirm(
+        `${originLabel} still has data open in the Mapping, Reconcile, Distribution, and Review screens. The upload belongs to ${originLabel} and cannot remain open under ${destinationLabel}. Your progress has been saved—are you sure you want to switch clients and clear the workspace?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      clearMappingWorkspace();
+    }
+
+    setActiveClientId(nextClientId);
+  };
+
   const handleSignOut = async () => {
     await signOut();
   };
@@ -128,7 +157,7 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
                   id={clientSelectorId}
                   className="min-w-[11rem] rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-700 dark:bg-slate-900 dark:text-gray-100"
                   value={activeClient?.clientId ?? ''}
-                  onChange={(event) => setActiveClientId(event.target.value)}
+                  onChange={handleClientChange}
                 >
                   {clients.map(client => (
                     <option key={client.clientId} value={client.clientId}>

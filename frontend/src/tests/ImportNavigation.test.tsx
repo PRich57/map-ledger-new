@@ -2,10 +2,27 @@ import { render, screen, waitFor } from './testUtils';
 import userEvent from './userEvent';
 import { MemoryRouter } from 'react-router-dom';
 import Import from '../pages/Import';
+import type { Import as ImportRecord } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useImportStore } from '../store/importStore';
+import { useClientStore } from '../store/clientStore';
 
 const mockNavigate = jest.fn();
+
+const mockHistoryImport: ImportRecord = {
+  id: 'import-history-1',
+  fileUploadGuid: 'import-history-1',
+  clientId: 'client-history',
+  fileName: 'history.xlsx',
+  fileSize: 1024,
+  fileType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  period: '2024-03-01',
+  timestamp: '2024-03-01T00:00:00.000Z',
+  status: 'completed',
+  rowCount: 42,
+  importedBy: 'history.user@example.com',
+  userId: 'user-1',
+};
 
 jest.mock('react-router-dom', () => {
   const actual = jest.requireActual('react-router-dom');
@@ -43,7 +60,7 @@ jest.mock('../components/import/ImportForm', () => ({
         description: 'Cash',
         entity: 'Main Division',
         netChange: 1250,
-        glMonth: '2024-01',
+        glMonth: '2024-01-01',
       },
     ];
     const headerMap: Record<string, string | null> = {
@@ -63,7 +80,7 @@ jest.mock('../components/import/ImportForm', () => ({
       'client-123',
       ['company-1'],
       headerMap,
-      '2024-01',
+      '2024-01-01',
       'trial_balance.csv',
       mockFile,
     );
@@ -78,8 +95,21 @@ jest.mock('../components/import/ImportForm', () => ({
 
 jest.mock('../components/import/ImportHistory', () => ({
   __esModule: true,
-  default: ({ imports }: { imports: unknown[] }) => (
-    <div data-testid="import-history-count">{imports.length}</div>
+  default: ({
+    imports,
+    onStartMapping,
+  }: {
+    imports: ImportRecord[];
+    onStartMapping?: (importItem: ImportRecord, mode: 'resume' | 'restart') => void;
+  }) => (
+    <div>
+      <div data-testid="import-history-count">{imports.length}</div>
+      {onStartMapping && imports.length > 0 && (
+        <button type="button" onClick={() => onStartMapping(imports[0], 'resume')}>
+          Open history import
+        </button>
+      )}
+    </div>
   ),
 }));
 
@@ -105,30 +135,102 @@ describe('Import page navigation', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
 
-    global.fetch = jest.fn();
+    global.fetch = jest.fn((input: RequestInfo, init?: RequestInit) => {
+      const url =
+        typeof input === 'string' ? input : (input as Request)?.url ?? '';
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ items: [], total: 0, page: 1, pageSize: 10 }),
-    });
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        item: {
-          id: 'import-123',
-          clientId: 'client-123',
-          userId: 'user-1',
-          fileName: 'trial_balance.csv',
-          fileSize: 256,
-          fileType: 'text/csv',
-          period: '2024-01',
-          timestamp: '2024-01-01T00:00:00.000Z',
-          status: 'completed',
-          rowCount: 1,
-          importedBy: 'user@example.com',
-        },
-      }),
-    });
+      if (url.includes('/user-clients')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            clients: [
+              {
+                clientId: 'client-123',
+                clientName: 'Client 123',
+                clientScac: 'C123',
+                operations: [],
+                companies: [],
+                metadata: {
+                  sourceAccounts: [],
+                  reportingPeriods: [],
+                  mappingTypes: [],
+                  targetSCoAs: [],
+                  polarities: [],
+                  presets: [],
+                  exclusions: [],
+                },
+              },
+              {
+                clientId: 'client-history',
+                clientName: 'History Client',
+                clientScac: 'HIST',
+                operations: [],
+                companies: [],
+                metadata: {
+                  sourceAccounts: [],
+                  reportingPeriods: [],
+                  mappingTypes: [],
+                  targetSCoAs: [],
+                  polarities: [],
+                  presets: [],
+                  exclusions: [],
+                },
+              },
+            ],
+            userEmail: 'user@example.com',
+          }),
+        });
+      }
+
+      if (url.includes('/client-files')) {
+        if (init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              item: {
+                id: 'import-123',
+                clientId: 'client-123',
+                userId: 'user-1',
+                fileUploadGuid: 'import-123',
+                fileName: 'trial_balance.csv',
+                fileSize: 256,
+                fileType: 'text/csv',
+                period: '2024-01-01',
+                timestamp: '2024-01-01T00:00:00.000Z',
+                status: 'completed',
+                rowCount: 1,
+                importedBy: 'user@example.com',
+              },
+            }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [mockHistoryImport],
+            total: 1,
+            page: 1,
+            pageSize: 10,
+          }),
+        });
+      }
+
+      if (url.includes('/file-records')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [],
+            entities: [],
+          }),
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
+    }) as jest.Mock;
 
     useAuthStore.setState({
       account: null,
@@ -147,6 +249,7 @@ describe('Import page navigation', () => {
     });
 
     useImportStore.getState().reset();
+    useClientStore.getState().reset();
   });
 
   afterEach(() => {
@@ -160,6 +263,8 @@ describe('Import page navigation', () => {
       isGuest: true,
       error: null,
     });
+
+    useClientStore.getState().reset();
 
     global.fetch = originalFetch;
   });
@@ -176,6 +281,25 @@ describe('Import page navigation', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/gl/mapping/import-123?stage=mapping');
+    });
+  });
+
+  it('resets the global client when opening history from another client', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Import />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId('import-history-count');
+    await user.click(screen.getByRole('button', { name: /open history import/i }));
+
+    await waitFor(() => {
+      expect(useClientStore.getState().activeClientId).toBe(mockHistoryImport.clientId);
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/gl/mapping/${mockHistoryImport.fileUploadGuid}?stage=mapping`,
+      );
     });
   });
 });

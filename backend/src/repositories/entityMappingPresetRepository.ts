@@ -127,6 +127,7 @@ export const createEntityMappingPreset = async (
 
   const presetGuid = normalizePresetGuid(input.presetGuid);
   const presetDescription = normalizeText(input.presetDescription);
+  const normalizedPresetType = normalizePresetTypeValue(input.presetType);
 
   const columns = [
     'ENTITY_ID',
@@ -162,7 +163,7 @@ export const createEntityMappingPreset = async (
     )`,
     {
       entityId: input.entityId,
-      presetType: input.presetType,
+      presetType: normalizedPresetType,
       presetDescription,
       ...(presetGuid ? { presetGuid } : {}),
     }
@@ -199,6 +200,9 @@ export const updateEntityMappingPreset = async (
   }
 
   const presetDescription = normalizeText(updates.presetDescription);
+  const normalizedPresetType = updates.presetType
+    ? normalizePresetTypeValue(updates.presetType)
+    : undefined;
 
   await runQuery(
     `UPDATE ${TABLE_NAME}
@@ -210,7 +214,7 @@ export const updateEntityMappingPreset = async (
     WHERE PRESET_GUID = @presetGuid`,
     {
       presetGuid: normalizedPresetGuid,
-      presetType: updates.presetType,
+      presetType: normalizedPresetType,
       presetDescription,
       updatedBy: updates.updatedBy ?? null,
     }
