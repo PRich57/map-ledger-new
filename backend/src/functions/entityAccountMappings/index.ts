@@ -102,17 +102,22 @@ const resolvePresetType = (value: string | null | undefined): string => {
   switch (normalized) {
     case 'dynamic':
     case 'd':
+    case 'dyn':
       return 'dynamic';
     case 'percentage':
     case 'p':
+    case 'pct':
+    case 'percent':
       return 'percentage';
     case 'direct':
       return 'direct';
     case 'exclude':
     case 'excluded':
     case 'x':
+    case 'excl':
       return 'excluded';
     default:
+      // Only allow the four valid preset types - default to 'direct' for any unknown value
       return 'direct';
   }
 };

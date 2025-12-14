@@ -47,13 +47,18 @@ const normalizePresetTypeValue = (value?: string | null): string => {
     case 'excluded':
       return 'excluded';
     case 'p':
+    case 'pct':
+    case 'percent':
       return 'percentage';
     case 'd':
+    case 'dyn':
       return 'dynamic';
     case 'x':
+    case 'excl':
       return 'excluded';
     default:
-      return lower;
+      // Only allow the four valid preset types - default to 'direct' for any unknown value
+      return 'direct';
   }
 };
 
