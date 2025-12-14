@@ -44,6 +44,7 @@ import RatioAllocationManager from './RatioAllocationManager';
 import { getGroupTotal } from '../../utils/dynamicAllocation';
 import { formatCurrencyAmount } from '../../utils/currency';
 import { computeDynamicExclusionSummaries } from '../../utils/dynamicExclusions';
+import { formatPeriodDate } from '../../utils/period';
 import SearchableSelect from '../ui/SearchableSelect';
 
 type SortKey =
@@ -208,6 +209,9 @@ export default function MappingTable() {
     }
     return availablePeriods[availablePeriods.length - 1] ?? null;
   }, [availablePeriods]);
+  const latestPeriodLabel = latestPeriod
+    ? formatPeriodDate(latestPeriod) || latestPeriod
+    : null;
 
   const splitIssueIds = useMemo(
     () => new Set(splitValidationIssues.map((issue) => issue.accountId)),
@@ -537,7 +541,7 @@ export default function MappingTable() {
                         colSpan={12}
                       >
                         Earlier GL months
-                        {latestPeriod ? ` (before ${latestPeriod})` : ''}
+                        {latestPeriodLabel ? ` (before ${latestPeriodLabel})` : ''}
                       </td>
                     </tr>
                   )}

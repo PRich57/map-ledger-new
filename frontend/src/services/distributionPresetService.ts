@@ -1,4 +1,4 @@
-import type { DynamicAllocationPreset, DynamicAllocationPresetRow } from '../types';
+import type { DynamicAllocationPreset, DynamicAllocationPresetRow, MappingType } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
@@ -17,6 +17,29 @@ export interface DistributionPresetPayload {
   metric?: string | null;
   presetDetails?: DistributionPresetDetailPayload[];
 }
+
+const normalizeDistributionPresetType = (value?: string | null): MappingType => {
+  if (!value) {
+    return 'percentage';
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'dynamic' || normalized === 'd') {
+    return 'dynamic';
+  }
+  if (normalized === 'direct') {
+    return 'direct';
+  }
+  if (normalized === 'exclude' || normalized === 'excluded' || normalized === 'x') {
+    return 'exclude';
+  }
+  return 'percentage';
+};
+
+export const toDistributionPresetType = (value?: string | null): MappingType =>
+  normalizeDistributionPresetType(value);
+
+export const isDynamicDistributionPresetType = (value?: string | null): boolean =>
+  normalizeDistributionPresetType(value) === 'dynamic';
 
 export const fetchDistributionPresetsFromApi = async (
   entityId: string,
@@ -59,6 +82,9 @@ export const mapDistributionPresetsToDynamic = (
   const grouped = new Map<string, { meta: DistributionPresetPayload; rows: DynamicAllocationPresetRow[] }>();
 
   presets.forEach(preset => {
+    if (!isDynamicDistributionPresetType(preset.presetType)) {
+      return;
+    }
     const rows = (preset.presetDetails ?? [])
       .map(detail => buildPresetRow(preset, detail))
       .filter((row): row is DynamicAllocationPresetRow => Boolean(row));

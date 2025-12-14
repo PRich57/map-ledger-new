@@ -3,7 +3,11 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import SearchableSelect from '../ui/SearchableSelect';
 import { useChartOfAccountsStore } from '../../store/chartOfAccountsStore';
-import { resolveTargetAccountId, useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import {
+  resolveTargetAccountId,
+  useRatioAllocationStore,
+  DEFAULT_PRESET_CONTEXT,
+} from '../../store/ratioAllocationStore';
 import type {
   DynamicAllocationPresetContext,
   DynamicAllocationPresetRow,
@@ -39,7 +43,7 @@ const RatioAllocationBuilder = ({
 }: RatioAllocationBuilderProps) => {
   const {
     allocations,
-    presets,
+    presets: allPresets,
     basisAccounts,
     sourceAccounts,
     selectedPeriod,
@@ -53,6 +57,15 @@ const RatioAllocationBuilder = ({
     toggleAllocationPresetTargets,
     toggleTargetExclusion,
   } = useRatioAllocationStore();
+
+  const resolvedPresetContext = presetContext ?? DEFAULT_PRESET_CONTEXT;
+  const contextPresets = useMemo(
+    () =>
+      allPresets.filter(
+        preset => (preset.context ?? DEFAULT_PRESET_CONTEXT) === resolvedPresetContext,
+      ),
+    [allPresets, resolvedPresetContext],
+  );
 
   const [selectedAllocationId, setSelectedAllocationId] = useState<string | null>(null);
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
@@ -187,7 +200,7 @@ const RatioAllocationBuilder = ({
 
   const getPresetTargetOptions = useCallback(
       (presetId: string, rowIndex?: number) => {
-        const preset = presets.find(item => item.id === presetId);
+        const preset = contextPresets.find(item => item.id === presetId);
         if (!preset) {
           return preparedTargetCatalog.map(option => ({ id: option.id, value: option.id, label: option.label }));
         }
@@ -236,7 +249,7 @@ const RatioAllocationBuilder = ({
         })
         .map(option => ({ id: option.id, value: option.id, label: option.label }));
     },
-    [basisAccounts, canonicalTargetResolver, preparedTargetCatalog, presets],
+    [basisAccounts, canonicalTargetResolver, preparedTargetCatalog, contextPresets],
   );
 
   const allocationIdForInitialSource = useMemo(() => {
@@ -379,6 +392,7 @@ const RatioAllocationBuilder = ({
       return;
     }
     const presetName =
+      selectedAllocation?.sourceAccount.name?.trim() ||
       selectedAllocation?.sourceAccount.description?.trim() ||
       selectedAllocation?.sourceAccount.number?.trim() ||
       selectedAllocation?.sourceAccount.id?.trim() ||
@@ -565,7 +579,7 @@ const RatioAllocationBuilder = ({
           )}
 
           <div className="space-y-4">
-            {presets.map(preset => {
+            {contextPresets.map(preset => {
               const isSelected = selectedPresetIds.has(preset.id);
               const isExcludedForAllocation = excludedPresetIds.has(preset.id);
               const members = getGroupMembersWithValues(preset, basisAccounts, selectedPeriod);

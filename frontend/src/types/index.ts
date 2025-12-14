@@ -174,6 +174,12 @@ export interface ReconciliationSubcategoryGroup {
   accounts: ReconciliationAccountBreakdown[];
 }
 
+export interface EntityReconciliationGroup {
+  entityId: string;
+  entityName: string;
+  total: number;
+  categories: ReconciliationSubcategoryGroup[];
+}
 export interface ImportPreviewRow {
   entity: string;
   accountId: string;
@@ -523,6 +529,7 @@ export interface DistributionOperationShare {
   code?: string;
   allocation?: number;
   notes?: string;
+  basisDatapoint?: string | null;
 }
 
 export type DistributionStatus = 'Distributed' | 'Undistributed';
@@ -547,6 +554,7 @@ export interface DistributionSaveOperation {
   operationCd: string;
   allocation?: number | null;
   notes?: string | null;
+  basisDatapoint?: string | null;
 }
 
 export interface DistributionSaveRowInput {

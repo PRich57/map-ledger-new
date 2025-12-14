@@ -4,18 +4,19 @@ import { Card, CardContent, CardHeader } from '../ui/Card';
 import { selectAccounts, selectSplitValidationIssues, useMappingStore } from '../../store/mappingStore';
 import {
   type DistributionOperationCatalogItem,
-  type DistributionOperationShare,
-  type DistributionRow,
   useDistributionStore,
 } from '../../store/distributionStore';
+import type { DistributionOperationShare, DistributionRow } from '../../types';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientStore } from '../../store/clientStore';
 import { formatCurrencyAmount } from '../../utils/currency';
+import { getDistributedActivityForShare } from '../../utils/distributionActivity';
 import {
   buildOperationScoaActivitySheets,
   exportOperationScoaWorkbook,
 } from '../../utils/exportScoaActivity';
+import { formatPeriodDate } from '../../utils/period';
 
 interface PublishLogEntry {
   id: string;
@@ -48,7 +49,7 @@ const formatAllocationShare = (row: DistributionRow, share: DistributionOperatio
   if (row.type === 'dynamic') {
     return 'Variable';
   }
-  return '—';
+  return 'N/A';
 };
 
 type OperationReviewItem = {
@@ -72,6 +73,8 @@ const ReviewPane = () => {
       isProcessing: state.isProcessing,
       calculateAllocations: state.calculateAllocations,
     }));
+  const selectedPeriodLabel =
+    selectedPeriod ? formatPeriodDate(selectedPeriod) || selectedPeriod : null;
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [publishLog, setPublishLog] = useState<PublishLogEntry[]>([
@@ -270,9 +273,11 @@ const ReviewPane = () => {
           </div>
         )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-xs text-gray-500 dark:text-gray-400">
-            {selectedPeriod ? `Previewing allocations for ${selectedPeriod}.` : 'Choose a reporting period to run allocation checks.'}
-          </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              {selectedPeriodLabel
+                ? `Previewing allocations for ${selectedPeriodLabel}.`
+                : 'Choose a reporting period to run allocation checks.'}
+            </div>
           <div className="flex gap-2">
             <button
               type="button"
@@ -410,13 +415,21 @@ const ReviewPane = () => {
             Only distributions that reached the <span className="font-semibold text-slate-900 dark:text-white">Distributed</span> status appear below. Each table represents an operation assigned to the active client.
           </div>
           <div className="space-y-6">
-            {operationReviewEntries.map(entry => (
-              <Card key={entry.operation.code}>
+            {operationReviewEntries.map(entry => {
+              const totalActivity = entry.items.reduce(
+                (sum, { row, share }) => sum + getDistributedActivityForShare(row, share),
+                0,
+              );
+              return (
+                <Card key={entry.operation.code}>
                 <CardHeader>
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                         Operation {entry.operation.code}
+                        <span className="ml-3 text-xs font-normal text-slate-500 dark:text-slate-400">
+                          {formatCurrencyAmount(totalActivity)} total mapped activity
+                        </span>
                       </h3>
                       {entry.operation.name && entry.operation.name !== entry.operation.code && (
                         <p className="text-sm text-gray-500 dark:text-gray-400">{entry.operation.name}</p>
@@ -447,33 +460,37 @@ const ReviewPane = () => {
                             </td>
                           </tr>
                         ) : (
-                          entry.items.map(({ row, share }) => (
-                            <tr
-                              key={`${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`}
-                              className="bg-white text-slate-900 odd:bg-slate-50 even:bg-white dark:bg-slate-900 dark:text-slate-100 dark:odd:bg-slate-900/70 dark:even:bg-slate-900/55"
-                            >
-                              <td className="max-w-[8rem] truncate px-3 py-2 font-semibold text-slate-900 dark:text-slate-100">
-                                {row.accountId}
-                              </td>
-                              <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.description}</td>
-                              <td className="px-3 py-2 text-right font-mono text-slate-700 dark:text-slate-200">
-                                {formatCurrencyAmount(row.activity)}
-                              </td>
-                              <td className="px-3 py-2 text-slate-700 dark:text-slate-200">
-                                {formatDistributionTypeLabel(row.type)}
-                              </td>
-                              <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">
-                                {formatAllocationShare(row, share)}
-                              </td>
-                            </tr>
-                          ))
+                          entry.items.map(({ row, share }) => {
+                            const allocatedAmount = getDistributedActivityForShare(row, share);
+                            return (
+                              <tr
+                                key={`${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`}
+                                className="bg-white text-slate-900 odd:bg-slate-50 even:bg-white dark:bg-slate-900 dark:text-slate-100 dark:odd:bg-slate-900/70 dark:even:bg-slate-900/55"
+                              >
+                                <td className="max-w-[8rem] truncate px-3 py-2 font-semibold text-slate-900 dark:text-slate-100">
+                                  {row.accountId}
+                                </td>
+                                <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.description}</td>
+                                <td className="px-3 py-2 text-right font-mono text-slate-700 dark:text-slate-200">
+                                  {formatCurrencyAmount(allocatedAmount)}
+                                </td>
+                                <td className="px-3 py-2 text-slate-700 dark:text-slate-200">
+                                  {formatDistributionTypeLabel(row.type)}
+                                </td>
+                                <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">
+                                  {formatAllocationShare(row, share)}
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );
+          })}
           </div>
         </div>
       )}

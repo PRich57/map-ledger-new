@@ -205,7 +205,7 @@ const sanitizePresetRows = (
   return sanitized;
 };
 
-const DEFAULT_PRESET_CONTEXT: DynamicAllocationPresetContext = 'mapping';
+export const DEFAULT_PRESET_CONTEXT: DynamicAllocationPresetContext = 'mapping';
 
 const getPresetsByContext = (
   presets: DynamicAllocationPreset[],

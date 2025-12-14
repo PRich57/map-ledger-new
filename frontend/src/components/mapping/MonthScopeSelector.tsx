@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Calendar, Check } from 'lucide-react';
 import { useMappingStore, selectAvailablePeriods } from '../../store/mappingStore';
+import { formatPeriodDate } from '../../utils/period';
 
 interface MonthScopeSelectorProps {
   entityId: string;
@@ -53,6 +54,9 @@ const MonthScopeSelector = ({
     }
   };
 
+  const formatMonthLabel = (value: string) => formatPeriodDate(value) || value;
+  const currentMonthLabel = currentMonth ? formatMonthLabel(currentMonth) : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
@@ -101,7 +105,7 @@ const MonthScopeSelector = ({
                     Current Month Only
                   </div>
                   <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Apply to {currentMonth} only
+                    Apply to {currentMonthLabel} only
                   </div>
                 </div>
               </label>
@@ -140,7 +144,7 @@ const MonthScopeSelector = ({
                       className="h-4 w-4 text-blue-600 rounded"
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-200">
-                      {month}
+                      {formatMonthLabel(month)}
                     </span>
                     {accountPeriods.includes(month) && (
                       <Check className="h-3 w-3 text-green-600 ml-auto" />

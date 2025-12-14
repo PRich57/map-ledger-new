@@ -170,6 +170,14 @@ const buildPeriodLabel = (
   return '';
 };
 
+const CLIENT_OPERATIONS_JOIN = `
+    LEFT JOIN (
+      SELECT CLIENT_ID, MAX(CLIENT_NAME) AS CLIENT_NAME
+      FROM ML.V_CLIENT_OPERATIONS
+      GROUP BY CLIENT_ID
+    ) client ON client.CLIENT_ID = cf.CLIENT_ID
+  `;
+
 const mapClientFileRow = (row: RawClientFileRow): ClientFileRecord => {
   const insertedDttm = parseDate(row.insertedDttm);
   const normalizedStart = normalizeMonth(row.glPeriodStart);
@@ -214,8 +222,8 @@ export const getClientFileByGuid = async (
       cf.GL_PERIOD_START as glPeriodStart,
       cf.GL_PERIOD_END as glPeriodEnd,
       cf.LAST_STEP_COMPLETED_DTTM as lastStepCompletedDttm
-    FROM ml.CLIENT_FILES cf
-    LEFT JOIN ML.V_CLIENT_OPERATIONS client ON client.CLIENT_ID = cf.CLIENT_ID
+      FROM ml.CLIENT_FILES cf
+    ${CLIENT_OPERATIONS_JOIN}
     WHERE cf.FILE_UPLOAD_GUID = @fileUploadGuid
       AND cf.IS_DELETED = 0`,
     { fileUploadGuid }
@@ -373,7 +381,7 @@ export const listClientFiles = async (
       cf.GL_PERIOD_END as glPeriodEnd,
       cf.LAST_STEP_COMPLETED_DTTM as lastStepCompletedDttm
     FROM ml.CLIENT_FILES cf
-    LEFT JOIN ML.V_CLIENT_OPERATIONS client ON client.CLIENT_ID = cf.CLIENT_ID
+    ${CLIENT_OPERATIONS_JOIN}
     ${clause}
     ORDER BY cf.LAST_STEP_COMPLETED_DTTM DESC
     OFFSET @offset ROWS

@@ -97,8 +97,8 @@ export function normalizeGlMonth(value: string): string {
   // Try parsing as a JavaScript Date
   const parsed = new Date(trimmed);
   if (!Number.isNaN(parsed.getTime())) {
-    const year = parsed.getFullYear();
-    const month = (parsed.getMonth() + 1).toString().padStart(2, '0');
+    const year = parsed.getUTCFullYear();
+    const month = (parsed.getUTCMonth() + 1).toString().padStart(2, '0');
     return formatMonthStart(year, month);
   }
 

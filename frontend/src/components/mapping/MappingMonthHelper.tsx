@@ -1,9 +1,11 @@
 import { Info, Calendar } from 'lucide-react';
 import { useMappingStore, selectActivePeriod, selectAvailablePeriods } from '../../store/mappingStore';
+import { formatPeriodDate } from '../../utils/period';
 
 const MappingMonthHelper = () => {
   const activePeriod = useMappingStore(selectActivePeriod);
   const availablePeriods = useMappingStore(selectAvailablePeriods);
+  const activePeriodLabel = activePeriod ? formatPeriodDate(activePeriod) || activePeriod : null;
 
   if (availablePeriods.length <= 1) {
     return null; // No need to show helper if only one period
@@ -22,7 +24,7 @@ const MappingMonthHelper = () => {
               <>
                 <p>
                   <Calendar className="inline h-4 w-4 mr-1" />
-                  Currently viewing: <strong>{activePeriod}</strong>
+                  Currently viewing: <strong>{activePeriodLabel}</strong>
                 </p>
                 <p>
                   Changes you make will apply to <strong>this month only</strong>. To apply mappings across all months:

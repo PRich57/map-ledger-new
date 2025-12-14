@@ -1,13 +1,17 @@
 import { useEffect, useMemo } from 'react';
 import { AlertTriangle, Calculator, Layers, XCircle } from 'lucide-react';
 import type { GLAccountMappingRow, MappingPresetLibraryEntry } from '../../types';
-import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
+import {
+  useRatioAllocationStore,
+  DEFAULT_PRESET_CONTEXT,
+} from '../../store/ratioAllocationStore';
 import {
   allocateDynamic,
   getBasisValue,
   getSourceValue,
 } from '../../utils/dynamicAllocation';
 import { formatCurrencyAmount } from '../../utils/currency';
+import { formatPeriodDate } from '../../utils/period';
 
 interface DynamicAllocationRowProps {
   account: GLAccountMappingRow;
@@ -76,6 +80,16 @@ const DynamicAllocationRow = ({
     setActivePresetForSource: state.setActivePresetForSource,
   }));
 
+  const mappingContextPresets = useMemo(
+    () =>
+      presets.filter(
+        preset => (preset.context ?? DEFAULT_PRESET_CONTEXT) === DEFAULT_PRESET_CONTEXT,
+      ),
+    [presets],
+  );
+  const formattedSelectedPeriod =
+    selectedPeriod ? formatPeriodDate(selectedPeriod) || selectedPeriod : null;
+
   useEffect(() => {
     if (!account.presetId) {
       return;
@@ -111,7 +125,9 @@ const DynamicAllocationRow = ({
 
     return allocation.targetDatapoints.map(target => {
       const isExclusion = Boolean(target.isExclusion);
-      const preset = target.groupId ? presets.find(item => item.id === target.groupId) : null;
+      const preset = target.groupId
+        ? mappingContextPresets.find(item => item.id === target.groupId)
+        : null;
       const matchingRow = preset?.rows.find(row => row.targetAccountId === target.datapointId) ?? null;
 
       const fallbackBasisAccount =
@@ -152,7 +168,7 @@ const DynamicAllocationRow = ({
         isExclusion,
       };
     });
-  }, [allocation, basisAccounts, presets, selectedPeriod]);
+  }, [allocation, basisAccounts, mappingContextPresets, selectedPeriod]);
 
   const basisTotal = useMemo(
     () => targetDetails.reduce((sum, detail) => sum + detail.basisValue, 0),
@@ -324,7 +340,7 @@ const DynamicAllocationRow = ({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
               <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Source balance {selectedPeriod ? `(${selectedPeriod})` : ''}
+                Source balance {formattedSelectedPeriod ? `(${formattedSelectedPeriod})` : ''}
               </div>
               <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
                 {formatCurrencyAmount(sourceValue)}
@@ -476,7 +492,7 @@ const DynamicAllocationRow = ({
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
                   <div className="text-sm font-semibold">
                     Allocation preview for {sourceAccountLabel}
-                    {selectedPeriod ? ` · ${selectedPeriod}` : ''}
+                    {formattedSelectedPeriod ? ` · ${formattedSelectedPeriod}` : ''}
                   </div>
                   <div className="text-xs text-blue-700 dark:text-blue-200">
                     Total distributes {formatCurrencyAmount(sourceValue)} across {computedPreview.allocations.length} targets.
@@ -539,7 +555,7 @@ const DynamicAllocationRow = ({
             ) : (
               <p className="rounded-md border border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100">
                 Run preset allocation checks for {sourceAccountLabel}
-                {selectedPeriod ? ` in ${selectedPeriod}` : ''} to generate preview amounts.
+                {formattedSelectedPeriod ? ` in ${formattedSelectedPeriod}` : ''} to generate preview amounts.
               </p>
             )
           ) : (

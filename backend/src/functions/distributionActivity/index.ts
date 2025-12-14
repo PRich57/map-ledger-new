@@ -7,6 +7,10 @@ import {
   type OperationScoaActivityInput,
 } from '../../repositories/operationScoaActivityRepository';
 import { replaceClientGlData, type ClientGlDataInput } from '../../repositories/clientGlDataRepository';
+import {
+  upsertEntityScoaActivity,
+  type EntityScoaActivityInput,
+} from '../../repositories/entityScoaActivityRepository';
 
 interface DistributionActivityEntryPayload {
   operationCd?: string | null;
@@ -65,7 +69,8 @@ const activityHandler = async (
     if (!entityId) {
       return json({ message: 'entityId is required' }, 400);
     }
-    const entries = buildEntries(payload.entries ?? [], normalizeText(payload.updatedBy));
+    const updatedBy = normalizeText(payload.updatedBy);
+    const entries = buildEntries(payload.entries ?? [], updatedBy);
     if (!entries.length) {
       return json({ message: 'No valid activity entries provided' }, 400);
     }
@@ -77,7 +82,30 @@ const activityHandler = async (
       glMonth: entry.activityMonth,
       glValue: entry.activityValue,
     }));
-    await replaceClientGlData(clientGlDataPayload);
+    const entityActivityTotals = entries.reduce<Map<string, EntityScoaActivityInput>>(
+      (accumulator, entry) => {
+        const key = `${entry.scoaAccountId}|||${entry.activityMonth}`;
+        const existing = accumulator.get(key);
+        if (existing) {
+          existing.activityValue += entry.activityValue;
+          return accumulator;
+        }
+        accumulator.set(key, {
+          entityId,
+          scoaAccountId: entry.scoaAccountId,
+          activityMonth: entry.activityMonth,
+          activityValue: entry.activityValue,
+          updatedBy,
+        });
+        return accumulator;
+      },
+      new Map(),
+    );
+
+    await Promise.all([
+      replaceClientGlData(clientGlDataPayload),
+      upsertEntityScoaActivity(Array.from(entityActivityTotals.values())),
+    ]);
 
     const durationMs = Date.now() - startedAt;
     context.log('Persisted distribution activity', {

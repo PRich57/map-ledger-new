@@ -33,6 +33,7 @@ interface DistributionSaveOperationPayload {
   operationCd?: string | null;
   allocation?: number | null;
   notes?: string | null;
+  basisDatapoint?: string | null;
 }
 
 interface DistributionSaveRowPayload {
@@ -131,11 +132,15 @@ const buildRequestPayload = (payload: unknown): DistributionSaveRequest => {
                     return null;
                   }
                   const allocation = parseNumber(opRecord.allocation);
+                  const basisDatapoint = normalizeText(
+                    getFirstStringValue(opRecord.basisDatapoint ?? opRecord.basisDataPoint),
+                  );
                   return {
                     operationCd: code.toUpperCase(),
                     allocation:
                       allocation !== null ? Math.max(0, Math.min(100, allocation)) : null,
                     notes: normalizeText(opRecord.notes),
+                    basisDatapoint,
                   };
                 },
               )
@@ -161,7 +166,7 @@ const buildRequestPayload = (payload: unknown): DistributionSaveRequest => {
 const normalizePresetKey = (entityId: string, scoaAccountId: string): string =>
   `${entityId}|${scoaAccountId}`;
 
-const buildDetailInputs = (
+export const buildDetailInputs = (
   operations: DistributionSaveOperationPayload[] | undefined,
   presetGuid: string,
   type: DistributionType,
@@ -170,6 +175,7 @@ const buildDetailInputs = (
   if (!operations || operations.length === 0) {
     return [];
   }
+  const isDynamicType = type === 'dynamic';
   return operations
     .map(
       (operation): EntityDistributionPresetDetailInput | null => {
@@ -177,14 +183,28 @@ const buildDetailInputs = (
         if (!code) {
           return null;
         }
+        const basisDatapoint =
+          isDynamicType && operation.basisDatapoint
+            ? normalizeText(operation.basisDatapoint)
+            : null;
+        const specifiedPct = (() => {
+          if (isDynamicType) {
+            return null;
+          }
+          if (type === 'direct') {
+            return 100;
+          }
+          if (typeof operation.allocation === 'number') {
+            return Math.max(0, Math.min(100, operation.allocation));
+          }
+          return null;
+        })();
         return {
           presetGuid,
           operationCd: code.toUpperCase(),
-          isCalculated: type === 'dynamic' ? true : null,
-          specifiedPct:
-            operation.allocation !== undefined && operation.allocation !== null
-              ? Math.max(0, Math.min(100, operation.allocation))
-              : null,
+          basisDatapoint,
+          isCalculated: isDynamicType,
+          specifiedPct,
           updatedBy,
         };
       },
@@ -193,6 +213,17 @@ const buildDetailInputs = (
       (detail): detail is EntityDistributionPresetDetailInput => Boolean(detail),
   );
 };
+
+const normalizeBasisKey = (value?: string | null): string => {
+  if (!value) {
+    return '';
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed.toLowerCase() : '';
+};
+
+const createDetailKey = (operationCd: string, basisDatapoint?: string | null): string =>
+  `${operationCd.toUpperCase()}|${normalizeBasisKey(basisDatapoint)}`;
 
 const areDetailInputsEqual = (
   current: EntityDistributionPresetDetailRow[],
@@ -205,7 +236,7 @@ const areDetailInputsEqual = (
   const currentMap = new Map<string, { pct: number | null; isCalculated: boolean | null }>();
 
   current.forEach(detail => {
-    const key = detail.operationCd.toUpperCase();
+    const key = createDetailKey(detail.operationCd, detail.basisDatapoint);
     currentMap.set(key, {
       pct: detail.specifiedPct ?? null,
       isCalculated: detail.isCalculated ?? null,
@@ -213,7 +244,7 @@ const areDetailInputsEqual = (
   });
 
   return target.every(detail => {
-    const key = detail.operationCd.toUpperCase();
+    const key = createDetailKey(detail.operationCd, detail.basisDatapoint);
     const existing = currentMap.get(key);
 
     if (!existing) {
@@ -234,17 +265,19 @@ const syncPresetDetails = async (
   updatedBy: string | null,
 ): Promise<void> => {
   const desiredMap = new Map<string, EntityDistributionPresetDetailInput>();
-  targetDetails.forEach(detail => {
-    desiredMap.set(detail.operationCd, detail);
-  });
+  targetDetails.forEach(detail =>
+    desiredMap.set(createDetailKey(detail.operationCd, detail.basisDatapoint), detail),
+  );
 
-  const toDelete: string[] = [];
+  const toDelete: EntityDistributionPresetDetailRow[] = [];
   const toUpdate: EntityDistributionPresetDetailInput[] = [];
 
   existingDetails.forEach(detail => {
-    const candidate = desiredMap.get(detail.operationCd);
+    const key = createDetailKey(detail.operationCd, detail.basisDatapoint);
+    const candidate = desiredMap.get(key);
+
     if (!candidate) {
-      toDelete.push(detail.operationCd);
+      toDelete.push(detail);
       return;
     }
 
@@ -253,31 +286,38 @@ const syncPresetDetails = async (
     const existingCalculated = detail.isCalculated ?? null;
     const targetCalculated = candidate.isCalculated ?? null;
 
-    if (
-      existingPct !== targetPct ||
-      existingCalculated !== targetCalculated
-    ) {
+    if (existingPct !== targetPct || existingCalculated !== targetCalculated) {
       toUpdate.push(candidate);
     }
 
-    desiredMap.delete(detail.operationCd);
+    desiredMap.delete(key);
   });
 
   const toCreate = Array.from(desiredMap.values());
 
   await Promise.all(
-    toDelete.map(operationCd =>
-      deleteEntityDistributionPresetDetail(presetGuid, operationCd),
+    toDelete.map(detail =>
+      deleteEntityDistributionPresetDetail(
+        presetGuid,
+        detail.operationCd,
+        detail.basisDatapoint ?? null,
+      ),
     ),
   );
 
   await Promise.all(
     toUpdate.map(detail =>
-      updateEntityDistributionPresetDetail(presetGuid, detail.operationCd, {
-        specifiedPct: detail.specifiedPct,
-        isCalculated: detail.isCalculated,
-        updatedBy,
-      }),
+      updateEntityDistributionPresetDetail(
+        presetGuid,
+        detail.operationCd,
+        {
+          specifiedPct: detail.specifiedPct,
+          isCalculated: detail.isCalculated,
+          updatedBy,
+          basisDatapoint: detail.basisDatapoint ?? null,
+        },
+        detail.basisDatapoint ?? null,
+      ),
     ),
   );
 

@@ -149,8 +149,8 @@ export const MappedCategoryAccordion = ({
 
                       {isAccountOpen && (
                         <div className="mt-3 border-t border-slate-200/80 pt-3 dark:border-slate-700/80">
-                          <div className="pl-8">
-                            <div className="rounded-2xl bg-white/80 px-4 py-3 shadow-inner dark:bg-slate-900/80">
+                      <div className="pl-12">
+                            <div className="rounded-l bg-white/80 px-8 py-3  dark:bg-slate-700/80">
                               <div className="space-y-3">
                                 <ul className="text-sm text-slate-900 dark:text-slate-200">
                                   {account.sources.map(source => (

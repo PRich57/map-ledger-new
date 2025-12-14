@@ -17,6 +17,9 @@ const openApiSpec = {
     '/mapping/suggest': {
       get: { summary: 'Suggest account mapping' }
     },
+    '/distribution/suggest': {
+      get: { summary: 'Suggest SCOA distributions for an entity' }
+    },
     '/chart-of-accounts': {
       get: { summary: 'List chart of accounts' }
     },

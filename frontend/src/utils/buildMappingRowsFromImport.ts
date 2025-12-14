@@ -4,6 +4,7 @@ import type {
   MappingPolarity,
   TrialBalanceRow,
 } from '../types';
+import { normalizeGlMonth } from './extractDateFromText';
 import { slugify } from './slugify';
 
 interface BuildMappingRowsFromImportOptions {
@@ -125,6 +126,7 @@ export const buildMappingRowsFromImport = (
     const netChange = Number.isFinite(rawNetChange) ? rawNetChange : 0;
     const polarity = determinePolarity(netChange);
     const operation = resolveOperation(row, 'Imported');
+    const normalizedGlMonth = normalizeGlMonth((row.glMonth ?? '').trim());
 
     return {
       id: rowId,
@@ -149,7 +151,7 @@ export const buildMappingRowsFromImport = (
               },
             ]
           : [],
-      glMonth: row.glMonth, // Preserve GL month from import
+      glMonth: normalizedGlMonth || undefined, // Normalize GL month to YYYY-MM-01
       requiresEntityAssignment: !normalized.id && !normalized.name,
     };
   });

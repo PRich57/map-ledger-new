@@ -135,6 +135,19 @@ describe('mappingStore selectors', () => {
     );
   });
 
+  it('includes GL account numbers in the ratio source lookup for distribution', () => {
+    const fuelSourceAccount = useRatioAllocationStore
+      .getState()
+      .sourceAccounts.find(account => account.id === '6100');
+
+    expect(fuelSourceAccount).toEqual(
+      expect.objectContaining({
+        id: '6100',
+        value: 65000,
+      }),
+    );
+  });
+
   it('includes percentage split targets in the basis selection before status is finalized', () => {
     const driverTarget = findTargetByDescription(
       'DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET',

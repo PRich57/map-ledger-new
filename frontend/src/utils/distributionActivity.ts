@@ -2,6 +2,7 @@ import { normalizeGlMonth } from './extractDateFromText';
 import { findChartOfAccountOption } from '../store/chartOfAccountsStore';
 import type {
   GLAccountMappingRow,
+  DistributionOperationShare,
   DistributionRow,
   MappingSplitDefinition,
 } from '../types';
@@ -109,6 +110,22 @@ const buildScoaContributions = (
       return;
     }
 
+    if (account.mappingType === 'dynamic') {
+      const scoaKey = resolveScoaKey(account.manualCOAId ?? account.suggestedCOAId);
+      if (!scoaKey) {
+        return;
+      }
+      const baseAmount = Math.abs(account.netChange);
+      const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
+      const allocatable = Math.max(0, baseAmount - excluded);
+      const signedAmount = getSignedAmountForAccount(account, allocatable);
+      if (signedAmount === 0) {
+        return;
+      }
+      addContribution(scoaKey, account, month, signedAmount);
+      return;
+    }
+
     if (account.mappingType === 'percentage') {
       account.splitDefinitions.forEach(split => {
         if (split.isExclusion) {
@@ -130,12 +147,12 @@ const buildScoaContributions = (
   return contributions;
 };
 
-const normalizeOperationCd = (value?: string | null): string | null => {
+export const normalizeOperationCd = (value?: string | null): string | null => {
   const normalized = value?.toString().trim().toUpperCase();
   return normalized && normalized.length > 0 ? normalized : null;
 };
 
-const buildSharesForRow = (row: DistributionRow): OperationShare[] => {
+export const buildSharesForRow = (row: DistributionRow): OperationShare[] => {
   const operations = row.operations
     .map(operation => {
       const code = normalizeOperationCd(operation.code ?? operation.id ?? operation.name ?? null);
@@ -174,8 +191,32 @@ const buildSharesForRow = (row: DistributionRow): OperationShare[] => {
     return shares.filter(share => share.share > 0);
   }
 
-  const equalShare = 1 / shares.length;
-  return shares.map(share => ({ operationCd: share.operationCd, share: equalShare }));
+const equalShare = 1 / shares.length;
+return shares.map(share => ({ operationCd: share.operationCd, share: equalShare }));
+};
+
+export const getOperationShareFraction = (
+  row: DistributionRow,
+  share: DistributionOperationShare,
+): number => {
+  const code = normalizeOperationCd(share.code ?? share.id ?? share.name ?? null);
+  if (!code) {
+    return 0;
+  }
+  const shares = buildSharesForRow(row);
+  const entry = shares.find(item => item.operationCd === code);
+  return entry?.share ?? 0;
+};
+
+export const getDistributedActivityForShare = (
+  row: DistributionRow,
+  share: DistributionOperationShare,
+): number => {
+  const fraction = getOperationShareFraction(row, share);
+  if (!Number.isFinite(row.activity)) {
+    return 0;
+  }
+  return row.activity * fraction;
 };
 
 export const buildDistributionActivityEntries = (

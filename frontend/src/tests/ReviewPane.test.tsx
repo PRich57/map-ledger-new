@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from './testUtils';
+import { fireEvent, render, screen, waitFor, within } from './testUtils';
 import ReviewPane from '../components/mapping/ReviewPane';
 import { useMappingStore } from '../store/mappingStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
+import { useDistributionStore } from '../store/distributionStore';
 import { exportOperationScoaWorkbook } from '../utils/exportScoaActivity';
 
 jest.mock('../utils/exportScoaActivity', () => {
@@ -115,9 +116,54 @@ const resetStores = () => {
   });
 };
 
+const buildDistributionRows = () => [
+  {
+    id: 'row-linehaul',
+    mappingRowId: 'acct-linehaul',
+    accountId: '4000',
+    description: 'Linehaul Revenue',
+    activity: 500000,
+    type: 'direct',
+    operations: [{ id: 'linehaul', code: 'Linehaul', name: 'Linehaul' }],
+    status: 'Distributed',
+  },
+  {
+    id: 'row-ss-direct',
+    mappingRowId: 'acct-ss-direct',
+    accountId: '5300',
+    description: 'Shared Services Payroll',
+    activity: 60000,
+    type: 'direct',
+    operations: [{ id: 'shared_services', code: 'Shared Services', name: 'Shared Services' }],
+    status: 'Distributed',
+  },
+  {
+    id: 'row-ss-split',
+    mappingRowId: 'acct-ss-split',
+    accountId: '5200',
+    description: 'Payroll Taxes',
+    activity: 120000,
+    type: 'percentage',
+    operations: [
+      { id: 'shared_services', code: 'Shared Services', name: 'Shared Services', allocation: 50 },
+      { id: 'fleet', code: 'Fleet', name: 'Fleet', allocation: 50 },
+    ],
+    status: 'Distributed',
+  },
+];
+
+const resetDistributionStore = () => {
+  useDistributionStore.setState({
+    rows: buildDistributionRows(),
+    searchTerm: '',
+    statusFilters: [],
+  });
+};
+
 describe('ReviewPane', () => {
   beforeEach(() => {
     resetStores();
+    resetDistributionStore();
   });
   afterEach(() => {
     jest.clearAllMocks();
@@ -157,6 +203,15 @@ describe('ReviewPane', () => {
 
     expect(screen.getByText(/\$500,000 total mapped activity/i)).toBeInTheDocument();
     expect(screen.getByText(/\$120,000 total mapped activity/i)).toBeInTheDocument();
+  });
+
+  test('shows allocated activity amounts for split distributions', () => {
+    render(<ReviewPane />);
+
+    const payrollRow = screen.getByText('Payroll Taxes').closest('tr');
+    expect(payrollRow).toBeInTheDocument();
+    const allocatedCell = within(payrollRow!).getByText('$60,000');
+    expect(allocatedCell).toBeInTheDocument();
   });
 
   test('exports SCoA activity when export button is clicked', async () => {

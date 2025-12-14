@@ -65,6 +65,12 @@ const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] =>
       parseGuid((entry as Record<string, unknown>)?.presetGuid) ??
       parseGuid((entry as Record<string, unknown>)?.presetId);
     const operationCd = getFirstStringValue((entry as Record<string, unknown>)?.operationCd);
+    const basisDatapoint = normalizeText(
+      getFirstStringValue(
+        (entry as Record<string, unknown>)?.basisDatapoint ??
+          (entry as Record<string, unknown>)?.basisDataPoint,
+      ),
+    );
 
     if (!presetGuid || !operationCd) {
       continue;
@@ -74,6 +80,7 @@ const buildInputs = (payload: unknown): EntityDistributionPresetDetailInput[] =>
       presetGuid,
       operationCd,
       isCalculated: normalizeBool((entry as Record<string, unknown>)?.isCalculated) ?? null,
+      basisDatapoint,
       specifiedPct: parseNumber((entry as Record<string, unknown>)?.specifiedPct) ?? null,
       updatedBy: normalizeText((entry as Record<string, unknown>)?.updatedBy),
     });
@@ -132,11 +139,19 @@ const updateHandler = async (
       return json({ message: 'presetGuid and operationCd are required' }, 400);
     }
 
-    const updated = await updateEntityDistributionPresetDetail(presetGuid, operationCd, {
-      isCalculated: normalizeBool(body?.isCalculated) ?? undefined,
-      specifiedPct: parseNumber(body?.specifiedPct),
-      updatedBy: normalizeText(body?.updatedBy),
-    });
+    const basisDatapoint = normalizeText(getFirstStringValue(body?.basisDatapoint));
+
+    const updated = await updateEntityDistributionPresetDetail(
+      presetGuid,
+      operationCd,
+      {
+        isCalculated: normalizeBool(body?.isCalculated) ?? undefined,
+        specifiedPct: parseNumber(body?.specifiedPct),
+        updatedBy: normalizeText(body?.updatedBy),
+        basisDatapoint,
+      },
+      basisDatapoint,
+    );
 
     if (!updated) {
       return json({ message: 'Preset detail not found' }, 404);
@@ -163,12 +178,24 @@ const deleteHandler = async (
     const operationCd =
       getFirstStringValue(request.query.get('operationCd')) ??
       getFirstStringValue((body as Record<string, unknown>)?.operationCd);
+    const basisDatapoint = normalizeText(
+      getFirstStringValue(
+        request.query.get('basisDatapoint') ??
+          (body as Record<string, unknown>)?.basisDatapoint ??
+          request.query.get('basisDataPoint') ??
+          (body as Record<string, unknown>)?.basisDataPoint,
+      ),
+    );
 
     if (!presetGuid || !operationCd) {
       return json({ message: 'presetGuid and operationCd are required' }, 400);
     }
 
-    const deleted = await deleteEntityDistributionPresetDetail(presetGuid, operationCd);
+    const deleted = await deleteEntityDistributionPresetDetail(
+      presetGuid,
+      operationCd,
+      basisDatapoint,
+    );
     if (!deleted) {
       return json({ message: 'Preset detail not found' }, 404);
     }

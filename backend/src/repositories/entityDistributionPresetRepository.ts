@@ -93,6 +93,7 @@ const mapBaseRow = (row: {
 const mapDetailRow = (row: {
   preset_guid: string;
   operation_cd?: string | null;
+  basis_datapoint?: string | null;
   is_calculated?: number | boolean | null;
   specified_pct?: number | null;
   inserted_dttm?: Date | string | null;
@@ -101,6 +102,7 @@ const mapDetailRow = (row: {
 }): EntityDistributionPresetDetailRow => ({
   presetGuid: row.preset_guid,
   operationCd: row.operation_cd ?? '',
+  basisDatapoint: row.basis_datapoint ?? null,
   isCalculated:
     typeof row.is_calculated === 'boolean'
       ? row.is_calculated
@@ -306,6 +308,7 @@ export const listEntityDistributionPresetsWithDetails = async (
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
     operation_cd?: string | null;
+    basis_datapoint?: string | null;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
   }>(
@@ -320,6 +323,7 @@ export const listEntityDistributionPresetsWithDetails = async (
       edp.UPDATED_DTTM as updated_dttm,
       edp.UPDATED_BY as updated_by,
       edpd.OPERATION_CD as operation_cd,
+      edpd.BASIS_DATAPOINT as basis_datapoint,
       edpd.IS_CALCULATED as is_calculated,
       edpd.SPECIFIED_PCT as specified_pct
     FROM ${TABLE_NAME} edp

@@ -1,5 +1,9 @@
 jest.mock('../src/utils/sqlClient', () => ({
   runQuery: jest.fn().mockResolvedValue({ recordset: [] }),
+  withQueryTracking: jest.fn().mockImplementation(async (fn: () => Promise<unknown>) => ({
+    result: await fn(),
+    queryCount: 0,
+  })),
 }));
 
 jest.mock('../src/http', () => ({
@@ -10,6 +14,7 @@ jest.mock('../src/http', () => ({
 jest.mock('../src/repositories/entityAccountMappingRepository', () => ({
   listEntityAccountMappingsForAccounts: jest.fn(),
   upsertEntityAccountMappings: jest.fn(),
+  listEntityAccountMappingsWithActivityForEntity: jest.fn(),
 }));
 
 jest.mock('../src/repositories/entityAccountRepository', () => ({
@@ -19,6 +24,7 @@ jest.mock('../src/repositories/entityAccountRepository', () => ({
 jest.mock('../src/repositories/entityMappingPresetRepository', () => ({
   listEntityMappingPresets: jest.fn(),
   createEntityMappingPreset: jest.fn(),
+  updateEntityMappingPreset: jest.fn(),
 }));
 
 jest.mock('../src/repositories/entityMappingPresetDetailRepository', () => ({
@@ -28,39 +34,47 @@ jest.mock('../src/repositories/entityMappingPresetDetailRepository', () => ({
 }));
 
 jest.mock('../src/repositories/entityScoaActivityRepository', () => ({
+  listEntityScoaActivity: jest.fn(),
   upsertEntityScoaActivity: jest.fn(),
 }));
 
 jest.mock('../src/repositories/entityPresetMappingRepository', () => ({
   deleteEntityPresetMappings: jest.fn(),
   createEntityPresetMappings: jest.fn(),
+  listEntityPresetMappings: jest.fn(),
+  listEntityPresetMappingsByPresetGuids: jest.fn(),
 }));
 
 const { saveHandler } = require('../src/functions/entityAccountMappings/index');
 const { readJson, json } = require('../src/http');
 const {
   listEntityAccountMappingsForAccounts,
+  listEntityAccountMappingsWithActivityForEntity,
   upsertEntityAccountMappings,
 } = require('../src/repositories/entityAccountMappingRepository');
 const { upsertEntityAccounts } = require('../src/repositories/entityAccountRepository');
 const {
   listEntityMappingPresets,
   createEntityMappingPreset,
+  updateEntityMappingPreset,
 } = require('../src/repositories/entityMappingPresetRepository');
 const {
   listEntityMappingPresetDetails,
   createEntityMappingPresetDetails,
   updateEntityMappingPresetDetail,
 } = require('../src/repositories/entityMappingPresetDetailRepository');
-const { upsertEntityScoaActivity } = require('../src/repositories/entityScoaActivityRepository');
+const { listEntityScoaActivity, upsertEntityScoaActivity } = require('../src/repositories/entityScoaActivityRepository');
 const {
   deleteEntityPresetMappings,
   createEntityPresetMappings,
+  listEntityPresetMappings,
+  listEntityPresetMappingsByPresetGuids,
 } = require('../src/repositories/entityPresetMappingRepository');
 
 const mockedReadJson = readJson;
 const mockedJson = json;
 const mockedListMappings = listEntityAccountMappingsForAccounts;
+const mockedListMappingsWithActivity = listEntityAccountMappingsWithActivityForEntity;
 const mockedCreatePreset = createEntityMappingPreset;
 const mockedCreateDetails = createEntityMappingPresetDetails;
 const mockedUpdateDetail = updateEntityMappingPresetDetail;
@@ -69,8 +83,12 @@ const mockedListPresets = listEntityMappingPresets;
 const mockedUpsertMappings = upsertEntityAccountMappings;
 const mockedUpsertAccounts = upsertEntityAccounts;
 const mockedUpsertActivity = upsertEntityScoaActivity;
+const mockedListEntityScoaActivity = listEntityScoaActivity;
 const mockedDeletePresetMappings = deleteEntityPresetMappings;
 const mockedCreatePresetMappings = createEntityPresetMappings;
+const mockedListPresetMappings = listEntityPresetMappingsByPresetGuids;
+const mockedUpdatePreset = updateEntityMappingPreset;
+const mockedListPresetMappingsExisting = listEntityPresetMappings;
 
 const expectedEntityMapping = {
   entityId: 'ent-1',
@@ -118,6 +136,7 @@ describe('entityAccountMappings save handler', () => {
     jest.clearAllMocks();
     mockedReadJson.mockResolvedValue(dynamicPayload);
     mockedListMappings.mockResolvedValue([]);
+    mockedListMappingsWithActivity.mockResolvedValue([]);
     mockedListPresetDetails.mockResolvedValue([]);
     mockedListPresets.mockResolvedValue([]);
     mockedCreatePreset.mockResolvedValue(undefined);
@@ -126,8 +145,12 @@ describe('entityAccountMappings save handler', () => {
     mockedUpsertMappings.mockResolvedValue([expectedEntityMapping]);
     mockedUpsertAccounts.mockResolvedValue([]);
     mockedUpsertActivity.mockResolvedValue([]);
+    mockedListEntityScoaActivity.mockResolvedValue([]);
     mockedDeletePresetMappings.mockResolvedValue(0);
     mockedCreatePresetMappings.mockResolvedValue([]);
+    mockedListPresetMappings.mockResolvedValue([]);
+    mockedUpdatePreset.mockResolvedValue(null);
+    mockedListPresetMappingsExisting.mockResolvedValue([]);
   });
 
   it('persists dynamic mapping preset records', async () => {

@@ -7,6 +7,7 @@ import './health';
 import './industries';
 import './chartOfAccounts';
 import './mappingSuggest';
+import './distributionSuggest';
 import './masterclients';
 import './userClients';
 import './datapointConfigs/create';

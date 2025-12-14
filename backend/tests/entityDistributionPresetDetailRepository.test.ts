@@ -35,6 +35,7 @@ describe('entityDistributionPresetDetailRepository', () => {
       recordset: inputs.map((detail) => ({
         preset_guid: detail.presetGuid,
         operation_cd: detail.operationCd,
+        basis_datapoint: null,
         is_calculated: null,
         specified_pct: detail.specifiedPct / 100,
         inserted_dttm: new Date('2025-03-01T00:00:00Z'),
@@ -49,6 +50,8 @@ describe('entityDistributionPresetDetailRepository', () => {
     const params = mockedRunQuery.mock.calls[0][1] as Record<string, unknown>;
     expect(params.specifiedPct0).toBe(1);
     expect(params.specifiedPct1).toBe(0.2);
+    expect(params.basisDatapoint0).toBeNull();
+    expect(params.basisDatapoint1).toBeNull();
     expect(result.map((row) => row.specifiedPct)).toEqual([100, 20]);
   });
 
@@ -60,6 +63,7 @@ describe('entityDistributionPresetDetailRepository', () => {
           {
             preset_id: 'dist-preset-2',
             operation_cd: 'OP-update',
+            basis_datapoint: null,
             is_calculated: null,
             specified_pct: 1,
             inserted_dttm: new Date('2025-04-01T00:00:00Z'),

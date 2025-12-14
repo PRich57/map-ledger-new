@@ -205,7 +205,7 @@ const updateByRecordId = async (
       TARGET_DATAPOINT = ISNULL(@targetDatapoint, TARGET_DATAPOINT),
       BASIS_DATAPOINT = ISNULL(@basisDatapoint, BASIS_DATAPOINT),
       IS_CALCULATED = ISNULL(@isCalculated, IS_CALCULATED),
-      SPECIFIED_PCT = ISNULL(@specifiedPct, SPECIFIED_PCT),
+      SPECIFIED_PCT = ISNULL(CAST(@specifiedPct AS DECIMAL(4,3)), SPECIFIED_PCT),
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
     WHERE RECORD_ID = @recordId`,
@@ -244,7 +244,7 @@ export const updateEntityMappingPresetDetail = async (
       `UPDATE ${TABLE_NAME}
       SET
         IS_CALCULATED = ISNULL(@isCalculated, IS_CALCULATED),
-        SPECIFIED_PCT = ISNULL(@specifiedPct, SPECIFIED_PCT),
+        SPECIFIED_PCT = ISNULL(CAST(@specifiedPct AS DECIMAL(4,3)), SPECIFIED_PCT),
         UPDATED_BY = @updatedBy,
         UPDATED_DTTM = SYSUTCDATETIME()
       WHERE PRESET_GUID = @presetGuid

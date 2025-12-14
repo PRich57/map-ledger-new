@@ -1,4 +1,5 @@
 import { runQuery } from '../utils/sqlClient';
+import { normalizeGlMonth } from '../utils/glMonth';
 
 export interface EntityAccountMappingUpsertInput {
   entityId: string;
@@ -336,6 +337,106 @@ export const listEntityAccountMappingsByFileUpload = async (
     WHERE fr.FILE_UPLOAD_GUID = @fileUploadGuid
     ORDER BY fr.SOURCE_SHEET_NAME ASC, fr.RECORD_ID ASC`,
     { fileUploadGuid }
+  );
+
+  const rows = (result.recordset ?? []).map((row) => ({
+    ...mapRow(row),
+    fileUploadGuid: row.file_upload_guid,
+    record_id: row.record_id,
+    accountName: row.account_name,
+    activityAmount: row.activity_amount,
+    glMonth: row.gl_month,
+    basisDatapoint: row.basisDatapoint,
+    targetDatapoint: row.targetDatapoint,
+    isCalculated: row.isCalculated,
+    // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+    specifiedPct: row.specifiedPct !== null && row.specifiedPct !== undefined
+      ? row.specifiedPct * 100
+      : null,
+    presetDetailRecordId: row.presetDetailRecordId ?? null,
+  }));
+
+  return hydratePresetDetails(rows).map(({ presetDetails, ...rest }) => ({
+    ...rest,
+    presetDetails,
+  }));
+};
+
+export const listEntityAccountMappingsWithActivityForEntity = async (
+  entityId: string,
+  glMonths?: string[],
+): Promise<EntityAccountMappingWithRecord[]> => {
+  if (!entityId) {
+    return [];
+  }
+
+  const params: Record<string, unknown> = { entityId };
+  const normalizedMonths = Array.from(
+    new Set(
+      (glMonths ?? [])
+        .map(month => normalizeGlMonth(month ?? '') ?? month?.trim())
+        .filter((month): month is string => Boolean(month)),
+    ),
+  );
+
+  const monthFilters = normalizedMonths.map((month, index) => {
+    params[`glMonth${index}`] = month;
+    return `fr.GL_MONTH = @glMonth${index}`;
+  });
+
+  const monthClause = monthFilters.length ? ` AND (${monthFilters.join(' OR ')})` : '';
+
+  const result = await runQuery<{
+    file_upload_guid: string;
+    record_id: number;
+    entity_id: string | number | null;
+    entity_account_id: string;
+    account_name: string | null;
+    activity_amount: number | null;
+    gl_month: string | null;
+    polarity?: string | null;
+    mapping_type?: string | null;
+    preset_id?: string | null;
+    mapping_status?: string | null;
+    exclusion_pct?: number | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+    basisDatapoint?: string | null;
+    targetDatapoint?: string | null;
+    isCalculated?: boolean | null;
+    specifiedPct?: number | null;
+    presetDetailRecordId?: number | null;
+  }>(
+    `SELECT
+      fr.FILE_UPLOAD_GUID as file_upload_guid,
+      fr.RECORD_ID as record_id,
+      fr.ENTITY_ID as entity_id,
+      fr.ACCOUNT_ID as entity_account_id,
+      fr.ACCOUNT_NAME as account_name,
+      fr.ACTIVITY_AMOUNT as activity_amount,
+      fr.GL_MONTH as gl_month,
+      eam.POLARITY as polarity,
+      eam.MAPPING_TYPE as mapping_type,
+      eam.PRESET_GUID as preset_id,
+      eam.MAPPING_STATUS as mapping_status,
+      eam.EXCLUSION_PCT as exclusion_pct,
+      eam.INSERTED_DTTM as inserted_dttm,
+      eam.UPDATED_DTTM as updated_dttm,
+      eam.UPDATED_BY as updated_by,
+      emd.BASIS_DATAPOINT as basisDatapoint,
+      emd.TARGET_DATAPOINT as targetDatapoint,
+      emd.IS_CALCULATED as isCalculated,
+      emd.SPECIFIED_PCT as specifiedPct,
+      emd.RECORD_ID as presetDetailRecordId
+    FROM ml.FILE_RECORDS fr
+    LEFT JOIN ${TABLE_NAME} eam
+      ON eam.ENTITY_ID = fr.ENTITY_ID AND eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+    LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
+    LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
+    WHERE fr.ENTITY_ID = @entityId${monthClause}
+    ORDER BY fr.SOURCE_SHEET_NAME ASC, fr.RECORD_ID ASC`,
+    params,
   );
 
   const rows = (result.recordset ?? []).map((row) => ({

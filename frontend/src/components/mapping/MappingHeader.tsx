@@ -6,6 +6,7 @@ import {
   selectAvailablePeriods,
   selectActivePeriod,
 } from '../../store/mappingStore';
+import { formatPeriodDate } from '../../utils/period';
 
 interface MappingHeaderProps {
   clientId?: string;
@@ -163,16 +164,16 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
               }}
               disabled={!hasAvailablePeriods}
             >
-              {hasAvailablePeriods ? (
-                <>
-                  <option value="all">All Periods</option>
-                  {availablePeriods.map(period => (
-                    <option key={period} value={period}>
-                      {period}
-                    </option>
-                  ))}
-                </>
-              ) : (
+                {hasAvailablePeriods ? (
+                  <>
+                    <option value="all">All Periods</option>
+                    {availablePeriods.map(period => (
+                      <option key={period} value={period}>
+                        {formatPeriodDate(period) || period}
+                      </option>
+                    ))}
+                  </>
+                ) : (
                 <option value="all">No periods available</option>
               )}
             </select>

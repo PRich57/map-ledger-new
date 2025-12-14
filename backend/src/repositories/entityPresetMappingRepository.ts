@@ -114,6 +114,55 @@ export const listEntityPresetMappings = async (
   return (result.recordset ?? []).map(mapRow);
 };
 
+export const listEntityPresetMappingsByPresetGuids = async (
+  presetGuids: string[],
+): Promise<EntityPresetMappingRow[]> => {
+  const normalized = Array.from(
+    new Set(
+      presetGuids
+        .map(presetGuid => normalizeText(presetGuid))
+        .filter((presetGuid): presetGuid is string => Boolean(presetGuid)),
+    ),
+  );
+
+  if (!normalized.length) {
+    return [];
+  }
+
+  const params: Record<string, unknown> = {};
+  const placeholders = normalized.map((presetGuid, index) => {
+    params[`presetGuid${index}`] = presetGuid;
+    return `@presetGuid${index}`;
+  });
+
+  const result = await runQuery<{
+    preset_guid: string;
+    basis_datapoint: string | null;
+    target_datapoint: string;
+    applied_pct?: number | null;
+    record_id?: number | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+  }>(
+    `SELECT
+      PRESET_GUID as preset_guid,
+      BASIS_DATAPOINT as basis_datapoint,
+      TARGET_DATAPOINT as target_datapoint,
+      APPLIED_PCT as applied_pct,
+      RECORD_ID as record_id,
+      INSERTED_DTTM as inserted_dttm,
+      UPDATED_DTTM as updated_dttm,
+      UPDATED_BY as updated_by
+    FROM ${TABLE_NAME}
+    WHERE PRESET_GUID IN (${placeholders.join(', ')})
+    ORDER BY PRESET_GUID DESC`,
+    params,
+  );
+
+  return (result.recordset ?? []).map(mapRow);
+};
+
 export const createEntityPresetMappings = async (
   inputs: EntityPresetMappingInput[]
 ): Promise<EntityPresetMappingRow[]> => {

@@ -12,6 +12,12 @@ import type {
 import { selectAccounts, useMappingStore } from './mappingStore';
 import { buildDistributionActivityEntries } from '../utils/distributionActivity';
 import { persistDistributionActivity } from '../services/distributionActivityService';
+import { normalizeDistributionStatus } from '../utils/distributionStatus';
+import {
+  fetchDistributionHistory,
+  type DistributionHistorySuggestion,
+} from '../services/distributionSuggestionService';
+import { useRatioAllocationStore } from './ratioAllocationStore';
 
 const env = import.meta.env;
 const API_BASE_URL = env.VITE_API_BASE_URL ?? '/api';
@@ -31,6 +37,8 @@ interface DistributionState {
   statusFilters: DistributionStatus[];
   currentEntityId: string | null;
   currentUpdatedBy: string | null;
+  historyByAccount: Record<string, DistributionHistorySuggestion>;
+  historyEntityId: string | null;
   isAutoSaving: boolean;
   autoSaveMessage: string | null;
   syncRowsFromStandardTargets: (summaries: StandardScoaSummary[]) => void;
@@ -58,6 +66,7 @@ interface DistributionState {
   queueAutoSave: (ids: string[], options?: { immediate?: boolean }) => void;
   flushAutoSaveQueue: (options?: { immediate?: boolean }) => Promise<void>;
   setSaveContext: (entityId: string | null, updatedBy: string | null) => void;
+  loadHistoryForEntity: (entityId: string | null) => Promise<void>;
   saveDistributions: (
     entityId: string | null,
     updatedBy: string | null,
@@ -147,7 +156,56 @@ const clampOperationsForType = (
     name: operation.name,
     allocation: operation.allocation,
     notes: operation.notes,
+    basisDatapoint: operation.basisDatapoint,
   }));
+};
+
+const cloneOperations = (
+  operations: DistributionOperationShare[],
+): DistributionOperationShare[] =>
+  operations.map(operation => ({
+    id: operation.id,
+    code: operation.code,
+    name: operation.name,
+    allocation:
+      typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
+        ? operation.allocation
+        : undefined,
+    notes: operation.notes,
+    basisDatapoint: operation.basisDatapoint,
+  }));
+
+const applyHistorySuggestions = (
+  rows: DistributionRow[],
+  history: Record<string, DistributionHistorySuggestion>,
+): DistributionRow[] => {
+  if (!history || Object.keys(history).length === 0) {
+    return rows;
+  }
+  const ratioState = useRatioAllocationStore.getState();
+  return rows.map(row => {
+    const suggestion = history[row.accountId];
+    if (!suggestion || row.isDirty) {
+      return row;
+    }
+    const preparedOperations = clampOperationsForType(
+      suggestion.type,
+      cloneOperations(suggestion.operations),
+    );
+    if (suggestion.type === 'dynamic') {
+      ratioState.setActivePresetForSource(row.accountId, suggestion.presetId ?? null);
+    }
+    return applyDistributionStatus({
+      ...row,
+      type: suggestion.type,
+      operations: preparedOperations,
+      presetId: suggestion.presetId ?? null,
+      status: suggestion.status,
+      isDirty: false,
+      autoSaveState: 'saved',
+      autoSaveError: null,
+    });
+  });
 };
 
 const buildOperationPayload = (
@@ -161,10 +219,12 @@ const buildOperationPayload = (
     typeof operation.allocation === 'number' && Number.isFinite(operation.allocation)
       ? Math.max(0, Math.min(100, operation.allocation))
       : null;
+  const basisDatapoint = operation.basisDatapoint?.toString().trim();
   return {
     operationCd: candidate,
     allocation,
     notes: operation.notes ?? null,
+    basisDatapoint: basisDatapoint && basisDatapoint.length > 0 ? basisDatapoint : null,
   };
 };
 
@@ -205,7 +265,7 @@ const applySaveResults = (
     return {
       ...row,
       presetId: match?.presetGuid ?? row.presetId,
-      status: match?.distributionStatus ?? row.status,
+      status: normalizeDistributionStatus(match?.distributionStatus ?? row.status),
       isDirty: false,
       autoSaveState,
       autoSaveError: null,
@@ -392,6 +452,8 @@ const persistActivityForRows = async (
     statusFilters: [],
     currentEntityId: null,
     currentUpdatedBy: null,
+    historyByAccount: {},
+    historyEntityId: null,
     isAutoSaving: false,
     autoSaveMessage: null,
     isSavingDistributions: false,
@@ -400,10 +462,18 @@ const persistActivityForRows = async (
     lastSavedCount: 0,
     syncRowsFromStandardTargets: summaries =>
       set(state => {
+        const uniqueSummaries = summaries.reduce<StandardScoaSummary[]>((acc, summary) => {
+          if (acc.some(item => item.id === summary.id)) {
+            return acc;
+          }
+          acc.push(summary);
+          return acc;
+        }, []);
+
         const existingByTarget = new Map(
           state.rows.map(row => [row.mappingRowId, row] as const),
         );
-        const nextRows: DistributionRow[] = summaries.map(summary => {
+        const nextRows: DistributionRow[] = uniqueSummaries.map(summary => {
           const existing = existingByTarget.get(summary.id);
           const nextOperations = existing
             ? existing.operations.map(operation => ({ ...operation }))
@@ -419,21 +489,20 @@ const persistActivityForRows = async (
             operations: clampOperationsForType(resolvedType, nextOperations),
             presetId: existing?.presetId ?? null,
             notes: existing?.notes,
-            status: existing?.status ?? 'Undistributed',
+            status: normalizeDistributionStatus(existing?.status ?? 'Undistributed'),
             isDirty: existing?.isDirty ?? false,
             autoSaveState: existing?.autoSaveState ?? 'idle',
             autoSaveError: existing?.autoSaveError ?? null,
           });
         });
-        return { rows: nextRows };
+        return { rows: applyHistorySuggestions(nextRows, state.historyByAccount) };
       }),
     setSearchTerm: term => set({ searchTerm: term }),
     toggleStatusFilter: status =>
-      set(state => ({
-        statusFilters: state.statusFilters.includes(status)
-          ? state.statusFilters.filter(value => value !== status)
-          : [...state.statusFilters, status],
-      })),
+      set(state => {
+        const isAlreadyActive = state.statusFilters.length === 1 && state.statusFilters[0] === status;
+        return { statusFilters: isAlreadyActive ? [] : [status] };
+      }),
     clearStatusFilters: () => set({ statusFilters: [] }),
     updateRow: (id, updates) => {
       set(state => ({
@@ -613,6 +682,37 @@ const persistActivityForRows = async (
       set({ currentEntityId: entityId, currentUpdatedBy: updatedBy });
       if (entityId && autoSaveQueue.size > 0) {
         scheduleAutoSave(true);
+      }
+    },
+    loadHistoryForEntity: async entityId => {
+      const normalized = entityId?.trim() ?? null;
+      if (!normalized) {
+        set({ historyByAccount: {}, historyEntityId: null });
+        return;
+      }
+
+      const currentState = _get();
+      if (
+        currentState.historyEntityId === normalized &&
+        Object.keys(currentState.historyByAccount).length > 0
+      ) {
+        return;
+      }
+
+      try {
+        const suggestions = await fetchDistributionHistory(normalized);
+        const lookup: Record<string, DistributionHistorySuggestion> = {};
+        suggestions.forEach(suggestion => {
+          lookup[suggestion.accountId] = suggestion;
+        });
+        set(state => ({
+          historyByAccount: lookup,
+          historyEntityId: normalized,
+          rows: applyHistorySuggestions(state.rows, lookup),
+        }));
+      } catch (error) {
+        console.error('Unable to load distribution history', error);
+        set({ historyByAccount: {}, historyEntityId: normalized });
       }
     },
     saveDistributions: async (entityId, updatedBy) => {

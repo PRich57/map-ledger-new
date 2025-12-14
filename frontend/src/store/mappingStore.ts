@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import type {
   DynamicAllocationPreset,
   DynamicAllocationPresetRow,
-  EntitySummary,
   DynamicBasisAccount,
+  DynamicSourceAccount,
+  EntitySummary,
   FileRecord,
   GLAccountMappingRow,
   MappingPresetLibraryEntry,
@@ -22,6 +23,7 @@ import type {
 } from '../types';
 import { buildMappingRowsFromImport } from '../utils/buildMappingRowsFromImport';
 import { slugify } from '../utils/slugify';
+import { normalizeGlMonth } from '../utils/extractDateFromText';
 import { getSourceValue } from '../utils/dynamicAllocation';
 import { computeDynamicExclusionSummaries } from '../utils/dynamicExclusions';
 import { trackMappingSaveAttempt } from '../utils/telemetry';
@@ -358,12 +360,45 @@ const getPeriodsForAccounts = (accounts: GLAccountMappingRow[]): string[] => {
   return Array.from(periodSet).sort();
 };
 
+const findLatestNormalizedGlMonth = (rows: TrialBalanceRow[]): string | null => {
+  let latest: string | null = null;
+  rows.forEach(row => {
+    const normalized = normalizeGlMonth((row.glMonth ?? '').trim());
+    if (!normalized) {
+      return;
+    }
+    if (!latest || normalized > latest) {
+      latest = normalized;
+    }
+  });
+  return latest;
+};
+
 const normalizePeriod = (period?: string | null): string | null => {
   if (!period) {
     return null;
   }
   const trimmed = period.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeAllocationPeriod = (value?: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const hyphenMatch = trimmed.match(/^(\d{4}-\d{2})/);
+  if (hyphenMatch) {
+    return hyphenMatch[1];
+  }
+  const compactMatch = trimmed.match(/^(\d{4})(\d{2})/);
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}`;
+  }
+  return trimmed;
 };
 
 const comparePeriodsDescending = (a?: string | null, b?: string | null): number => {
@@ -503,6 +538,24 @@ const accumulateStandardTargetValues = (
         const value = amount > 0 ? amount : 0;
         addValue(targetId, label, value);
       });
+      return;
+    }
+
+    if (account.mappingType === 'dynamic') {
+      const normalizedTarget = account.manualCOAId?.trim() ?? account.suggestedCOAId?.trim();
+      if (!normalizedTarget) {
+        return;
+      }
+      const option = findChartOfAccountTarget(normalizedTarget);
+      const targetId = option?.id ?? normalizedTarget;
+      const label = option?.label ?? normalizedTarget;
+      const baseAmount = Math.abs(account.netChange);
+      const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
+      const allocatable = Math.max(0, baseAmount - excluded);
+      if (allocatable <= 0) {
+        return;
+      }
+      addValue(targetId, label, allocatable);
     }
   });
 
@@ -860,8 +913,24 @@ const buildSaveInputFromAccount = (
       });
 
       // Find the results for this allocation to get calculated percentages
+      const periodCandidates = new Set<string>();
+      const normalizedSelectionPeriod = normalizeAllocationPeriod(selectedPeriod ?? account.glMonth);
+      if (normalizedSelectionPeriod) {
+        periodCandidates.add(normalizedSelectionPeriod);
+      }
+      const normalizedAccountPeriod = normalizeAllocationPeriod(account.glMonth);
+      if (normalizedAccountPeriod) {
+        periodCandidates.add(normalizedAccountPeriod);
+      }
+      const matchesAllocationPeriod = (period?: string | null): boolean => {
+        if (periodCandidates.size === 0) {
+          return true;
+        }
+        const normalized = normalizeAllocationPeriod(period);
+        return Boolean(normalized && periodCandidates.has(normalized));
+      };
       const allocationResult = results.find(
-        result => result.allocationId === allocation.id && result.periodId === (selectedPeriod ?? account.glMonth),
+        result => result.allocationId === allocation.id && matchesAllocationPeriod(result.periodId),
       );
 
       // Build split definitions from presets
@@ -1004,13 +1073,49 @@ const syncDynamicAllocationState = (
 ) => {
   const basisAccounts = buildBasisAccountsFromMappings(accounts);
 
-  const sourceAccounts = accounts.map(account => ({
+  const accountSourceAccounts: DynamicSourceAccount[] = accounts.map(account => ({
     id: account.id,
     name: account.accountName,
     number: account.accountId,
     description: account.accountName,
     value: account.netChange,
   }));
+
+  const summarySourceAccounts = buildStandardScoaSummaries(accounts)
+    .map(summary => {
+      const normalizedId = summary.value?.trim() ?? '';
+      if (!normalizedId) {
+        return null;
+      }
+      const label = summary.label?.trim() ?? normalizedId;
+      return {
+        id: normalizedId,
+        name: label,
+        number: normalizedId,
+        description: label,
+        value: summary.mappedAmount,
+      } as DynamicSourceAccount;
+    })
+    .filter((entry): entry is DynamicSourceAccount => Boolean(entry));
+
+  const sourceAccountLookup = new Map<string, DynamicSourceAccount>();
+  accountSourceAccounts.forEach(account => {
+    sourceAccountLookup.set(account.id, account);
+    const canonicalAccountId = account.number?.trim();
+    if (canonicalAccountId && !sourceAccountLookup.has(canonicalAccountId)) {
+      sourceAccountLookup.set(canonicalAccountId, {
+        ...account,
+        id: canonicalAccountId,
+        number: canonicalAccountId,
+      });
+    }
+  });
+  summarySourceAccounts.forEach(account => {
+    if (!sourceAccountLookup.has(account.id)) {
+      sourceAccountLookup.set(account.id, account);
+    }
+  });
+  const sourceAccounts = Array.from(sourceAccountLookup.values());
 
   const periodSet = new Set<string>();
   rows.forEach(row => {
@@ -1026,9 +1131,11 @@ const syncDynamicAllocationState = (
 
   const availablePeriods = Array.from(periodSet).sort();
   const normalizedRequested = requestedPeriod?.trim() ?? null;
-  const selectedPeriod = normalizedRequested && availablePeriods.includes(normalizedRequested)
-    ? normalizedRequested
-    : availablePeriods[0] ?? null;
+  const fallbackPeriod = availablePeriods[availablePeriods.length - 1] ?? null;
+  const selectedPeriod =
+    normalizedRequested && availablePeriods.includes(normalizedRequested)
+      ? normalizedRequested
+      : fallbackPeriod;
 
   const hydratePayload: RatioAllocationHydrationPayload = {
     basisAccounts,
@@ -2793,8 +2900,10 @@ export const useMappingStore = create<MappingState>((set, get) => {
         };
       });
 
+      const latestNormalizedPeriod = findLatestNormalizedGlMonth(rows);
+      const fallbackPeriod = rows.find((row) => row.glMonth)?.glMonth ?? null;
       const preferredPeriod =
-        options?.period ?? rows.find((row) => row.glMonth)?.glMonth ?? null;
+        options?.period ?? latestNormalizedPeriod ?? fallbackPeriod;
 
       const normalizedClientId = normalizeClientId(options?.clientId ?? null);
       const normalizedEntityIds = options?.entityIds

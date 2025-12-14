@@ -1,4 +1,5 @@
 import { runQuery } from '../utils/sqlClient';
+import type { EntityDistributionPresetDetailRow } from './entityDistributionPresetDetailRepository';
 
 export interface EntityScoaDistributionInput {
   entityId: string;
@@ -12,6 +13,13 @@ export interface EntityScoaDistributionInput {
 export interface EntityScoaDistributionRow extends EntityScoaDistributionInput {
   insertedDttm?: string | null;
   updatedDttm?: string | null;
+}
+
+export interface EntityScoaDistributionWithDetailsRow
+  extends EntityScoaDistributionRow {
+  presetDescription?: string | null;
+  presetType?: string | null;
+  presetDetails: EntityDistributionPresetDetailRow[];
 }
 
 const TABLE_NAME = 'ml.ENTITY_SCOA_DISTRIBUTION';
@@ -195,6 +203,132 @@ export const deleteEntityScoaDistribution = async (
   );
 
   return result.rowsAffected?.[0] ?? 0;
+};
+
+const normalizeDetailRow = (row: {
+  preset_guid: string | null;
+  operation_cd?: string | null;
+  basis_datapoint?: string | null;
+  is_calculated?: number | boolean | null;
+  specified_pct?: number | null;
+}): EntityDistributionPresetDetailRow | null => {
+  const operationCd = row.operation_cd?.trim();
+  if (!operationCd) {
+    return null;
+  }
+  return {
+    presetGuid: row.preset_guid ?? '',
+    operationCd,
+    basisDatapoint: row.basis_datapoint ?? null,
+    isCalculated:
+      typeof row.is_calculated === 'boolean'
+        ? row.is_calculated
+        : row.is_calculated === null || row.is_calculated === undefined
+          ? null
+          : Boolean(row.is_calculated),
+    specifiedPct:
+      row.specified_pct !== null && row.specified_pct !== undefined
+        ? row.specified_pct * 100
+        : null,
+    insertedDttm: null,
+    updatedDttm: null,
+    updatedBy: null,
+  };
+};
+
+export const listEntityScoaDistributionsWithDetails = async (
+  entityId: string,
+): Promise<EntityScoaDistributionWithDetailsRow[]> => {
+  if (!entityId) {
+    return [];
+  }
+
+  const result = await runQuery<{
+    entity_id: string;
+    scoa_account_id: string;
+    distribution_type: string;
+    preset_guid?: string | null;
+    distribution_status?: string | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+    preset_type?: string | null;
+    preset_description?: string | null;
+    operation_cd?: string | null;
+    basis_datapoint?: string | null;
+    is_calculated?: number | boolean | null;
+    specified_pct?: number | null;
+  }>(
+    `SELECT
+      esd.ENTITY_ID as entity_id,
+      esd.SCOA_ACCOUNT_ID as scoa_account_id,
+      esd.DISTRIBUTION_TYPE as distribution_type,
+      esd.PRESET_GUID as preset_guid,
+      esd.DISTRIBUTION_STATUS as distribution_status,
+      esd.INSERTED_DTTM as inserted_dttm,
+      esd.UPDATED_DTTM as updated_dttm,
+      esd.UPDATED_BY as updated_by,
+      edp.PRESET_TYPE as preset_type,
+      edp.PRESET_DESCRIPTION as preset_description,
+      edpd.OPERATION_CD as operation_cd,
+      edpd.BASIS_DATAPOINT as basis_datapoint,
+      edpd.IS_CALCULATED as is_calculated,
+      edpd.SPECIFIED_PCT as specified_pct
+    FROM ${TABLE_NAME} esd
+    LEFT JOIN ml.ENTITY_DISTRIBUTION_PRESETS edp ON edp.PRESET_GUID = esd.PRESET_GUID
+    LEFT JOIN ml.ENTITY_DISTRIBUTION_PRESET_DETAIL edpd ON edpd.PRESET_GUID = esd.PRESET_GUID
+    WHERE esd.ENTITY_ID = @entityId
+    ORDER BY esd.SCOA_ACCOUNT_ID ASC`,
+    { entityId },
+  );
+
+  const rows = (result.recordset ?? []).map(row => ({
+    distribution: mapRow(row),
+    presetDescription: row.preset_description ?? null,
+    presetType: row.preset_type ?? null,
+    detail: normalizeDetailRow({
+      preset_guid: row.preset_guid ?? null,
+      operation_cd: row.operation_cd,
+      basis_datapoint: row.basis_datapoint,
+      is_calculated: row.is_calculated,
+      specified_pct: row.specified_pct,
+    }),
+  }));
+
+  const grouped = new Map<
+    string,
+    {
+      base: EntityScoaDistributionRow & {
+        presetDescription?: string | null;
+        presetType?: string | null;
+      };
+      details: EntityDistributionPresetDetailRow[];
+    }
+  >();
+
+  rows.forEach(({ distribution, presetDescription, presetType, detail }) => {
+    const key = `${distribution.entityId}|${distribution.scoaAccountId}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      if (detail) {
+        existing.details.push(detail);
+      }
+      return;
+    }
+    grouped.set(key, {
+      base: {
+        ...distribution,
+        presetDescription,
+        presetType,
+      },
+      details: detail ? [detail] : [],
+    });
+  });
+
+  return Array.from(grouped.values()).map(({ base, details }) => ({
+    ...base,
+    presetDetails: details,
+  }));
 };
 
 export default listEntityScoaDistributions;

@@ -3,6 +3,7 @@ import { runQuery } from '../utils/sqlClient';
 export interface EntityDistributionPresetDetailInput {
   presetGuid: string;
   operationCd: string;
+  basisDatapoint?: string | null;
   isCalculated?: boolean | null;
   specifiedPct?: number | null;
   updatedBy?: string | null;
@@ -53,6 +54,7 @@ const normalizeSpecifiedPct = (value?: number | null): number | null => {
 const mapRow = (row: {
   preset_guid: string;
   operation_cd: string;
+  basis_datapoint?: string | null;
   is_calculated?: number | boolean | null;
   specified_pct?: number | null;
   inserted_dttm?: Date | string | null;
@@ -61,6 +63,7 @@ const mapRow = (row: {
 }): EntityDistributionPresetDetailRow => ({
   presetGuid: row.preset_guid,
   operationCd: row.operation_cd,
+  basisDatapoint: row.basis_datapoint ?? null,
   isCalculated: typeof row.is_calculated === 'boolean'
     ? row.is_calculated
     : row.is_calculated === null || row.is_calculated === undefined
@@ -99,6 +102,7 @@ export const listEntityDistributionPresetDetails = async (
   const result = await runQuery<{
     preset_guid: string;
     operation_cd: string;
+    basis_datapoint?: string | null;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
     inserted_dttm?: Date | string | null;
@@ -110,6 +114,7 @@ export const listEntityDistributionPresetDetails = async (
       OPERATION_CD as operation_cd,
       IS_CALCULATED as is_calculated,
       SPECIFIED_PCT as specified_pct,
+      BASIS_DATAPOINT as basis_datapoint,
       INSERTED_DTTM as inserted_dttm,
       UPDATED_DTTM as updated_dttm,
       UPDATED_BY as updated_by
@@ -134,15 +139,17 @@ export const createEntityDistributionPresetDetails = async (
     .map((input, index) => {
       params[`presetGuid${index}`] = normalizeGuid(input.presetGuid);
       params[`operationCd${index}`] = normalizeText(input.operationCd);
+      params[`basisDatapoint${index}`] = normalizeText(input.basisDatapoint);
       params[`isCalculated${index}`] = toBit(input.isCalculated);
       params[`specifiedPct${index}`] = normalizeSpecifiedPct(input.specifiedPct);
-      return `(@presetGuid${index}, @operationCd${index}, @isCalculated${index}, @specifiedPct${index})`;
+      return `(@presetGuid${index}, @operationCd${index}, @basisDatapoint${index}, @isCalculated${index}, @specifiedPct${index})`;
     })
     .join(', ');
 
   const result = await runQuery<{
     preset_guid: string;
     operation_cd: string;
+    basis_datapoint?: string | null;
     is_calculated?: number | boolean | null;
     specified_pct?: number | null;
     inserted_dttm?: Date | string | null;
@@ -152,12 +159,14 @@ export const createEntityDistributionPresetDetails = async (
     `INSERT INTO ${TABLE_NAME} (
       PRESET_GUID,
       OPERATION_CD,
+      BASIS_DATAPOINT,
       IS_CALCULATED,
       SPECIFIED_PCT
     )
     OUTPUT
       INSERTED.PRESET_GUID as preset_guid,
       INSERTED.OPERATION_CD as operation_cd,
+      INSERTED.BASIS_DATAPOINT as basis_datapoint,
       INSERTED.IS_CALCULATED as is_calculated,
       INSERTED.SPECIFIED_PCT as specified_pct,
       INSERTED.INSERTED_DTTM as inserted_dttm,
@@ -173,7 +182,8 @@ export const createEntityDistributionPresetDetails = async (
 export const updateEntityDistributionPresetDetail = async (
   presetGuid: string,
   operationCd: string,
-  updates: Partial<Omit<EntityDistributionPresetDetailInput, 'presetGuid' | 'operationCd'>>
+  updates: Partial<Omit<EntityDistributionPresetDetailInput, 'presetGuid' | 'operationCd'>>,
+  lookupBasisDatapoint?: string | null,
 ): Promise<EntityDistributionPresetDetailRow | null> => {
   const normalizedPreset = normalizeGuid(presetGuid);
 
@@ -181,11 +191,18 @@ export const updateEntityDistributionPresetDetail = async (
     return null;
   }
 
+  const basisFilter = normalizeText(lookupBasisDatapoint ?? null);
+  const normalizedNewBasis = updates.basisDatapoint === undefined
+    ? undefined
+    : normalizeText(updates.basisDatapoint ?? null);
+
+  const basisParam = normalizedNewBasis === undefined ? null : normalizedNewBasis;
   await runQuery(
     `UPDATE ${TABLE_NAME}
     SET
+      BASIS_DATAPOINT = ISNULL(@basisDatapoint, BASIS_DATAPOINT),
       IS_CALCULATED = ISNULL(@isCalculated, IS_CALCULATED),
-      SPECIFIED_PCT = ISNULL(@specifiedPct, SPECIFIED_PCT),
+      SPECIFIED_PCT = ISNULL(CAST(@specifiedPct AS DECIMAL(4,3)), SPECIFIED_PCT),
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
     WHERE PRESET_GUID = @presetGuid
@@ -193,6 +210,8 @@ export const updateEntityDistributionPresetDetail = async (
     {
       presetGuid: normalizedPreset,
       operationCd,
+      basisDatapoint: basisParam,
+      basisDatapointFilter: basisFilter ?? null,
       isCalculated: toBit(updates.isCalculated ?? null),
       specifiedPct: normalizeSpecifiedPct(updates.specifiedPct),
       updatedBy: normalizeText(updates.updatedBy),
@@ -200,15 +219,24 @@ export const updateEntityDistributionPresetDetail = async (
   );
 
   const updatedRows = await listEntityDistributionPresetDetails(presetGuid);
-  return updatedRows.find((row) => row.operationCd === operationCd) ?? null;
+  const lookupBasis = normalizedNewBasis ?? basisFilter ?? null;
+  return (
+    updatedRows.find(
+      (row) =>
+        row.operationCd === operationCd &&
+        (row.basisDatapoint ?? null) === lookupBasis,
+    ) ?? null
+  );
 };
 
 export const deleteEntityDistributionPresetDetail = async (
   presetGuid: string,
-  operationCd: string
+  operationCd: string,
+  basisDatapoint?: string | null,
 ): Promise<number> => {
   const normalizedPreset = normalizeGuid(presetGuid);
   const normalizedOperationCd = normalizeText(operationCd);
+  const basisFilter = normalizeText(basisDatapoint ?? null);
   if (!normalizedPreset || !normalizedOperationCd) {
     return 0;
   }
@@ -216,10 +244,12 @@ export const deleteEntityDistributionPresetDetail = async (
   const result = await runQuery(
     `DELETE FROM ${TABLE_NAME}
     WHERE PRESET_GUID = @presetGuid
-      AND OPERATION_CD = @operationCd`,
+      AND OPERATION_CD = @operationCd
+      AND ((BASIS_DATAPOINT IS NULL AND @basisDatapoint IS NULL) OR BASIS_DATAPOINT = @basisDatapoint)`,
     {
       presetGuid: normalizedPreset,
       operationCd: normalizedOperationCd,
+      basisDatapoint: basisFilter ?? null,
     }
   );
 
