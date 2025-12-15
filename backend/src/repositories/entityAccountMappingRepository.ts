@@ -4,6 +4,7 @@ import { normalizeGlMonth } from '../utils/glMonth';
 export interface EntityAccountMappingUpsertInput {
   entityId: string;
   entityAccountId: string;
+  glMonth?: string | null;
   polarity?: string | null;
   mappingType?: string | null;
   presetId?: string | null;
@@ -22,7 +23,6 @@ export interface EntityAccountMappingWithRecord extends EntityAccountMappingRow 
   recordId?: number | null;
   accountName?: string | null;
   activityAmount?: number | null;
-  glMonth?: string | null;
   presetDetails?: EntityMappingPresetDetailRow[];
 }
 
@@ -79,6 +79,17 @@ const normalizePresetId = (value?: string | null): string | null => {
   return null;
 };
 
+const normalizeGlMonthValue = (value?: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const normalized = normalizeGlMonth(value);
+  if (!normalized) {
+    return null;
+  }
+  return normalized;
+};
+
 const toEntityId = (value: string | number | null | undefined): string => {
   if (value === null || value === undefined) {
     return '';
@@ -90,6 +101,7 @@ const toEntityId = (value: string | number | null | undefined): string => {
 const mapRow = (row: {
   entity_id: string | number | null;
   entity_account_id: string;
+  gl_month?: string | Date | null;
   polarity?: string | null;
   mapping_type?: string | null;
   preset_id?: string | null;
@@ -98,27 +110,37 @@ const mapRow = (row: {
   inserted_dttm?: Date | string | null;
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
-}): EntityAccountMappingRow => ({
-  entityId: toEntityId(row.entity_id),
-  entityAccountId: row.entity_account_id,
-  polarity: row.polarity ?? null,
-  mappingType: row.mapping_type ?? null,
-  presetId: row.preset_id ?? null,
-  mappingStatus: row.mapping_status ?? null,
-  // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
-  exclusionPct: row.exclusion_pct !== null && row.exclusion_pct !== undefined
-    ? row.exclusion_pct * 100
-    : null,
-  insertedDttm:
-    row.inserted_dttm instanceof Date
-      ? row.inserted_dttm.toISOString()
-      : row.inserted_dttm ?? null,
-  updatedDttm:
-    row.updated_dttm instanceof Date
-      ? row.updated_dttm.toISOString()
-      : row.updated_dttm ?? null,
-  updatedBy: row.updated_by ?? null,
-});
+}): EntityAccountMappingRow => {
+  const normalizedGlMonth =
+    row.gl_month instanceof Date
+      ? row.gl_month.toISOString().slice(0, 10)
+      : typeof row.gl_month === 'string'
+        ? row.gl_month
+        : null;
+
+  return {
+    entityId: toEntityId(row.entity_id),
+    entityAccountId: row.entity_account_id,
+    glMonth: normalizedGlMonth,
+    polarity: row.polarity ?? null,
+    mappingType: row.mapping_type ?? null,
+    presetId: row.preset_id ?? null,
+    mappingStatus: row.mapping_status ?? null,
+    // Multiply by 100 to convert from database format (0.000-1.000) to application format (0-100)
+    exclusionPct: row.exclusion_pct !== null && row.exclusion_pct !== undefined
+      ? row.exclusion_pct * 100
+      : null,
+    insertedDttm:
+      row.inserted_dttm instanceof Date
+        ? row.inserted_dttm.toISOString()
+        : row.inserted_dttm ?? null,
+    updatedDttm:
+      row.updated_dttm instanceof Date
+        ? row.updated_dttm.toISOString()
+        : row.updated_dttm ?? null,
+    updatedBy: row.updated_by ?? null,
+  };
+};
 
 export const listEntityAccountMappings = async (
   entityId: string | undefined,
@@ -130,6 +152,7 @@ export const listEntityAccountMappings = async (
   const result = await runQuery<{
     entity_id: string | number;
     entity_account_id: string;
+    gl_month?: string | null;
     polarity?: string | null;
     mapping_type?: string | null;
     preset_id?: string | null;
@@ -142,6 +165,7 @@ export const listEntityAccountMappings = async (
     `SELECT
       ENTITY_ID as entity_id,
       ENTITY_ACCOUNT_ID as entity_account_id,
+      GL_MONTH as gl_month,
       POLARITY as polarity,
       MAPPING_TYPE as mapping_type,
       PRESET_GUID as preset_id,
@@ -175,7 +199,7 @@ const hydratePresetDetails = <T extends EntityAccountMappingRow>(
   }>();
 
   rows.forEach((row) => {
-    const key = `${row.entityId}|${row.entityAccountId}|${row.recordId ?? ''}`;
+    const key = `${row.entityId}|${row.entityAccountId}|${row.glMonth ?? ''}|${row.recordId ?? ''}`;
     const existing = grouped.get(key);
     const detail = row.targetDatapoint
       ? {
@@ -220,6 +244,7 @@ export const listEntityAccountMappingsWithPresets = async (
     {
       entity_id: string | number;
       entity_account_id: string;
+      gl_month?: string | null;
       polarity?: string | null;
       mapping_type?: string | null;
       preset_id?: string | null;
@@ -239,6 +264,7 @@ export const listEntityAccountMappingsWithPresets = async (
     `SELECT
       eam.ENTITY_ID as entity_id,
       eam.ENTITY_ACCOUNT_ID as entity_account_id,
+      eam.GL_MONTH as gl_month,
       eam.POLARITY as polarity,
       eam.MAPPING_TYPE as mapping_type,
       eam.PRESET_GUID as preset_id,
@@ -291,6 +317,7 @@ export const listEntityAccountMappingsByFileUpload = async (
     record_id: number;
     entity_id: string | number | null;
     entity_account_id: string;
+    mapping_gl_month?: string | null;
     account_name: string | null;
     activity_amount: number | null;
     gl_month: string | null;
@@ -311,8 +338,9 @@ export const listEntityAccountMappingsByFileUpload = async (
     `SELECT
       fr.FILE_UPLOAD_GUID as file_upload_guid,
       fr.RECORD_ID as record_id,
-      fr.ENTITY_ID as entity_id,
+      ISNULL(fr.ENTITY_ID, eam.ENTITY_ID) as entity_id,
       fr.ACCOUNT_ID as entity_account_id,
+      eam.GL_MONTH as mapping_gl_month,
       fr.ACCOUNT_NAME as account_name,
       fr.ACTIVITY_AMOUNT as activity_amount,
       fr.GL_MONTH as gl_month,
@@ -330,8 +358,14 @@ export const listEntityAccountMappingsByFileUpload = async (
       emd.SPECIFIED_PCT as specifiedPct,
       emd.RECORD_ID as presetDetailRecordId
     FROM ml.FILE_RECORDS fr
-    LEFT JOIN ${TABLE_NAME} eam
-      ON eam.ENTITY_ID = fr.ENTITY_ID AND eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+    OUTER APPLY (
+      SELECT TOP 1 *
+      FROM ${TABLE_NAME} eam
+      WHERE eam.ENTITY_ID = fr.ENTITY_ID
+        AND eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+        AND (eam.GL_MONTH = fr.GL_MONTH OR eam.GL_MONTH IS NULL)
+      ORDER BY CASE WHEN eam.GL_MONTH = fr.GL_MONTH THEN 0 ELSE 1 END, eam.UPDATED_DTTM DESC
+    ) eam
     LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
     LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
     WHERE fr.FILE_UPLOAD_GUID = @fileUploadGuid
@@ -343,9 +377,9 @@ export const listEntityAccountMappingsByFileUpload = async (
     ...mapRow(row),
     fileUploadGuid: row.file_upload_guid,
     record_id: row.record_id,
+    glMonth: row.gl_month,
     accountName: row.account_name,
     activityAmount: row.activity_amount,
-    glMonth: row.gl_month,
     basisDatapoint: row.basisDatapoint,
     targetDatapoint: row.targetDatapoint,
     isCalculated: row.isCalculated,
@@ -424,11 +458,19 @@ export const listEntityAccountMappingsWithActivityForEntity = async (
       ) ranked
       WHERE rn = 1
     )
+    , ScopedRecords AS (
+      SELECT frInner.*
+      FROM ml.FILE_RECORDS frInner
+      INNER JOIN LatestUploads lu
+        ON lu.FILE_UPLOAD_GUID = frInner.FILE_UPLOAD_GUID
+        AND lu.GL_MONTH = frInner.GL_MONTH
+        AND (frInner.ENTITY_ID = lu.ENTITY_ID OR frInner.ENTITY_ID IS NULL)
+    )
     SELECT
       fr.FILE_UPLOAD_GUID as file_upload_guid,
       fr.RECORD_ID as record_id,
-      eam.ENTITY_ID as entity_id,
-      ISNULL(fr.ACCOUNT_ID, eam.ENTITY_ACCOUNT_ID) as entity_account_id,
+      COALESCE(fr.ENTITY_ID, @entityId) as entity_id,
+      fr.ACCOUNT_ID as entity_account_id,
       fr.ACCOUNT_NAME as account_name,
       fr.ACTIVITY_AMOUNT as activity_amount,
       fr.GL_MONTH as gl_month,
@@ -445,20 +487,18 @@ export const listEntityAccountMappingsWithActivityForEntity = async (
       emd.IS_CALCULATED as isCalculated,
       emd.SPECIFIED_PCT as specifiedPct,
       emd.RECORD_ID as presetDetailRecordId
-    FROM ${TABLE_NAME} eam
-    LEFT JOIN (
-      SELECT frInner.*
-      FROM ml.FILE_RECORDS frInner
-      INNER JOIN LatestUploads lu
-        ON lu.FILE_UPLOAD_GUID = frInner.FILE_UPLOAD_GUID
-        AND lu.GL_MONTH = frInner.GL_MONTH
-        AND (frInner.ENTITY_ID = lu.ENTITY_ID OR frInner.ENTITY_ID IS NULL)
-    ) fr
-      ON fr.ACCOUNT_ID = eam.ENTITY_ACCOUNT_ID
-      AND (fr.ENTITY_ID = eam.ENTITY_ID OR fr.ENTITY_ID IS NULL)
+    FROM ScopedRecords fr
+    OUTER APPLY (
+      SELECT TOP 1 *
+      FROM ${TABLE_NAME} eam
+      WHERE eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+        AND (eam.ENTITY_ID = fr.ENTITY_ID OR fr.ENTITY_ID IS NULL)
+        AND (eam.GL_MONTH = fr.GL_MONTH OR eam.GL_MONTH IS NULL)
+      ORDER BY CASE WHEN eam.GL_MONTH = fr.GL_MONTH THEN 0 ELSE 1 END, eam.UPDATED_DTTM DESC
+    ) eam
     LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
     LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
-    WHERE eam.ENTITY_ID = @entityId
+    WHERE (fr.ENTITY_ID = @entityId OR fr.ENTITY_ID IS NULL)
     ORDER BY fr.SOURCE_SHEET_NAME ASC, fr.RECORD_ID ASC`,
     params,
   );
@@ -496,9 +536,11 @@ export const upsertEntityAccountMappings = async (
   const params: Record<string, unknown> = {};
   const valueRows = inputs.map((input, index) => {
     const presetId = normalizePresetId(input.presetId);
+    const glMonth = normalizeGlMonthValue(input.glMonth ?? null);
 
     params[`entityId${index}`] = input.entityId;
     params[`entityAccountId${index}`] = input.entityAccountId;
+    params[`glMonth${index}`] = glMonth;
     params[`polarity${index}`] = normalizeText(input.polarity);
     params[`mappingType${index}`] = normalizeText(input.mappingType);
     params[`presetId${index}`] = presetId;
@@ -506,7 +548,7 @@ export const upsertEntityAccountMappings = async (
     params[`exclusionPct${index}`] = normalizeExclusionPct(input.exclusionPct);
     params[`updatedBy${index}`] = normalizeText(input.updatedBy);
 
-    return `(@entityId${index}, @entityAccountId${index}, @polarity${index}, @mappingType${index}, @presetId${index}, @mappingStatus${index}, @exclusionPct${index}, @updatedBy${index})`;
+    return `(@entityId${index}, @entityAccountId${index}, @glMonth${index}, @polarity${index}, @mappingType${index}, @presetId${index}, @mappingStatus${index}, @exclusionPct${index}, @updatedBy${index})`;
   });
 
   const valuesClause = valueRows.join(', ');
@@ -514,6 +556,7 @@ export const upsertEntityAccountMappings = async (
   const result = await runQuery<{
     entity_id: string;
     entity_account_id: string;
+    gl_month?: string | null;
     polarity?: string | null;
     mapping_type?: string | null;
     preset_id?: string | null;
@@ -528,6 +571,7 @@ export const upsertEntityAccountMappings = async (
       DECLARE @payload TABLE (
         entity_id varchar(36),
         entity_account_id varchar(36),
+        gl_month date,
         polarity varchar(50),
         mapping_type varchar(50),
         preset_id varchar(36),
@@ -539,6 +583,7 @@ export const upsertEntityAccountMappings = async (
       INSERT INTO @payload (
         entity_id,
         entity_account_id,
+        gl_month,
         polarity,
         mapping_type,
         preset_id,
@@ -549,7 +594,9 @@ export const upsertEntityAccountMappings = async (
 
       MERGE ${TABLE_NAME} AS target
       USING @payload AS source
-      ON target.ENTITY_ID = source.entity_id AND target.ENTITY_ACCOUNT_ID = source.entity_account_id
+      ON target.ENTITY_ID = source.entity_id
+        AND target.ENTITY_ACCOUNT_ID = source.entity_account_id
+        AND ISNULL(CONVERT(varchar(10), target.GL_MONTH, 23), '') = ISNULL(CONVERT(varchar(10), source.gl_month, 23), '')
       WHEN MATCHED THEN
         UPDATE SET
           POLARITY = ISNULL(source.polarity, target.POLARITY),
@@ -557,12 +604,14 @@ export const upsertEntityAccountMappings = async (
           PRESET_GUID = ISNULL(source.preset_id, target.PRESET_GUID),
           MAPPING_STATUS = ISNULL(source.mapping_status, target.MAPPING_STATUS),
           EXCLUSION_PCT = ISNULL(source.exclusion_pct, target.EXCLUSION_PCT),
+          GL_MONTH = ISNULL(source.gl_month, target.GL_MONTH),
           UPDATED_BY = source.updated_by,
           UPDATED_DTTM = SYSUTCDATETIME()
       WHEN NOT MATCHED THEN
         INSERT (
           ENTITY_ID,
           ENTITY_ACCOUNT_ID,
+          GL_MONTH,
           POLARITY,
           MAPPING_TYPE,
           PRESET_GUID,
@@ -573,6 +622,7 @@ export const upsertEntityAccountMappings = async (
         ) VALUES (
           source.entity_id,
           source.entity_account_id,
+          source.gl_month,
           source.polarity,
           source.mapping_type,
           source.preset_id,
@@ -584,6 +634,7 @@ export const upsertEntityAccountMappings = async (
       OUTPUT
         inserted.ENTITY_ID as entity_id,
         inserted.ENTITY_ACCOUNT_ID as entity_account_id,
+        inserted.GL_MONTH as gl_month,
         inserted.POLARITY as polarity,
         inserted.MAPPING_TYPE as mapping_type,
         inserted.PRESET_GUID as preset_id,
@@ -618,6 +669,7 @@ export const listEntityAccountMappingsForAccounts = async (
   const result = await runQuery<{
     entity_id: string | number;
     entity_account_id: string;
+    gl_month?: string | null;
     polarity?: string | null;
     mapping_type?: string | null;
     preset_id?: string | null;
@@ -630,6 +682,7 @@ export const listEntityAccountMappingsForAccounts = async (
     `SELECT
       ENTITY_ID as entity_id,
       ENTITY_ACCOUNT_ID as entity_account_id,
+      GL_MONTH as gl_month,
       POLARITY as polarity,
       MAPPING_TYPE as mapping_type,
       PRESET_GUID as preset_id,

@@ -249,6 +249,38 @@ describe('MappingTable', () => {
     });
   });
 
+  test('shows a divider for the current GL month alongside older periods', () => {
+    const [templateOne, templateTwo] = createInitialMappingAccounts();
+    const accounts = [
+      {
+        ...templateOne,
+        id: 'current-account',
+        accountId: '1000',
+        accountName: 'Current Month Account',
+        glMonth: '2024-12-01',
+      },
+      {
+        ...templateTwo,
+        id: 'prior-account',
+        accountId: '2000',
+        accountName: 'Prior Month Account',
+        glMonth: '2024-11-01',
+      },
+    ];
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts,
+      }));
+    });
+
+    render(<MappingTable />);
+
+    expect(screen.getByText('Current GL month 2024-12-01')).toBeInTheDocument();
+    expect(screen.getByText('Records from GL month 2024-11-01')).toBeInTheDocument();
+  });
+
   test('lists all COA datapoints in the target selector', () => {
     render(<MappingTable />);
 

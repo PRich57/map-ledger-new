@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { EntityReconciliationGroup, ReconciliationSubcategoryGroup } from '../../types';
 import { formatCurrencyAmount } from '../../utils/currency';
+import { formatPeriodDate } from '../../utils/period';
 
 type Accent = 'neutral';
 
@@ -32,6 +33,20 @@ const ToggleIcon = ({ isOpen }: { isOpen: boolean }) =>
   ) : (
     <ChevronRight aria-hidden className="h-4 w-4 text-gray-500 transition" />
   );
+
+const formatGlMonthLabel = (value?: string | null): string => {
+  const formatted = formatPeriodDate(value);
+  if (formatted) {
+    return formatted;
+  }
+  if (value) {
+    const trimmed = value.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return 'Unspecified GL month';
+};
 
 interface MappedCategoryAccordionProps {
   groups: ReconciliationSubcategoryGroup[];
@@ -162,12 +177,22 @@ export const MappedCategoryAccordion = ({
                                         <p className="font-semibold text-slate-900 dark:text-white">
                                           {source.glAccountId} - {source.glAccountName}
                                         </p>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                                          {source.companyName}
-                                          {source.entityName && source.entityName !== source.companyName
-                                            ? ` | ${source.entityName}`
-                                            : ''}
-                                        </p>
+                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                          <span>
+                                            {source.companyName}
+                                            {source.entityName && source.entityName !== source.companyName
+                                              ? ` | ${source.entityName}`
+                                              : ''}
+                                          </span>
+                                          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                                            <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                                              GL month
+                                            </span>
+                                            <span className="text-[11px] text-slate-800 dark:text-slate-50">
+                                              {formatGlMonthLabel(source.glMonth)}
+                                            </span>
+                                          </span>
+                                        </div>
                                       </div>
                                       <p className="text-sm font-semibold text-slate-900 dark:text-white">
                                         {formatCurrencyAmount(source.amount)}

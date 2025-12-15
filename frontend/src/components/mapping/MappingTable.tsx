@@ -446,7 +446,7 @@ export default function MappingTable() {
     return sortConfig.direction === 'asc' ? 'ascending' : 'descending';
   };
 
-  const renderedPriorPeriods = new Set<string>();
+  const renderedPeriods = new Set<string>();
 
   return (
     <div className="space-y-4">
@@ -494,13 +494,17 @@ export default function MappingTable() {
             {sortedAccounts.map((account, index) => {
               const normalizedAccountPeriod = account.glMonth?.trim() ?? null;
               const periodKey = normalizedAccountPeriod ?? 'unspecified';
+              const isCurrentPeriod =
+                normalizedLatestPeriod !== null && periodKey === normalizedLatestPeriod;
               const isPriorPeriod =
                 normalizedLatestPeriod !== null && periodKey !== normalizedLatestPeriod;
               const shouldRenderDivider =
-                isPriorPeriod && !renderedPriorPeriods.has(periodKey);
+                normalizedLatestPeriod !== null &&
+                (isCurrentPeriod || isPriorPeriod) &&
+                !renderedPeriods.has(periodKey);
 
               if (shouldRenderDivider) {
-                renderedPriorPeriods.add(periodKey);
+                renderedPeriods.add(periodKey);
               }
 
               const isSelected = selectedIds.has(account.id);
@@ -555,7 +559,9 @@ export default function MappingTable() {
                         className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-200"
                         colSpan={12}
                       >
-                        Records from GL month {getGlMonthLabel(normalizedAccountPeriod)}
+                        {isCurrentPeriod
+                          ? `Current GL month ${getGlMonthLabel(normalizedAccountPeriod)}`
+                          : `Records from GL month ${getGlMonthLabel(normalizedAccountPeriod)}`}
                       </td>
                     </tr>
                   )}

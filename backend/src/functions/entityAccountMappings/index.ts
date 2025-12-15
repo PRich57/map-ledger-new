@@ -259,8 +259,14 @@ const buildUpsertInputs = (payload: unknown): MappingSaveInput[] => {
   return inputs;
 };
 
-const toPresetCacheKey = (entityId: string, entityAccountId: string): string =>
-  `${entityId}|${entityAccountId}`;
+const toPresetCacheKey = (
+  entityId: string,
+  entityAccountId: string,
+  glMonth?: string | null,
+): string => {
+  const normalizedMonth = normalizeActivityMonth(glMonth);
+  return `${entityId}|${entityAccountId}|${normalizedMonth ?? 'all'}`;
+};
 
 const buildExistingPresetLookup = async (
   inputs: MappingSaveInput[],
@@ -277,7 +283,7 @@ const buildExistingPresetLookup = async (
       return;
     }
 
-    const key = toPresetCacheKey(input.entityId, input.entityAccountId);
+    const key = `${input.entityId}|${input.entityAccountId}`;
     if (seen.has(key)) {
       return;
     }
@@ -297,14 +303,20 @@ const buildExistingPresetLookup = async (
   const presetMetadata = new Map<string, EntityMappingPresetDbRow>();
 
   existingMappings.forEach((mapping) => {
-    if (mapping.presetId) {
-      const presetGuid = mapping.presetId;
-      presetLookup.set(
-        toPresetCacheKey(mapping.entityId, mapping.entityAccountId),
-        presetGuid,
-      );
-      knownPresetGuids.add(presetGuid);
+    if (!mapping.presetId) {
+      return;
     }
+
+    const presetGuid = mapping.presetId;
+    const normalizedMonth = normalizeActivityMonth(mapping.glMonth);
+    const scopedKey = toPresetCacheKey(mapping.entityId, mapping.entityAccountId, normalizedMonth);
+    const fallbackKey = toPresetCacheKey(mapping.entityId, mapping.entityAccountId, null);
+
+    presetLookup.set(scopedKey, presetGuid);
+    if (!presetLookup.has(fallbackKey)) {
+      presetLookup.set(fallbackKey, presetGuid);
+    }
+    knownPresetGuids.add(presetGuid);
   });
 
   const entityIds = Array.from(
@@ -453,6 +465,7 @@ const syncPresetDetails = async (
 const ensurePreset = async (
   entityId: string,
   entityAccountId: string,
+  glMonth: string | null | undefined,
   mappingType: string | null,
   presetGuid: string,
   presetLookup: Map<string, string>,
@@ -461,8 +474,12 @@ const ensurePreset = async (
   presetDescription: string | null,
   updatedBy?: string | null,
 ): Promise<boolean> => {
-  const cacheKey = toPresetCacheKey(entityId, entityAccountId);
+  const cacheKey = toPresetCacheKey(entityId, entityAccountId, glMonth);
+  const fallbackKey = toPresetCacheKey(entityId, entityAccountId, null);
   presetLookup.set(cacheKey, presetGuid);
+  if (!presetLookup.has(fallbackKey)) {
+    presetLookup.set(fallbackKey, presetGuid);
+  }
 
   const targetPresetType = resolvePresetType(mappingType);
   const existingPreset = presetMetadata.get(presetGuid);
@@ -560,10 +577,15 @@ const saveHandler = async (
         })),
       );
       const existingLookup = new Map(
-        existingMappings.map((mapping) => [
-          toPresetCacheKey(mapping.entityId, mapping.entityAccountId),
-          mapping,
-        ]),
+        existingMappings.flatMap((mapping) => {
+          const normalizedMonth = normalizeActivityMonth(mapping.glMonth);
+          const scopedKey = toPresetCacheKey(mapping.entityId, mapping.entityAccountId, normalizedMonth);
+          const fallbackKey = toPresetCacheKey(mapping.entityId, mapping.entityAccountId, null);
+          return [
+            [scopedKey, mapping] as const,
+            [fallbackKey, mapping] as const,
+          ];
+        }),
       );
       const upserts: EntityAccountMappingUpsertInput[] = [];
       const entityAccounts: EntityAccountInput[] = [];
@@ -571,14 +593,30 @@ const saveHandler = async (
       const entityUpdatedByLookup = new Map<string, string | null>();
 
       for (const input of inputs) {
+        const normalizedActivityMonth = normalizeActivityMonth(input.glMonth);
         const cacheKey = toPresetCacheKey(
           input.entityId as string,
           input.entityAccountId as string,
+          normalizedActivityMonth,
         );
+        const fallbackKey = toPresetCacheKey(
+          input.entityId as string,
+          input.entityAccountId as string,
+          null,
+        );
+        const explicitPresetId = normalizeText(input.presetId);
+        const shouldForkPreset =
+          Boolean(normalizedActivityMonth) &&
+          !explicitPresetId &&
+          presetLookup.has(fallbackKey);
+
         const presetGuid =
-          normalizeText(input.presetId) ??
-          presetLookup.get(cacheKey) ??
-          crypto.randomUUID();
+          explicitPresetId ??
+          (shouldForkPreset
+            ? crypto.randomUUID()
+            : presetLookup.get(cacheKey) ??
+              (!normalizedActivityMonth ? presetLookup.get(fallbackKey) : undefined) ??
+              crypto.randomUUID());
 
         const presetType = determinePresetType(
           input.mappingType ?? null,
@@ -616,6 +654,7 @@ const saveHandler = async (
         const createdPreset = await ensurePreset(
           input.entityId as string,
           input.entityAccountId as string,
+          normalizedActivityMonth,
           presetType,
           presetGuid,
           presetLookup,
@@ -631,6 +670,7 @@ const saveHandler = async (
         const upsertPayload: EntityAccountMappingUpsertInput = {
           entityId: input.entityId as string,
           entityAccountId: input.entityAccountId as string,
+          glMonth: normalizedActivityMonth,
           polarity: input.polarity,
           mappingType: mappingTypeForPersistence,
           presetId: presetGuid,
@@ -641,15 +681,18 @@ const saveHandler = async (
           exclusionPct: input.exclusionPct,
           updatedBy: input.updatedBy,
         };
-        const existing = existingLookup.get(cacheKey);
+        const existing = normalizedActivityMonth
+          ? existingLookup.get(cacheKey)
+          : existingLookup.get(cacheKey) ?? existingLookup.get(fallbackKey);
 
         const shouldSyncPresetDetails =
           presetDetails.length > 0 || (existing?.presetId && existing.presetId === presetGuid);
         const shouldSyncDynamicMappings =
-          presetType === 'dynamic' &&
+            presetType === 'dynamic' &&
           (presetMappingInputs.length > 0 ||
             existing?.presetId === presetGuid ||
-            presetLookup.has(cacheKey));
+            presetLookup.has(cacheKey) ||
+            (!normalizedActivityMonth && presetLookup.has(fallbackKey)));
 
         const hasChanges =
           !existing ||
@@ -694,9 +737,8 @@ const saveHandler = async (
         });
 
         const monthSet = affectedMonths.get(input.entityId as string) ?? new Set<string>();
-        const activityMonth = normalizeActivityMonth(input.glMonth);
-        if (activityMonth) {
-          monthSet.add(activityMonth);
+        if (normalizedActivityMonth) {
+          monthSet.add(normalizedActivityMonth);
         }
         affectedMonths.set(input.entityId as string, monthSet);
 

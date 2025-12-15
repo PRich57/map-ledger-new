@@ -111,6 +111,10 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
   }, [activeUploadMetadata, glUploadId]);
 
   const hasAvailablePeriods = availablePeriods.length > 0;
+  const sortedPeriods = useMemo(
+    () => [...availablePeriods].sort((a, b) => b.localeCompare(a)),
+    [availablePeriods],
+  );
 
   return (
     <div className="bg-white dark:bg-slate-900 shadow-sm rounded-lg p-6">
@@ -167,7 +171,7 @@ const MappingHeader = ({ clientId, glUploadId }: MappingHeaderProps) => {
                 {hasAvailablePeriods ? (
                   <>
                     <option value="all">All Periods</option>
-                    {availablePeriods.map(period => (
+                    {sortedPeriods.map(period => (
                       <option key={period} value={period}>
                         {formatPeriodDate(period) || period}
                       </option>

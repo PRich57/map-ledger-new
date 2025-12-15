@@ -137,6 +137,7 @@ export default function Navbar({ isSidebarOpen, onToggleSidebar }: NavbarProps) 
               type="button"
               onClick={onToggleSidebar}
               aria-label={sidebarLabel}
+              title={sidebarLabel}
               className="rounded-full p-2 text-gray-500 transition-colors hover:text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:text-blue-400"
             >
               {sidebarIcon}

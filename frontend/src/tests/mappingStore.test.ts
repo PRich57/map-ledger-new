@@ -565,6 +565,58 @@ describe('mappingStore selectors', () => {
     );
   });
 
+  it('scopes summary metrics to the active reporting period when selected', () => {
+    const mappedTarget =
+      findTargetByDescription('Revenue') ?? getChartOfAccountOptions()[0] ?? { id: '4100', value: '4100', label: '4100' };
+
+    const accounts: GLAccountMappingRow[] = [
+      buildMappingAccount({
+        id: 'acct-jan',
+        glMonth: '2024-01-01',
+        netChange: 1250,
+        activity: 1250,
+        accountName: 'January Revenue',
+        accountId: '4000',
+        status: 'Mapped',
+        manualCOAId: mappedTarget.id,
+      }),
+      buildMappingAccount({
+        id: 'acct-feb',
+        glMonth: '2024-02-01',
+        netChange: 875,
+        activity: 875,
+        accountName: 'February Revenue',
+        accountId: '4000',
+        status: 'Mapped',
+        manualCOAId: mappedTarget.id,
+      }),
+    ];
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts,
+        activeEntityId: 'ent-1',
+        activeEntities: [{ id: 'ent-1', name: 'Entity One' }],
+        activeEntityIds: ['ent-1'],
+        activePeriod: null,
+      }));
+    });
+
+    const allSummary = selectSummaryMetrics(useMappingStore.getState());
+    expect(allSummary.totalAccounts).toBe(2);
+    expect(allSummary.grossTotal).toBe(2125);
+
+    act(() => {
+      useMappingStore.setState(state => ({ ...state, activePeriod: '2024-01-01' }));
+    });
+
+    const januarySummary = selectSummaryMetrics(useMappingStore.getState());
+    expect(januarySummary.totalAccounts).toBe(1);
+    expect(januarySummary.grossTotal).toBe(1250);
+    expect(januarySummary.mappedAccounts).toBe(1);
+  });
+
   it('clears the mapping workspace when a client switch resets the import', () => {
     const rows: TrialBalanceRow[] = [
       {

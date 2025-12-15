@@ -606,6 +606,7 @@ export const buildReconciliationGroups = (
       glAccountId: account.accountId,
       glAccountName: account.accountName,
       companyName: account.entityName ?? '',
+      glMonth: normalizePeriod(account.glMonth),
     } satisfies Omit<ReconciliationSourceMapping, 'amount'>;
 
     if (account.mappingType === 'direct') {
@@ -3242,27 +3243,36 @@ const selectEntityScopedAccounts = (
   state: MappingState,
 ): GLAccountMappingRow[] => getAccountsForEntity(state.accounts, state.activeEntityId);
 
+const selectPeriodScopedAccounts = (state: MappingState): GLAccountMappingRow[] => {
+  const scopedAccounts = selectEntityScopedAccounts(state);
+  if (!state.activePeriod) {
+    return scopedAccounts;
+  }
+  const normalizedPeriod = normalizePeriod(state.activePeriod);
+  return scopedAccounts.filter(account => normalizePeriod(account.glMonth) === normalizedPeriod);
+};
+
 export const selectAccounts = (state: MappingState): GLAccountMappingRow[] =>
-  selectEntityScopedAccounts(state);
+  selectPeriodScopedAccounts(state);
 
 export const selectTotalAccounts = (state: MappingState): number =>
-  selectEntityScopedAccounts(state).length;
+  selectPeriodScopedAccounts(state).length;
 
 export const selectMappedAccounts = (state: MappingState): number =>
-  selectEntityScopedAccounts(state).filter(isAccountResolvedForSummary).length;
+  selectPeriodScopedAccounts(state).filter(isAccountResolvedForSummary).length;
 
 export const selectGrossTotal = (state: MappingState): number =>
-  calculateGrossTotal(selectEntityScopedAccounts(state));
+  calculateGrossTotal(selectPeriodScopedAccounts(state));
 
 export const selectExcludedTotal = (state: MappingState): number =>
-  calculateExcludedTotal(selectEntityScopedAccounts(state));
+  calculateExcludedTotal(selectPeriodScopedAccounts(state));
 
 export const selectNetTotal = (state: MappingState): number =>
-  calculateGrossTotal(selectEntityScopedAccounts(state)) -
-  calculateExcludedTotal(selectEntityScopedAccounts(state));
+  calculateGrossTotal(selectPeriodScopedAccounts(state)) -
+  calculateExcludedTotal(selectPeriodScopedAccounts(state));
 
 export const selectStatusCounts = (state: MappingState): Record<MappingStatus, number> =>
-  selectEntityScopedAccounts(state).reduce<Record<MappingStatus, number>>(
+  selectPeriodScopedAccounts(state).reduce<Record<MappingStatus, number>>(
     (accumulator, account) => {
       accumulator[account.status] += 1;
       return accumulator;
@@ -3271,7 +3281,7 @@ export const selectStatusCounts = (state: MappingState): Record<MappingStatus, n
   );
 
 export const selectSummaryMetrics = (state: MappingState): SummarySelector => {
-  const scopedAccounts = selectEntityScopedAccounts(state);
+  const scopedAccounts = selectPeriodScopedAccounts(state);
   const grossTotal = calculateGrossTotal(scopedAccounts);
   const excludedTotal = calculateExcludedTotal(scopedAccounts);
   return {
@@ -3313,17 +3323,17 @@ export const selectFilteredAccounts = (state: MappingState): GLAccountMappingRow
 
 export const selectStandardScoaSummaries = (
   state: MappingState,
-): StandardScoaSummary[] => buildStandardScoaSummaries(selectEntityScopedAccounts(state));
+): StandardScoaSummary[] => buildStandardScoaSummaries(selectPeriodScopedAccounts(state));
 
 export const selectReconciliationGroups = (
   state: MappingState,
 ): ReconciliationSubcategoryGroup[] => buildReconciliationGroups(
-    selectEntityScopedAccounts(state),
+    selectPeriodScopedAccounts(state),
   );
 
 export const selectEntityReconciliationGroups = (
   state: MappingState,
-): EntityReconciliationGroup[] => buildEntityReconciliationGroups(state.accounts);
+): EntityReconciliationGroup[] => buildEntityReconciliationGroups(selectPeriodScopedAccounts(state));
 
 export const selectAccountsByPeriod = (state: MappingState): Map<string, GLAccountMappingRow[]> => {
   const byPeriod = new Map<string, GLAccountMappingRow[]>();
@@ -3360,10 +3370,10 @@ export const calculateSplitAmount = (
 ): number => getSplitAmount(account, split);
 
 export const selectSplitValidationIssues = (state: MappingState) =>
-  getSplitValidationIssues(selectEntityScopedAccounts(state));
+  getSplitValidationIssues(selectPeriodScopedAccounts(state));
 
 export const selectAccountsRequiringSplits = (state: MappingState) =>
-  selectEntityScopedAccounts(state).filter(
+  selectPeriodScopedAccounts(state).filter(
     account =>
       account.mappingType === 'percentage' && account.splitDefinitions.length === 0
   );

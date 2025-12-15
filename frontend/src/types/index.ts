@@ -157,6 +157,7 @@ export interface ReconciliationSourceMapping {
   glAccountName: string;
   entityName?: string;
   companyName: string;
+  glMonth?: string | null;
   amount: number;
 }
 
