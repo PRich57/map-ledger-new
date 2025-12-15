@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, Download, History, Loader2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock3, Download, History, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import { selectAccounts, selectSplitValidationIssues, useMappingStore } from '../../store/mappingStore';
 import {
   type DistributionOperationCatalogItem,
   useDistributionStore,
 } from '../../store/distributionStore';
-import type { DistributionOperationShare, DistributionRow } from '../../types';
+import type { DistributionOperationShare, DistributionRow, GLAccountMappingRow } from '../../types';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientStore } from '../../store/clientStore';
@@ -61,6 +61,25 @@ interface OperationReviewEntry {
   operation: DistributionOperationCatalogItem;
   items: OperationReviewItem[];
 }
+
+/** Entity breakdown with aggregated source accounts */
+interface EntitySourceGroup {
+  entityId: string;
+  entityName: string;
+  total: number;
+  sources: {
+    accountId: string;
+    accountName: string;
+    amount: number;
+  }[];
+}
+
+const ToggleIcon = ({ isOpen }: { isOpen: boolean }) =>
+  isOpen ? (
+    <ChevronDown aria-hidden className="h-4 w-4 text-slate-500 transition" />
+  ) : (
+    <ChevronRight aria-hidden className="h-4 w-4 text-slate-500 transition" />
+  );
 
 const ReviewPane = () => {
   const accounts = useMappingStore(selectAccounts);
@@ -123,6 +142,67 @@ const ReviewPane = () => {
     () => distributionRows.filter(row => row.status === 'Distributed'),
     [distributionRows],
   );
+
+  // State for nested accordion expansion
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [expandedEntities, setExpandedEntities] = useState<Record<string, boolean>>({});
+
+  // Create a lookup from mappingRowId to GLAccountMappingRow for entity details
+  const mappingRowLookup = useMemo(() => {
+    const lookup = new Map<string, GLAccountMappingRow>();
+    accounts.forEach(account => {
+      lookup.set(account.id, account);
+    });
+    return lookup;
+  }, [accounts]);
+
+  // Build entity source groups for a given distribution row
+  const getEntitySourceGroups = (row: DistributionRow): EntitySourceGroup[] => {
+    const mappingRow = mappingRowLookup.get(row.mappingRowId);
+    if (!mappingRow) {
+      return [];
+    }
+
+    // If the mapping row has entities breakdown, use it
+    if (mappingRow.entities && mappingRow.entities.length > 0) {
+      return mappingRow.entities.map(entityBreakdown => ({
+        entityId: entityBreakdown.id,
+        entityName: entityBreakdown.entity || 'Unknown Entity',
+        total: entityBreakdown.balance,
+        sources: [{
+          accountId: mappingRow.accountId,
+          accountName: mappingRow.accountName,
+          amount: entityBreakdown.balance,
+        }],
+      }));
+    }
+
+    // Fallback: use the mapping row's entity info directly
+    return [{
+      entityId: mappingRow.entityId || 'default',
+      entityName: mappingRow.entityName || 'Default Entity',
+      total: mappingRow.netChange,
+      sources: [{
+        accountId: mappingRow.accountId,
+        accountName: mappingRow.accountName,
+        amount: mappingRow.netChange,
+      }],
+    }];
+  };
+
+  const toggleRowExpansion = (rowKey: string) => {
+    setExpandedRows(current => ({
+      ...current,
+      [rowKey]: !current[rowKey],
+    }));
+  };
+
+  const toggleEntityExpansion = (entityKey: string) => {
+    setExpandedEntities(current => ({
+      ...current,
+      [entityKey]: !current[entityKey],
+    }));
+  };
 
   const clientOperations = useMemo<DistributionOperationCatalogItem[]>(() => {
     const map = new Map<string, DistributionOperationCatalogItem>();
@@ -442,6 +522,7 @@ const ReviewPane = () => {
                     <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
                       <thead className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <tr>
+                          <th className="w-8 px-2 py-2" aria-label="Expand row" />
                           <th className="px-3 py-2 text-left">Account</th>
                           <th className="px-3 py-2 text-left">Description</th>
                           <th className="px-3 py-2 text-right">Activity</th>
@@ -453,7 +534,7 @@ const ReviewPane = () => {
                         {entry.items.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={5}
+                              colSpan={6}
                               className="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-300"
                             >
                               No distributed activity has been mapped to this operation yet.
@@ -462,25 +543,124 @@ const ReviewPane = () => {
                         ) : (
                           entry.items.map(({ row, share }) => {
                             const allocatedAmount = getDistributedActivityForShare(row, share);
+                            const rowKey = `${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`;
+                            const isRowExpanded = expandedRows[rowKey] ?? false;
+                            const entityGroups = getEntitySourceGroups(row);
+                            const hasEntityData = entityGroups.length > 0;
+
                             return (
-                              <tr
-                                key={`${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`}
-                                className="bg-white text-slate-900 odd:bg-slate-50 even:bg-white dark:bg-slate-900 dark:text-slate-100 dark:odd:bg-slate-900/70 dark:even:bg-slate-900/55"
-                              >
-                                <td className="max-w-[8rem] truncate px-3 py-2 font-semibold text-slate-900 dark:text-slate-100">
-                                  {row.accountId}
-                                </td>
-                                <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.description}</td>
-                                <td className="px-3 py-2 text-right font-mono text-slate-700 dark:text-slate-200">
-                                  {formatCurrencyAmount(allocatedAmount)}
-                                </td>
-                                <td className="px-3 py-2 text-slate-700 dark:text-slate-200">
-                                  {formatDistributionTypeLabel(row.type)}
-                                </td>
-                                <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">
-                                  {formatAllocationShare(row, share)}
-                                </td>
-                              </tr>
+                              <React.Fragment key={rowKey}>
+                                <tr
+                                  className="bg-white text-slate-900 odd:bg-slate-50 even:bg-white dark:bg-slate-900 dark:text-slate-100 dark:odd:bg-slate-900/70 dark:even:bg-slate-900/55"
+                                >
+                                  <td className="px-2 py-2">
+                                    {hasEntityData && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleRowExpansion(rowKey)}
+                                        aria-expanded={isRowExpanded}
+                                        aria-label={`${isRowExpanded ? 'Collapse' : 'Expand'} details for ${row.accountId}`}
+                                        className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-slate-200 dark:hover:bg-slate-700"
+                                      >
+                                        <ToggleIcon isOpen={isRowExpanded} />
+                                      </button>
+                                    )}
+                                  </td>
+                                  <td className="max-w-[8rem] truncate px-3 py-2 font-semibold text-slate-900 dark:text-slate-100">
+                                    {row.accountId}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{row.description}</td>
+                                  <td className="px-3 py-2 text-right font-mono text-slate-700 dark:text-slate-200">
+                                    {formatCurrencyAmount(allocatedAmount)}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-200">
+                                    {formatDistributionTypeLabel(row.type)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-semibold text-slate-900 dark:text-white">
+                                    {formatAllocationShare(row, share)}
+                                  </td>
+                                </tr>
+
+                                {/* Nested accordion: Entity breakdown (Level 1) */}
+                                {isRowExpanded && hasEntityData && (
+                                  <tr>
+                                    <td colSpan={6} className="bg-slate-50/80 px-0 py-0 dark:bg-slate-800/50">
+                                      <div className="ml-10 border-l-2 border-slate-200 pl-4 py-3 dark:border-slate-600">
+                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                                          Contributing Entities
+                                        </div>
+                                        <div className="space-y-2">
+                                          {entityGroups.map(entityGroup => {
+                                            const entityKey = `${rowKey}-${entityGroup.entityId}`;
+                                            const isEntityExpanded = expandedEntities[entityKey] ?? false;
+
+                                            return (
+                                              <div
+                                                key={entityKey}
+                                                className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                                              >
+                                                {/* Entity header - Level 2 accordion */}
+                                                <button
+                                                  type="button"
+                                                  onClick={() => toggleEntityExpansion(entityKey)}
+                                                  aria-expanded={isEntityExpanded}
+                                                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                                                >
+                                                  <div className="flex items-center gap-2">
+                                                    <ToggleIcon isOpen={isEntityExpanded} />
+                                                    <div>
+                                                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                        {entityGroup.entityName}
+                                                      </p>
+                                                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                        {entityGroup.sources.length} source account{entityGroup.sources.length !== 1 ? 's' : ''}
+                                                      </p>
+                                                    </div>
+                                                  </div>
+                                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                    {formatCurrencyAmount(entityGroup.total)}
+                                                  </p>
+                                                </button>
+
+                                                {/* Source accounts - Level 3 content */}
+                                                {isEntityExpanded && (
+                                                  <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/50">
+                                                    <div className="ml-6 border-l-2 border-slate-300 pl-4 dark:border-slate-600">
+                                                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
+                                                        Source Accounts from Import
+                                                      </div>
+                                                      <ul className="space-y-2">
+                                                        {entityGroup.sources.map((source, sourceIndex) => (
+                                                          <li
+                                                            key={`${entityKey}-source-${sourceIndex}`}
+                                                            className="flex items-start justify-between gap-3 rounded-md bg-white px-3 py-2 shadow-sm dark:bg-slate-900"
+                                                          >
+                                                            <div>
+                                                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                                {source.accountId}
+                                                              </p>
+                                                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                                {source.accountName}
+                                                              </p>
+                                                            </div>
+                                                            <p className="text-sm font-mono font-semibold text-slate-900 dark:text-white">
+                                                              {formatCurrencyAmount(source.amount)}
+                                                            </p>
+                                                          </li>
+                                                        ))}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
                             );
                           })
                         )}
