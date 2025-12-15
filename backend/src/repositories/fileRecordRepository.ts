@@ -47,11 +47,15 @@ export interface FileRecordRow extends FileRecordInput {
 
 const TABLE_NAME = 'ml.FILE_RECORDS';
 
-export const insertFileRecords = async (
+// SQL Server has a 2100 parameter limit. Each record uses 12 parameters,
+// so we use 150 records per batch (150 * 12 = 1800) to stay safely under the limit.
+const BATCH_SIZE = 150;
+
+const insertFileRecordsBatch = async (
   fileUploadGuid: string,
   records: FileRecordInput[],
 ): Promise<FileRecordRow[]> => {
-  if (!fileUploadGuid || fileUploadGuid.length !== 36 || records.length === 0) {
+  if (records.length === 0) {
     return [];
   }
 
@@ -115,6 +119,26 @@ export const insertFileRecords = async (
           : insertedRecords[index]?.inserted_dttm ?? undefined,
     };
   });
+};
+
+export const insertFileRecords = async (
+  fileUploadGuid: string,
+  records: FileRecordInput[],
+): Promise<FileRecordRow[]> => {
+  if (!fileUploadGuid || fileUploadGuid.length !== 36 || records.length === 0) {
+    return [];
+  }
+
+  // Process records in batches to avoid SQL Server's 2100 parameter limit
+  const allResults: FileRecordRow[] = [];
+
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+    const batchResults = await insertFileRecordsBatch(fileUploadGuid, batch);
+    allResults.push(...batchResults);
+  }
+
+  return allResults;
 };
 
 export const listFileRecords = async (fileUploadGuid?: string): Promise<FileRecordRow[]> => {
