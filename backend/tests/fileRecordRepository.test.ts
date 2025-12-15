@@ -61,6 +61,45 @@ describe('fileRecordRepository', () => {
     );
   });
 
+  it('batches large inserts to avoid SQL Server 2100 parameter limit', async () => {
+    // Create 200 records to test batching (BATCH_SIZE is 150)
+    const records = Array.from({ length: 200 }, (_, i) => ({
+      accountId: `${100 + i}`,
+      accountName: `Account ${i}`,
+      activityAmount: i * 10,
+      sourceSheetName: 'Sheet1',
+    }));
+
+    // Mock responses for two batches (150 + 50 records)
+    mockedRunQuery
+      .mockResolvedValueOnce({
+        recordset: Array.from({ length: 150 }, (_, i) => ({ record_id: i + 1 })),
+      } as any)
+      .mockResolvedValueOnce({
+        recordset: Array.from({ length: 50 }, (_, i) => ({ record_id: i + 151 })),
+      } as any);
+
+    const insertedRecords = await insertFileRecords(guid, records);
+
+    // Should have called runQuery twice (once per batch)
+    expect(mockedRunQuery).toHaveBeenCalledTimes(2);
+
+    // First batch should have 150 records
+    const [sql1, params1] = mockedRunQuery.mock.calls[0];
+    expect(Object.keys(params1 as object).filter(k => k.startsWith('accountId')).length).toBe(150);
+
+    // Second batch should have 50 records
+    const [sql2, params2] = mockedRunQuery.mock.calls[1];
+    expect(Object.keys(params2 as object).filter(k => k.startsWith('accountId')).length).toBe(50);
+
+    // Should return all 200 records
+    expect(insertedRecords.length).toBe(200);
+    expect(insertedRecords[0].recordId).toBe(1);
+    expect(insertedRecords[149].recordId).toBe(150);
+    expect(insertedRecords[150].recordId).toBe(151);
+    expect(insertedRecords[199].recordId).toBe(200);
+  });
+
   it('retrieves file records by GUID', async () => {
     const insertedDttm = new Date('2024-01-02T00:00:00.000Z');
     mockedRunQuery.mockResolvedValue({
