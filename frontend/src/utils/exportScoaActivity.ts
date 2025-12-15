@@ -274,6 +274,12 @@ export const exportOperationScoaWorkbook = async (sheets: OperationScoaSheet[]):
       worksheet.addRow(rowValues);
     });
 
+    // Apply 2 decimal place formatting to GL month columns (columns 5 onwards)
+    const firstMonthColumn = 5;
+    for (let i = 0; i < sheet.months.length; i++) {
+      worksheet.getColumn(firstMonthColumn + i).numFmt = '#,##0.00';
+    }
+
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
