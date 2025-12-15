@@ -403,44 +403,76 @@ const buildDistributionPresetLibraryEntries = (
   }, [focusMappingId, rows]);
 
   useEffect(() => {
-    let autoOpenedId: string | null = null;
     const previousTypes = previousTypesRef.current;
-    setExpandedRows(prev => {
-      const next = new Set<string>();
-      rows.forEach(row => {
-        if (prev.has(row.id) && row.type !== 'direct') {
-          next.add(row.id);
-        }
-      });
-      rows.forEach(row => {
-        const requiresExpanded = row.type === 'percentage' || row.type === 'dynamic';
-        const previousType = previousTypes.get(row.id);
-        const previouslyRequired = previousType === 'percentage' || previousType === 'dynamic';
-        if (requiresExpanded && !previouslyRequired && !next.has(row.id)) {
-          next.add(row.id);
-          autoOpenedId = row.id;
-        }
-      });
-      return next;
-    });
-    setEditingRowId(prev => {
-      if (autoOpenedId) {
-        return autoOpenedId;
+    const requiresExpanded = (type: DistributionType) => type === 'percentage' || type === 'dynamic';
+
+    const nextExpanded = new Set<string>();
+    expandedRows.forEach(id => {
+      const matchingRow = rows.find(row => row.id === id);
+      if (matchingRow && matchingRow.type !== 'direct') {
+        nextExpanded.add(id);
       }
-      if (!prev) {
-        return null;
-      }
-      const row = rows.find(item => item.id === prev);
-      return row && row.type !== 'direct' ? prev : null;
     });
+
+    let autoOpenedId: string | null = null;
+    rows.forEach(row => {
+      if (!requiresExpanded(row.type)) {
+        return;
+      }
+      const previousType = previousTypes.get(row.id);
+      const previouslyRequired = previousType ? requiresExpanded(previousType) : false;
+      if (!previouslyRequired && !nextExpanded.has(row.id)) {
+        nextExpanded.add(row.id);
+        autoOpenedId = row.id;
+      }
+    });
+
+    const expandedChanged =
+      nextExpanded.size !== expandedRows.size ||
+      Array.from(nextExpanded).some(id => !expandedRows.has(id));
+    if (expandedChanged) {
+      setExpandedRows(nextExpanded);
+    }
+
+    let nextEditingId = editingRowId;
+    if (autoOpenedId) {
+      nextEditingId = autoOpenedId;
+    } else if (editingRowId) {
+      const row = rows.find(item => item.id === editingRowId);
+      if (!row || row.type === 'direct') {
+        nextEditingId = null;
+      }
+    }
+    if (nextEditingId !== editingRowId) {
+      setEditingRowId(nextEditingId);
+    }
+
     if (autoOpenedId) {
       const targetRow = rows.find(item => item.id === autoOpenedId);
       if (targetRow) {
-        setOperationsDraft(toDraftOperations(targetRow.operations));
+        const nextDraft = toDraftOperations(targetRow.operations);
+        const draftsMatch =
+          operationsDraft.length === nextDraft.length &&
+          operationsDraft.every((draft, index) => {
+            const candidate = nextDraft[index];
+            return (
+              candidate &&
+              (draft.id ?? '').trim() === (candidate.id ?? '').trim() &&
+              (draft.code ?? '').trim() === (candidate.code ?? '').trim() &&
+              (draft.name ?? '').trim() === (candidate.name ?? '').trim() &&
+              (draft.allocation ?? null) === (candidate.allocation ?? null) &&
+              (draft.notes ?? '').trim() === (candidate.notes ?? '').trim() &&
+              (draft.basisDatapoint ?? '').trim() === (candidate.basisDatapoint ?? '').trim()
+            );
+          });
+        if (!draftsMatch) {
+          setOperationsDraft(nextDraft);
+        }
       }
     }
+
     previousTypesRef.current = new Map(rows.map(row => [row.id, row.type]));
-  }, [rows]);
+  }, [editingRowId, expandedRows, operationsDraft, rows]);
 
   const normalizedStatusFilters = useMemo(
     () => statusFilters.map(normalizeDistributionStatus),

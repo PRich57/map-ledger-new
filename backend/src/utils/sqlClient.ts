@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import sql, { ConnectionPool, config as SqlConfig, IResult } from 'mssql';
+import * as sql from 'mssql';
 
 const logPrefix = '[sqlClient]';
 
@@ -38,7 +38,7 @@ const incrementQueryCount = () => {
   }
 };
 
-let connectionPromise: Promise<ConnectionPool> | null = null;
+let connectionPromise: Promise<sql.ConnectionPool> | null = null;
 const toInt = (v: string | undefined, fallback: number) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -146,7 +146,7 @@ const parseSqlConfigFromConnectionString = (
     trustServerCertificate: boolean;
     connectionTimeoutMs?: number;
   },
-): SqlConfig | null => {
+): sql.config | null => {
   if (!connectionString.includes('=')) {
     return null;
   }
@@ -199,7 +199,7 @@ const parseSqlConfigFromConnectionString = (
     idleTimeoutMillis: toInt(process.env.SQL_POOL_IDLE_TIMEOUT, 30000),
   };
 
-  const config: SqlConfig = {
+  const config: sql.config = {
     server,
     database,
     user,
@@ -209,25 +209,25 @@ const parseSqlConfigFromConnectionString = (
   };
 
   if (Number.isFinite(port)) {
-    (config as SqlConfig & { port?: number }).port = port;
+    (config as sql.config & { port?: number }).port = port;
   } else if (Number.isFinite(derivedPort)) {
-    (config as SqlConfig & { port?: number }).port = derivedPort;
+    (config as sql.config & { port?: number }).port = derivedPort;
   }
 
   if (Number.isFinite(connectionTimeoutSeconds) && connectionTimeoutSeconds > 0) {
-    (config as SqlConfig & { connectionTimeout?: number }).connectionTimeout =
+    (config as sql.config & { connectionTimeout?: number }).connectionTimeout =
       Math.round(connectionTimeoutSeconds * 1000);
   }
 
   if (defaults.connectionTimeoutMs && defaults.connectionTimeoutMs > 0) {
-    (config as SqlConfig & { connectionTimeout?: number }).connectionTimeout =
+    (config as sql.config & { connectionTimeout?: number }).connectionTimeout =
       defaults.connectionTimeoutMs;
   }
 
   return config;
 };
 
-const resolveSqlConfig = (): SqlConfig => {
+const resolveSqlConfig = (): sql.config => {
   const explicitKeys = [
     'SQL_CONN_STR',
     'SQL_CONNECTION_STRING',
@@ -305,7 +305,7 @@ const resolveSqlConfig = (): SqlConfig => {
       return parsed;
     }
 
-    const fallbackConfig: SqlConfig = {
+    const fallbackConfig: sql.config = {
       connectionString,
       options: {
         enableArithAbort: true,
@@ -320,7 +320,7 @@ const resolveSqlConfig = (): SqlConfig => {
     };
 
     if (connectionTimeoutMsFromEnv) {
-      (fallbackConfig as SqlConfig & { connectionTimeout?: number }).connectionTimeout =
+      (fallbackConfig as sql.config & { connectionTimeout?: number }).connectionTimeout =
         connectionTimeoutMsFromEnv;
     }
 
@@ -351,17 +351,17 @@ const resolveSqlConfig = (): SqlConfig => {
       min: toInt(process.env.SQL_POOL_MIN, 0),
       idleTimeoutMillis: toInt(process.env.SQL_POOL_IDLE_TIMEOUT, 30000),
     },
-  } as SqlConfig;
+  } as sql.config;
 
   if (connectionTimeoutMsFromEnv) {
-    (config as SqlConfig & { connectionTimeout?: number }).connectionTimeout =
+    (config as sql.config & { connectionTimeout?: number }).connectionTimeout =
       connectionTimeoutMsFromEnv;
   }
 
   return config;
 };
 
-export const getSqlPool = async (): Promise<ConnectionPool> => {
+export const getSqlPool = async (): Promise<sql.ConnectionPool> => {
   if (!connectionPromise) {
     const cfg = resolveSqlConfig();
     const startTime = Date.now();
@@ -420,10 +420,18 @@ export const getSqlPool = async (): Promise<ConnectionPool> => {
   return connectionPromise;
 };
 
-export const runQuery = async <TRecord = Record<string, unknown>>(query: string, parameters: Record<string, unknown> = {}): Promise<IResult<TRecord>> => {
+export const runQuery = async <TRecord = Record<string, unknown>>(query: string, parameters: Record<string, unknown> = {}): Promise<sql.IResult<TRecord>> => {
   const pool = await getSqlPool();
   const request = pool.request();
   Object.entries(parameters).forEach(([name, value]) => {
+    if (typeof value === 'string') {
+      request.input(name, sql.NVarChar(sql.MAX), value);
+      return;
+    }
+    if (value === null) {
+      request.input(name, value as any);
+      return;
+    }
     request.input(name, value as any);
   });
 

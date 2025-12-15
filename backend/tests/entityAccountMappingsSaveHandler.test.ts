@@ -23,8 +23,13 @@ jest.mock('../src/repositories/entityAccountRepository', () => ({
 
 jest.mock('../src/repositories/entityMappingPresetRepository', () => ({
   listEntityMappingPresets: jest.fn(),
+  listEntityMappingPresetsRaw: jest.fn(),
   createEntityMappingPreset: jest.fn(),
   updateEntityMappingPreset: jest.fn(),
+  normalizePresetTypeValue: jest.requireActual('../src/repositories/entityMappingPresetRepository')
+    .normalizePresetTypeValue,
+  ALLOWED_PRESET_TYPES: jest.requireActual('../src/repositories/entityMappingPresetRepository')
+    .ALLOWED_PRESET_TYPES,
 }));
 
 jest.mock('../src/repositories/entityMappingPresetDetailRepository', () => ({
@@ -57,6 +62,7 @@ import {
   listEntityMappingPresets,
   createEntityMappingPreset,
   updateEntityMappingPreset,
+  listEntityMappingPresetsRaw,
 } from '../src/repositories/entityMappingPresetRepository';
 import { listEntityScoaActivity, upsertEntityScoaActivity } from '../src/repositories/entityScoaActivityRepository';
 import { deleteEntityPresetMappings, createEntityPresetMappings, listEntityPresetMappingsByPresetGuids, listEntityPresetMappings } from '../src/repositories/entityPresetMappingRepository';
@@ -72,6 +78,7 @@ type UpsertMappingsMock = jest.MockedFunction<typeof upsertEntityAccountMappings
 type ListMappingsMock = jest.MockedFunction<typeof listEntityAccountMappingsForAccounts>;
 type ListMappingsWithActivityMock = jest.MockedFunction<typeof listEntityAccountMappingsWithActivityForEntity>;
 type ListPresetsMock = jest.MockedFunction<typeof listEntityMappingPresets>;
+type ListPresetsRawMock = jest.MockedFunction<typeof listEntityMappingPresetsRaw>;
 type UpsertAccountsMock = jest.MockedFunction<typeof upsertEntityAccounts>;
 type UpsertActivityMock = jest.MockedFunction<typeof upsertEntityScoaActivity>;
 type ListEntityActivityMock = jest.MockedFunction<typeof listEntityScoaActivity>;
@@ -91,6 +98,7 @@ const mockedUpsertMappings = upsertEntityAccountMappings as UpsertMappingsMock;
 const mockedListMappings = listEntityAccountMappingsForAccounts as ListMappingsMock;
 const mockedListMappingsWithActivity = listEntityAccountMappingsWithActivityForEntity as ListMappingsWithActivityMock;
 const mockedListPresets = listEntityMappingPresets as ListPresetsMock;
+const mockedListPresetsRaw = listEntityMappingPresetsRaw as ListPresetsRawMock;
 const mockedUpsertAccounts = upsertEntityAccounts as UpsertAccountsMock;
 const mockedUpsertActivity = upsertEntityScoaActivity as UpsertActivityMock;
 const mockedListEntityScoaActivity = listEntityScoaActivity as ListEntityActivityMock;
@@ -108,6 +116,7 @@ const resetSaveHandlerMocks = () => {
   mockedListMappings.mockResolvedValue([]);
   mockedListMappingsWithActivity.mockResolvedValue([] as any);
   mockedListPresets.mockResolvedValue([]);
+  mockedListPresetsRaw.mockResolvedValue([]);
   mockedReadJson.mockResolvedValue({});
   mockedUpsertMappings.mockResolvedValue([]);
   mockedUpsertAccounts.mockResolvedValue([]);
@@ -141,7 +150,7 @@ describe('entityAccountMappings save handler change detection', () => {
     expect(mockedUpsertActivity).not.toHaveBeenCalled();
   });
 
-  it('skips unchanged mappings when incoming data matches stored values', async () => {
+  it('processes unchanged mappings when preset refresh is needed', async () => {
     const payload = {
       changedRows: [
         {
@@ -174,7 +183,18 @@ describe('entityAccountMappings save handler change detection', () => {
     const response = await saveHandler({} as any, { log: jest.fn(), error: jest.fn() } as any);
 
     expect(response).toEqual({ items: [] });
-    expect(mockedUpsertMappings).toHaveBeenCalledWith([]);
+    expect(mockedUpsertMappings).toHaveBeenCalledWith([
+      expect.objectContaining({
+        entityId: 'ent-1',
+        entityAccountId: 'acct-1',
+        mappingType: 'direct',
+        mappingStatus: 'Mapped',
+        presetId: 'preset-1',
+        polarity: 'Debit',
+        exclusionPct: null,
+        updatedBy: 'tester',
+      }),
+    ]);
     expect(mockedCreatePresetDetails).not.toHaveBeenCalled();
     expect(mockedDeletePresetMappings).not.toHaveBeenCalled();
   });
@@ -241,14 +261,14 @@ describe('entityAccountMappings save handler change detection', () => {
     const response = await saveHandler({} as any, { log: jest.fn(), error: jest.fn() } as any);
 
     expect(response).toEqual({ items: [{ entityId: 'ent-1', entityAccountId: 'acct-2', mappingType: 'percentage', mappingStatus: 'Mapped', presetId: 'preset-2' }] });
-    expect(mockedListMappingsWithActivity).toHaveBeenCalledWith('ent-1', ['2024-01']);
+    expect(mockedListMappingsWithActivity).toHaveBeenCalledWith('ent-1', ['2024-01-01']);
     expect(mockedUpsertActivity).toHaveBeenCalledTimes(1);
     expect(mockedUpsertActivity).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           entityId: 'ent-1',
           scoaAccountId: 'scoa-1',
-          activityMonth: '2024-01',
+          activityMonth: '2024-01-01',
           activityValue: 170,
           updatedBy: 'tester',
         }),
@@ -301,6 +321,79 @@ describe('entityAccountMappings save handler change detection', () => {
       expect.objectContaining({
         limit: SAVE_ROW_LIMIT,
         requestedRows: overLimitRows,
+      }),
+    );
+  });
+
+  it('updates preset type when mapping type changes for an existing preset', async () => {
+    const payload = {
+      changedRows: [
+        {
+          entityId: 'ent-1',
+          entityAccountId: 'acct-1',
+          accountName: 'Account One',
+          mappingType: 'percentage',
+          mappingStatus: 'Mapped',
+          presetId: 'preset-1',
+          polarity: 'Debit',
+          exclusionPct: null,
+          updatedBy: 'tester@example.com',
+        },
+      ],
+    };
+
+    mockedReadJson.mockResolvedValue(payload);
+    mockedListMappings.mockResolvedValue([
+      {
+        entityId: 'ent-1',
+        entityAccountId: 'acct-1',
+        mappingType: 'direct',
+        mappingStatus: 'Mapped',
+        presetId: 'preset-1',
+        polarity: 'Debit',
+        exclusionPct: null,
+      },
+    ] as any);
+    mockedListPresetsRaw.mockResolvedValue([
+      {
+        presetGuid: 'preset-1',
+        entityId: 'ent-1',
+        presetType: 'direct',
+        presetDescription: 'Existing preset',
+        insertedDttm: null,
+        updatedDttm: null,
+        updatedBy: null,
+      },
+    ]);
+    mockedUpsertMappings.mockResolvedValue([
+      {
+        entityId: 'ent-1',
+        entityAccountId: 'acct-1',
+        mappingType: 'percentage',
+        mappingStatus: 'Mapped',
+        presetId: 'preset-1',
+        polarity: 'Debit',
+        exclusionPct: null,
+      },
+    ]);
+
+    const response = await saveHandler({} as any, { log: jest.fn(), error: jest.fn() } as any);
+
+    expect(response).toEqual({
+      items: [
+        expect.objectContaining({
+          entityId: 'ent-1',
+          entityAccountId: 'acct-1',
+          mappingType: 'percentage',
+          presetId: 'preset-1',
+        }),
+      ],
+    });
+    expect(mockedUpdatePreset).toHaveBeenCalledWith(
+      'preset-1',
+      expect.objectContaining({
+        presetType: 'percentage',
+        updatedBy: 'tester@example.com',
       }),
     );
   });

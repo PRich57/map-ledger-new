@@ -289,10 +289,12 @@ const RatioAllocationBuilder = ({
 
   useEffect(() => {
     if (!isCreatingPreset) {
-      setNewPresetRows([]);
+      if (newPresetRows.length > 0) {
+        setNewPresetRows([]);
+      }
       return;
     }
-    if (isCreatingPreset && newPresetRows.length === 0) {
+    if (newPresetRows.length === 0) {
       const dynamicOptions = computeNewPresetDynamicOptions();
       const targetOptions = computeNewPresetTargetOptions();
       if (dynamicOptions.length > 0 && targetOptions.length > 0) {

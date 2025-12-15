@@ -110,6 +110,63 @@ const deriveGroups = (
 const normalizeAccountId = (value?: string | null): string =>
   typeof value === 'string' ? value.trim() : '';
 
+const normalizeSourceAccountId = (value?: string | null): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const coerceFiniteNumber = (value?: number | null): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+const upsertSourceAccountBalance = (
+  accounts: DynamicSourceAccount[],
+  sourceAccountId: string,
+  value: number,
+  periodId?: string | null,
+): DynamicSourceAccount[] => {
+  const normalizedId = normalizeSourceAccountId(sourceAccountId);
+  if (!normalizedId) {
+    return accounts;
+  }
+
+  const normalizedValue = coerceFiniteNumber(value);
+  const periodKey =
+    typeof periodId === 'string' && periodId.trim().length > 0 ? periodId.trim() : null;
+
+  const existingIndex = accounts.findIndex(account => account.id === normalizedId);
+  if (existingIndex === -1) {
+    const nextAccount: DynamicSourceAccount = {
+      id: normalizedId,
+      name: normalizedId,
+      number: normalizedId,
+      description: normalizedId,
+      value: normalizedValue,
+      ...(periodKey ? { valuesByPeriod: { [periodKey]: normalizedValue } } : {}),
+    };
+    return [...accounts, nextAccount];
+  }
+
+  const existing = accounts[existingIndex];
+  const existingPeriodValue = periodKey ? existing.valuesByPeriod?.[periodKey] : undefined;
+
+  if (existing.value === normalizedValue && (!periodKey || existingPeriodValue === normalizedValue)) {
+    return accounts;
+  }
+
+  const nextAccounts = [...accounts];
+  nextAccounts[existingIndex] = {
+    ...existing,
+    value: normalizedValue,
+    valuesByPeriod: periodKey
+      ? { ...(existing.valuesByPeriod ?? {}), [periodKey]: normalizedValue }
+      : existing.valuesByPeriod,
+  };
+  return nextAccounts;
+};
+
 const buildPresetTargetDatapoint = (
   preset: DynamicAllocationPreset,
   row: DynamicAllocationPresetRow,
@@ -253,12 +310,12 @@ export type RatioAllocationState = {
   validationErrors: DynamicAllocationValidationIssue[];
   auditLog: DynamicAllocationAuditRecord[];
   lastDynamicMutation: DynamicAllocationMutation | null;
-    hydrate: (payload: RatioAllocationHydrationPayload) => void;
-    setContextPresets: (
-      context: DynamicAllocationPresetContext,
-      presets: DynamicAllocationPreset[],
-    ) => void;
-    setBasisAccounts: (basisAccounts: DynamicBasisAccount[]) => void;
+  hydrate: (payload: RatioAllocationHydrationPayload) => void;
+  setContextPresets: (
+    context: DynamicAllocationPresetContext,
+    presets: DynamicAllocationPreset[],
+  ) => void;
+  setBasisAccounts: (basisAccounts: DynamicBasisAccount[]) => void;
   getOrCreateAllocation: (sourceAccountId: string) => RatioAllocation;
   addAllocation: (allocation: Omit<RatioAllocation, 'id'>) => void;
   updateAllocation: (id: string, allocation: Partial<RatioAllocation>) => void;
@@ -266,13 +323,18 @@ export type RatioAllocationState = {
   setAvailablePeriods: (periods: string[]) => void;
   setSelectedPeriod: (period: string) => void;
   calculateAllocations: (periodId: string) => Promise<void>;
-    createPreset: (payload: {
-      name: string;
-      rows: DynamicAllocationPresetRow[];
-      notes?: string;
-      applyToAllocationId?: string | null;
-      context?: DynamicAllocationPresetContext;
-    }) => string;
+  syncSourceAccountBalance: (
+    sourceAccountId: string,
+    value: number,
+    periodId?: string | null,
+  ) => void;
+  createPreset: (payload: {
+    name: string;
+    rows: DynamicAllocationPresetRow[];
+    notes?: string;
+    applyToAllocationId?: string | null;
+    context?: DynamicAllocationPresetContext;
+  }) => string;
   updatePreset: (
     presetId: string,
     updates: Partial<Omit<DynamicAllocationPreset, 'id' | 'rows'>>,
@@ -420,6 +482,26 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     });
   },
 
+  syncSourceAccountBalance: (sourceAccountId, value, periodId) => {
+    const normalizedId = normalizeSourceAccountId(sourceAccountId);
+    if (!normalizedId) {
+      return;
+    }
+    const normalizedValue = coerceFiniteNumber(value);
+    set(state => {
+      const nextAccounts = upsertSourceAccountBalance(
+        state.sourceAccounts,
+        normalizedId,
+        normalizedValue,
+        periodId,
+      );
+      if (nextAccounts === state.sourceAccounts) {
+        return {};
+      }
+      return { sourceAccounts: nextAccounts };
+    });
+  },
+
   getOrCreateAllocation: sourceAccountId => {
     const existing = get().allocations.find(allocation => allocation.sourceAccount.id === sourceAccountId);
     if (existing) {
@@ -428,14 +510,17 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     const sourceAccount =
       get().sourceAccounts.find(account => account.id === sourceAccountId) ??
       (() => {
+        const fallbackValue = 0;
         const fallback: DynamicSourceAccount = {
           id: sourceAccountId,
           name: sourceAccountId,
           number: sourceAccountId,
           description: sourceAccountId,
-          value: 0,
+          value: fallbackValue,
         };
-        set(state => ({ sourceAccounts: [...state.sourceAccounts, fallback] }));
+        set(state => ({
+          sourceAccounts: upsertSourceAccountBalance(state.sourceAccounts, sourceAccountId, fallbackValue),
+        }));
         return fallback;
       })();
     const allocation: RatioAllocation = {

@@ -71,6 +71,7 @@ const DistributionDynamicAllocationRow = ({
     presets,
     getActivePresetForSource,
     setActivePresetForSource,
+    syncSourceAccountBalance,
   } = useRatioAllocationStore(state => ({
     allocations: state.allocations,
     basisAccounts: state.basisAccounts,
@@ -81,6 +82,7 @@ const DistributionDynamicAllocationRow = ({
     presets: state.presets,
     getActivePresetForSource: state.getActivePresetForSource,
     setActivePresetForSource: state.setActivePresetForSource,
+    syncSourceAccountBalance: state.syncSourceAccountBalance,
   }));
 
   const distributionContextPresets = useMemo(
@@ -144,11 +146,27 @@ const DistributionDynamicAllocationRow = ({
     [row.accountId, sourceAccounts],
   );
 
+  useEffect(() => {
+    const normalizedActivity = Number.isFinite(row.activity) ? row.activity : 0;
+    syncSourceAccountBalance(row.accountId, normalizedActivity, selectedPeriod ?? null);
+  }, [row.accountId, row.activity, selectedPeriod, syncSourceAccountBalance]);
+
   const sourceValue = useMemo(() => {
+    const fallbackValue = row.activity;
     if (!sourceAccount) {
-      return row.activity;
+      return fallbackValue;
     }
-    return getSourceValue(sourceAccount, selectedPeriod);
+    const resolved = getSourceValue(sourceAccount, selectedPeriod);
+    if (!Number.isFinite(resolved)) {
+      return fallbackValue;
+    }
+    if (Math.abs(resolved) < 1e-6 && Math.abs(fallbackValue) > 0) {
+      return fallbackValue;
+    }
+    if (Math.abs(fallbackValue) > 0 && Math.abs(resolved - fallbackValue) > 0.01) {
+      return fallbackValue;
+    }
+    return resolved;
   }, [row.activity, selectedPeriod, sourceAccount]);
 
   const targetDetails = useMemo<TargetDetail[]>(() => {
@@ -225,7 +243,10 @@ const DistributionDynamicAllocationRow = ({
   }, [row.accountId, selectedPeriod, validationErrors]);
 
   const computedPreview = useMemo(() => {
-    if (periodResult) {
+    const mapResultToPreview = () => {
+      if (!periodResult) {
+        return null;
+      }
       return {
         allocations: periodResult.allocations.map(target => ({
           targetId: target.targetId,
@@ -244,10 +265,16 @@ const DistributionDynamicAllocationRow = ({
             }
           : null,
       } as const;
+    };
+
+    const shouldUseSavedResult =
+      periodResult && Math.abs(periodResult.sourceValue - sourceValue) < 0.01;
+    if (shouldUseSavedResult) {
+      return mapResultToPreview();
     }
 
     if (!allocation || targetDetails.length === 0 || basisTotal <= 0) {
-      return null;
+      return mapResultToPreview();
     }
 
     try {
@@ -398,6 +425,7 @@ const operationsMatch = useCallback(
   ]);
 
   const handlePresetChange = (presetId: string | null) => {
+    syncSourceAccountBalance(row.accountId, sourceValue, selectedPeriod ?? null);
     setActivePresetForSource(row.accountId, presetId);
     updateRowPreset(row.id, presetId);
     if (!presetId) {

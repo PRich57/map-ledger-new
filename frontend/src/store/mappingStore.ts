@@ -494,7 +494,7 @@ const accumulateStandardTargetValues = (
   const accumulator = new Map<string, TargetAccumulatorEntry>();
 
   const addValue = (targetId: string, label: string, amount: number) => {
-    if (amount <= 0) {
+    if (!Number.isFinite(amount) || amount === 0) {
       return;
     }
     const existing = accumulator.get(targetId);
@@ -517,7 +517,7 @@ const accumulateStandardTargetValues = (
       const option = findChartOfAccountTarget(normalizedTarget);
       const targetId = option?.id ?? normalizedTarget;
       const label = option?.label ?? normalizedTarget;
-      const amount = Math.abs(account.netChange);
+      const amount = account.netChange;
       addValue(targetId, label, amount);
       return;
     }
@@ -534,9 +534,8 @@ const accumulateStandardTargetValues = (
         const option = findChartOfAccountTarget(normalizedTarget);
         const targetId = option?.id ?? normalizedTarget;
         const label = option?.label ?? split.targetName ?? normalizedTarget;
-        const amount = getSplitAmount(account, split);
-        const value = amount > 0 ? amount : 0;
-        addValue(targetId, label, value);
+        const amount = getSplitSignedAmount(account, split);
+        addValue(targetId, label, amount);
       });
       return;
     }
@@ -552,10 +551,8 @@ const accumulateStandardTargetValues = (
       const baseAmount = Math.abs(account.netChange);
       const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
       const allocatable = Math.max(0, baseAmount - excluded);
-      if (allocatable <= 0) {
-        return;
-      }
-      addValue(targetId, label, allocatable);
+      const signedAmount = getSignedAmountForAccount(account, allocatable);
+      addValue(targetId, label, signedAmount);
     }
   });
 
@@ -582,7 +579,7 @@ export const buildReconciliationGroups = (
     amount: number,
     source: ReconciliationSourceMapping,
   ) => {
-    if (amount <= 0) {
+    if (!Number.isFinite(amount) || amount === 0) {
       return;
     }
 
@@ -624,7 +621,7 @@ export const buildReconciliationGroups = (
       const option = findChartOfAccountTarget(normalizedTarget);
       const targetId = option?.id ?? normalizedTarget;
       const label = option?.label ?? normalizedTarget;
-      const amount = Math.abs(account.netChange);
+      const amount = account.netChange;
 
       addContribution(targetId, label, amount, { ...sourceBase, amount });
       return;
@@ -644,9 +641,9 @@ export const buildReconciliationGroups = (
         const option = findChartOfAccountTarget(normalizedTarget);
         const targetId = option?.id ?? normalizedTarget;
         const label = option?.label ?? split.targetName ?? normalizedTarget;
-        const amount = getSplitAmount(account, split);
+        const amount = getSplitSignedAmount(account, split);
 
-        if (amount <= 0) {
+        if (amount === 0) {
           return;
         }
 
@@ -658,7 +655,7 @@ export const buildReconciliationGroups = (
   const groupedBySubcategory = new Map<string, ReconciliationSubcategoryGroup>();
 
   accountTargets.forEach(account => {
-    if (account.total <= 0) {
+    if (account.total === 0) {
       return;
     }
 
@@ -733,7 +730,7 @@ export const buildEntityReconciliationGroups = (
         categories,
       };
     })
-    .filter(group => group.total > 0 && group.categories.length > 0)
+    .filter(group => group.total !== 0 && group.categories.length > 0)
     .sort((a, b) => b.total - a.total || a.entityName.localeCompare(b.entityName));
 };
 

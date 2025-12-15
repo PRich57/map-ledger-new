@@ -193,6 +193,11 @@ const applyHistorySuggestions = (
       cloneOperations(suggestion.operations),
     );
     if (suggestion.type === 'dynamic') {
+      ratioState.syncSourceAccountBalance(
+        row.accountId,
+        row.activity,
+        ratioState.selectedPeriod ?? null,
+      );
       ratioState.setActivePresetForSource(row.accountId, suggestion.presetId ?? null);
     }
     return applyDistributionStatus({

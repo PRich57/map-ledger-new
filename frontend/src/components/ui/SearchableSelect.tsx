@@ -1,6 +1,14 @@
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 type Option = { id: string; value: string; label: string };
 
@@ -45,14 +53,22 @@ export default function SearchableSelect<TOption extends Option>({
   const inputId = useId();
   const listboxId = `${inputId}-listbox`;
   const resolvedId = id ?? inputId;
-  const valueSelector = getOptionValue ?? ((option: TOption) => option.value);
-  const labelSelector = getOptionLabel ?? ((option: TOption) => option.label);
+  const valueSelector = useCallback(
+    (option: TOption) => (getOptionValue ? getOptionValue(option) : option.value),
+    [getOptionValue],
+  );
+  const labelSelector = useCallback(
+    (option: TOption) => (getOptionLabel ? getOptionLabel(option) : option.label),
+    [getOptionLabel],
+  );
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const previousValueRef = useRef<string | null>(null);
+  const lastSyncedLabelRef = useRef<string>('');
   const [menuStyles, setMenuStyles] = useState<MenuStyles | null>(null);
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -75,12 +91,17 @@ export default function SearchableSelect<TOption extends Option>({
   );
 
   useEffect(() => {
-    if (selectedOption) {
-      setSearchTerm(labelSelector(selectedOption));
-    } else if (!searchTerm) {
-      setSearchTerm('');
+    const nextLabel = selectedOption ? labelSelector(selectedOption) : '';
+    if (
+      value === previousValueRef.current &&
+      nextLabel === lastSyncedLabelRef.current
+    ) {
+      return;
     }
-  }, [labelSelector, selectedOption]);
+    previousValueRef.current = value;
+    lastSyncedLabelRef.current = nextLabel;
+    setSearchTerm(nextLabel);
+  }, [labelSelector, selectedOption, value]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

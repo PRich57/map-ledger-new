@@ -16,11 +16,22 @@ export interface EntityMappingPresetRow
   updatedBy?: string | null;
 }
 
+export interface EntityMappingPresetDbRow {
+  presetGuid: string;
+  entityId: string;
+  presetType?: string | null;
+  presetDescription?: string | null;
+  insertedDttm?: string | null;
+  updatedDttm?: string | null;
+  updatedBy?: string | null;
+}
+
 export interface EntityMappingPresetWithDetailsRow extends EntityMappingPresetRow {
   presetDetails?: EntityMappingPresetDetailRow[];
 }
 
 const TABLE_NAME = 'ml.ENTITY_MAPPING_PRESETS';
+export const ALLOWED_PRESET_TYPES = new Set(['direct', 'percentage', 'dynamic', 'excluded']);
 
 const normalizeText = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
@@ -30,31 +41,26 @@ const normalizeText = (value?: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const normalizePresetTypeValue = (value?: string | null): string => {
+export const normalizePresetTypeValue = (value?: string | null): string => {
   const normalized = normalizeText(value);
   if (!normalized) {
     return 'direct';
   }
   const lower = normalized.toLowerCase();
-  switch (lower) {
-    case 'dynamic':
-      return 'dynamic';
-    case 'percentage':
-      return 'percentage';
-    case 'direct':
-      return 'direct';
-    case 'exclude':
-    case 'excluded':
-      return 'excluded';
-    case 'p':
-      return 'percentage';
-    case 'd':
-      return 'dynamic';
-    case 'x':
-      return 'excluded';
-    default:
-      return lower;
-  }
+  const mapped =
+    lower === 'p'
+      ? 'percentage'
+      : lower === 'd'
+        ? 'dynamic'
+        : lower === 'x'
+          ? 'excluded'
+          : lower === 'exclude'
+            ? 'excluded'
+            : lower === 'excluded'
+              ? 'excluded'
+              : lower;
+
+  return ALLOWED_PRESET_TYPES.has(mapped) ? mapped : 'direct';
 };
 
 const normalizePresetGuid = (value?: string | null): string | null => {
@@ -65,9 +71,33 @@ const normalizePresetGuid = (value?: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-export const listEntityMappingPresets = async (
+const mapPresetQueryRow = (row: {
+  preset_guid: string;
+  entity_id: string;
+  preset_type: string;
+  preset_description?: string | null;
+  inserted_dttm?: Date | string | null;
+  updated_dttm?: Date | string | null;
+  updated_by?: string | null;
+}): EntityMappingPresetDbRow => ({
+  presetGuid: row.preset_guid,
+  entityId: row.entity_id,
+  presetType: row.preset_type ?? null,
+  presetDescription: row.preset_description ?? null,
+  insertedDttm:
+    row.inserted_dttm instanceof Date
+      ? row.inserted_dttm.toISOString()
+      : row.inserted_dttm ?? null,
+  updatedDttm:
+    row.updated_dttm instanceof Date
+      ? row.updated_dttm.toISOString()
+      : row.updated_dttm ?? null,
+  updatedBy: row.updated_by ?? null,
+});
+
+export const listEntityMappingPresetsRaw = async (
   entityId?: string
-): Promise<EntityMappingPresetRow[]> => {
+): Promise<EntityMappingPresetDbRow[]> => {
   const params: Record<string, unknown> = {};
   const filters: string[] = [];
 
@@ -101,20 +131,18 @@ export const listEntityMappingPresets = async (
     params
   );
 
-  return (result.recordset ?? []).map((row) => ({
-    presetGuid: row.preset_guid,
-    entityId: row.entity_id,
-    presetType: normalizePresetTypeValue(row.preset_type),
-    presetDescription: row.preset_description ?? null,
-    insertedDttm:
-      row.inserted_dttm instanceof Date
-        ? row.inserted_dttm.toISOString()
-        : row.inserted_dttm ?? null,
-    updatedDttm:
-      row.updated_dttm instanceof Date
-        ? row.updated_dttm.toISOString()
-        : row.updated_dttm ?? null,
-    updatedBy: row.updated_by ?? null,
+  return (result.recordset ?? []).map(mapPresetQueryRow);
+};
+
+export const listEntityMappingPresets = async (
+  entityId?: string
+): Promise<EntityMappingPresetRow[]> => {
+  const rows = await listEntityMappingPresetsRaw(entityId);
+
+  return rows.map((row) => ({
+    ...row,
+    presetType: normalizePresetTypeValue(row.presetType),
+    presetDescription: row.presetDescription ?? null,
   }));
 };
 
@@ -133,6 +161,8 @@ export const createEntityMappingPreset = async (
     'ENTITY_ID',
     'PRESET_TYPE',
     'PRESET_DESCRIPTION',
+    'UPDATED_DTTM',
+    'UPDATED_BY',
     ...(presetGuid ? ['PRESET_GUID'] : []),
   ];
 
@@ -140,6 +170,8 @@ export const createEntityMappingPreset = async (
     '@entityId',
     '@presetType',
     '@presetDescription',
+    '@updatedDttm',
+    '@updatedBy',
     ...(presetGuid ? ['@presetGuid'] : []),
   ];
   const result = await runQuery<{
@@ -165,6 +197,8 @@ export const createEntityMappingPreset = async (
       entityId: input.entityId,
       presetType: normalizedPresetType,
       presetDescription,
+      updatedDttm: null,
+      updatedBy: null,
       ...(presetGuid ? { presetGuid } : {}),
     }
   );
@@ -199,26 +233,37 @@ export const updateEntityMappingPreset = async (
     return null;
   }
 
-  const presetDescription = normalizeText(updates.presetDescription);
+  const presetDescription =
+    updates.presetDescription === undefined ? undefined : normalizeText(updates.presetDescription);
   const normalizedPresetType = updates.presetType
     ? normalizePresetTypeValue(updates.presetType)
     : undefined;
 
-  await runQuery(
-    `UPDATE ${TABLE_NAME}
-    SET
-      PRESET_TYPE = ISNULL(@presetType, PRESET_TYPE),
-      PRESET_DESCRIPTION = ISNULL(@presetDescription, PRESET_DESCRIPTION),
-      UPDATED_BY = @updatedBy,
-      UPDATED_DTTM = SYSUTCDATETIME()
-    WHERE PRESET_GUID = @presetGuid`,
-    {
-      presetGuid: normalizedPresetGuid,
-      presetType: normalizedPresetType,
-      presetDescription,
-      updatedBy: updates.updatedBy ?? null,
-    }
-  );
+  const assignments: string[] = [];
+  const params: Record<string, unknown> = { presetGuid: normalizedPresetGuid };
+
+  if (normalizedPresetType !== undefined) {
+    assignments.push('PRESET_TYPE = @presetType');
+    params.presetType = normalizedPresetType;
+  }
+
+  if (presetDescription !== undefined) {
+    assignments.push('PRESET_DESCRIPTION = @presetDescription');
+    params.presetDescription = presetDescription;
+  }
+
+  assignments.push('UPDATED_BY = @updatedBy', 'UPDATED_DTTM = SYSUTCDATETIME()');
+  params.updatedBy = updates.updatedBy ?? null;
+
+  if (assignments.length) {
+    await runQuery(
+      `UPDATE ${TABLE_NAME}
+      SET
+        ${assignments.join(',\n        ')}
+      WHERE PRESET_GUID = @presetGuid`,
+      params
+    );
+  }
 
   const updatedRows = await listEntityMappingPresets();
   return updatedRows.find((preset) => preset.presetGuid === normalizedPresetGuid) ?? null;
@@ -327,9 +372,9 @@ export const listEntityMappingPresetsWithDetails = async (
   rows.forEach((row) => {
     const key = row.preset_guid;
     const base: EntityMappingPresetRow = {
-    presetGuid: row.preset_guid,
-    entityId: row.entity_id,
-    presetType: normalizePresetTypeValue(row.preset_type),
+      presetGuid: row.preset_guid,
+      entityId: row.entity_id,
+      presetType: normalizePresetTypeValue(row.preset_type),
       presetDescription: row.preset_description,
       insertedDttm: row.inserted_dttm,
       updatedDttm: row.updated_dttm,

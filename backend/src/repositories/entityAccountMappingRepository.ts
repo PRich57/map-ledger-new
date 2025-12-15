@@ -387,11 +387,11 @@ export const listEntityAccountMappingsWithActivityForEntity = async (
   const monthClause = monthFilters.length ? ` AND (${monthFilters.join(' OR ')})` : '';
 
   const result = await runQuery<{
-    file_upload_guid: string;
-    record_id: number;
+    file_upload_guid: string | null;
+    record_id: number | null;
     entity_id: string | number | null;
     entity_account_id: string;
-    account_name: string | null;
+    account_name: string | null | undefined;
     activity_amount: number | null;
     gl_month: string | null;
     polarity?: string | null;
@@ -408,11 +408,27 @@ export const listEntityAccountMappingsWithActivityForEntity = async (
     specifiedPct?: number | null;
     presetDetailRecordId?: number | null;
   }>(
-    `SELECT
+    `WITH LatestUploads AS (
+      SELECT FILE_UPLOAD_GUID, ENTITY_ID, GL_MONTH
+      FROM (
+        SELECT
+          fr.FILE_UPLOAD_GUID,
+          fr.ENTITY_ID,
+          fr.GL_MONTH,
+          ROW_NUMBER() OVER (
+            PARTITION BY fr.ENTITY_ID, fr.GL_MONTH
+            ORDER BY fr.INSERTED_DTTM DESC, fr.FILE_UPLOAD_GUID DESC
+          ) as rn
+        FROM ml.FILE_RECORDS fr
+        WHERE fr.ENTITY_ID = @entityId${monthClause}
+      ) ranked
+      WHERE rn = 1
+    )
+    SELECT
       fr.FILE_UPLOAD_GUID as file_upload_guid,
       fr.RECORD_ID as record_id,
-      fr.ENTITY_ID as entity_id,
-      fr.ACCOUNT_ID as entity_account_id,
+      eam.ENTITY_ID as entity_id,
+      ISNULL(fr.ACCOUNT_ID, eam.ENTITY_ACCOUNT_ID) as entity_account_id,
       fr.ACCOUNT_NAME as account_name,
       fr.ACTIVITY_AMOUNT as activity_amount,
       fr.GL_MONTH as gl_month,
@@ -429,12 +445,20 @@ export const listEntityAccountMappingsWithActivityForEntity = async (
       emd.IS_CALCULATED as isCalculated,
       emd.SPECIFIED_PCT as specifiedPct,
       emd.RECORD_ID as presetDetailRecordId
-    FROM ml.FILE_RECORDS fr
-    LEFT JOIN ${TABLE_NAME} eam
-      ON eam.ENTITY_ID = fr.ENTITY_ID AND eam.ENTITY_ACCOUNT_ID = fr.ACCOUNT_ID
+    FROM ${TABLE_NAME} eam
+    LEFT JOIN (
+      SELECT frInner.*
+      FROM ml.FILE_RECORDS frInner
+      INNER JOIN LatestUploads lu
+        ON lu.FILE_UPLOAD_GUID = frInner.FILE_UPLOAD_GUID
+        AND lu.GL_MONTH = frInner.GL_MONTH
+        AND (frInner.ENTITY_ID = lu.ENTITY_ID OR frInner.ENTITY_ID IS NULL)
+    ) fr
+      ON fr.ACCOUNT_ID = eam.ENTITY_ACCOUNT_ID
+      AND (fr.ENTITY_ID = eam.ENTITY_ID OR fr.ENTITY_ID IS NULL)
     LEFT JOIN ml.ENTITY_MAPPING_PRESETS emp ON emp.PRESET_GUID = eam.PRESET_GUID
     LEFT JOIN ml.ENTITY_MAPPING_PRESET_DETAIL emd ON emd.PRESET_GUID = emp.PRESET_GUID
-    WHERE fr.ENTITY_ID = @entityId${monthClause}
+    WHERE eam.ENTITY_ID = @entityId
     ORDER BY fr.SOURCE_SHEET_NAME ASC, fr.RECORD_ID ASC`,
     params,
   );

@@ -23,8 +23,13 @@ jest.mock('../src/repositories/entityAccountRepository', () => ({
 
 jest.mock('../src/repositories/entityMappingPresetRepository', () => ({
   listEntityMappingPresets: jest.fn(),
+  listEntityMappingPresetsRaw: jest.fn(),
   createEntityMappingPreset: jest.fn(),
   updateEntityMappingPreset: jest.fn(),
+  normalizePresetTypeValue: jest.requireActual('../src/repositories/entityMappingPresetRepository')
+    .normalizePresetTypeValue,
+  ALLOWED_PRESET_TYPES: jest.requireActual('../src/repositories/entityMappingPresetRepository')
+    .ALLOWED_PRESET_TYPES,
 }));
 
 jest.mock('../src/repositories/entityMappingPresetDetailRepository', () => ({
@@ -55,6 +60,7 @@ const {
 const { upsertEntityAccounts } = require('../src/repositories/entityAccountRepository');
 const {
   listEntityMappingPresets,
+  listEntityMappingPresetsRaw,
   createEntityMappingPreset,
   updateEntityMappingPreset,
 } = require('../src/repositories/entityMappingPresetRepository');
@@ -80,6 +86,7 @@ const mockedCreateDetails = createEntityMappingPresetDetails;
 const mockedUpdateDetail = updateEntityMappingPresetDetail;
 const mockedListPresetDetails = listEntityMappingPresetDetails;
 const mockedListPresets = listEntityMappingPresets;
+const mockedListPresetsRaw = listEntityMappingPresetsRaw;
 const mockedUpsertMappings = upsertEntityAccountMappings;
 const mockedUpsertAccounts = upsertEntityAccounts;
 const mockedUpsertActivity = upsertEntityScoaActivity;
@@ -139,6 +146,7 @@ describe('entityAccountMappings save handler', () => {
     mockedListMappingsWithActivity.mockResolvedValue([]);
     mockedListPresetDetails.mockResolvedValue([]);
     mockedListPresets.mockResolvedValue([]);
+    mockedListPresetsRaw.mockResolvedValue([]);
     mockedCreatePreset.mockResolvedValue(undefined);
     mockedCreateDetails.mockResolvedValue([]);
     mockedUpdateDetail.mockResolvedValue(null);
