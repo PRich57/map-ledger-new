@@ -239,6 +239,10 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
   const [activeDynamicAccountId, setActiveDynamicAccountId] = useState<string | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const previousTypesRef = useRef<Map<string, DistributionType>>(new Map());
+  const lastSyncedOperationsRef = useRef<{
+    rowId: string;
+    operations: DistributionOperationShare[];
+  } | null>(null);
 
   const { selectedIds, toggleSelection, setSelection, clearSelection } = useDistributionSelectionStore();
 
@@ -563,19 +567,36 @@ const buildDistributionPresetLibraryEntries = (
 
   useEffect(() => {
     if (!editingRowId) {
+      lastSyncedOperationsRef.current = null;
       return;
     }
 
     const targetRow = rows.find(row => row.id === editingRowId);
     if (!targetRow || targetRow.type === 'direct') {
+      lastSyncedOperationsRef.current = null;
       return;
     }
 
     const sanitized = sanitizeOperationsDraft(operationsDraft);
+
+    // Check if store already has these exact operations
     if (operationsAreEqual(targetRow.operations, sanitized)) {
+      lastSyncedOperationsRef.current = null;
       return;
     }
 
+    // Prevent infinite loop: skip if we just synced these exact operations
+    // This can happen when the store update triggers a re-render but the
+    // comparison still fails due to subtle differences in sanitization
+    if (
+      lastSyncedOperationsRef.current &&
+      lastSyncedOperationsRef.current.rowId === editingRowId &&
+      operationsAreEqual(lastSyncedOperationsRef.current.operations, sanitized)
+    ) {
+      return;
+    }
+
+    lastSyncedOperationsRef.current = { rowId: editingRowId, operations: sanitized };
     updateRowOperations(editingRowId, sanitized);
   }, [editingRowId, operationsDraft, rows, sanitizeOperationsDraft, updateRowOperations]);
 
