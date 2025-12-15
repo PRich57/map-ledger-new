@@ -196,8 +196,38 @@ export default function DistributionSplitRow({
     });
   };
 
-  const updateAllocation = (draftId: string, normalizedValue: number) => {
+  const updatePercentageAllocations = (draftId: string, normalizedValue: number) => {
+    const totalOperationCount = operationsDraft.length;
+
+    // Auto-calculate the partner split only when there are exactly 2 operations
+    const shouldRedistribute = totalOperationCount === 2;
+
+    const partnerOperation = shouldRedistribute
+      ? operationsDraft.find(operation => operation.draftId !== draftId)
+      : null;
+
+    // Update the edited operation
     updateOperationByDraft(draftId, { allocation: normalizedValue });
+
+    // Auto-calculate partner split when exactly 2 operations
+    if (partnerOperation) {
+      const remaining = roundToTwoDecimals(Math.max(0, 100 - normalizedValue));
+      updateOperationByDraft(partnerOperation.draftId, { allocation: remaining });
+
+      // Update both input displays
+      setPercentageInputs(prev => ({
+        ...prev,
+        [draftId]: formatPercentageLabel(normalizedValue),
+        [partnerOperation.draftId]: formatPercentageLabel(remaining),
+      }));
+      return;
+    }
+
+    // No auto-calculation if not exactly 2 operations
+    setPercentageInputs(prev => ({
+      ...prev,
+      [draftId]: formatPercentageLabel(normalizedValue),
+    }));
   };
 
   const handlePercentageChange = (draftId: string, value: string) => {
@@ -220,11 +250,7 @@ export default function DistributionSplitRow({
     }
 
     const normalizedValue = roundToTwoDecimals(clampPercentage(parsedValue));
-    updateAllocation(draftId, normalizedValue);
-    setPercentageInputs(prev => ({
-      ...prev,
-      [draftId]: formatPercentageLabel(normalizedValue),
-    }));
+    updatePercentageAllocations(draftId, normalizedValue);
     triggerImmediateAutoSave();
   };
 
