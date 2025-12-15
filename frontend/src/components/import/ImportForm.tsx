@@ -52,6 +52,8 @@ type EntitySlotSummary = {
   rowCount: number;
 };
 
+type DetectedEntityOption = ClientEntity & { detectedCount: number };
+
 const normalizeMonthKey = (glMonth?: string): string => {
   return normalizeGlMonth(glMonth ?? '') || 'unspecified';
 };
@@ -240,6 +242,73 @@ const filterRowsByGlMonth = (
     });
 };
 
+const normalizeEntityValue = (value: unknown): string => {
+  if (typeof value === 'string' || typeof value === 'number') {
+    const normalized = value.toString().trim();
+    return normalized.length > 0 ? normalized : '';
+  }
+  return '';
+};
+
+const extractEntitiesFromRows = (rows: TrialBalanceRow[]): DetectedEntityOption[] => {
+  const detected = new Map<
+    string,
+    { entity: DetectedEntityOption; aliases: Set<string> }
+  >();
+
+  rows.forEach((row) => {
+    const providedId = normalizeEntityValue(row.entityId);
+    const providedName =
+      normalizeEntityValue(row.entityName) || normalizeEntityValue(row.entity);
+
+    if (!providedId && !providedName) {
+      return;
+    }
+
+    const name = providedName || providedId;
+    const id = providedId || slugify(name) || name;
+    const key = id.toLowerCase();
+    const existing = detected.get(key);
+    const aliasSet = existing?.aliases ?? new Set<string>();
+    [providedId, providedName, name].forEach((alias) => {
+      if (alias) {
+        aliasSet.add(alias);
+      }
+    });
+
+    if (existing) {
+      existing.entity.detectedCount += 1;
+      existing.aliases = aliasSet;
+      return;
+    }
+
+    detected.set(key, {
+      entity: {
+        id,
+        name,
+        displayName: name,
+        aliases: Array.from(aliasSet),
+        detectedCount: 1,
+      },
+      aliases: aliasSet,
+    });
+  });
+
+  return Array.from(detected.values())
+    .map(({ entity, aliases }) => ({
+      ...entity,
+      aliases: Array.from(aliases),
+    }))
+    .sort((a, b) => {
+      if (a.detectedCount !== b.detectedCount) {
+        return b.detectedCount - a.detectedCount;
+      }
+      const aLabel = a.displayName ?? a.name ?? a.id;
+      const bLabel = b.displayName ?? b.name ?? b.id;
+      return aLabel.localeCompare(bLabel, undefined, { sensitivity: 'base' });
+    });
+};
+
 interface ImportFormProps {
   onImport: (
     uploads: TrialBalanceRow[],
@@ -342,10 +411,62 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     return `Previewing first sheet. ${selectedSheets.length} sheets selected with ${totalRows.toLocaleString()} total rows.`;
   }, [uploads, selectedSheets, previewSampleCount]);
 
-  const entityOptions = useMemo(() => {
+  const clientEntityOptions = useMemo(() => {
     if (!clientId) return [];
     return entitiesByClient[clientId] ?? [];
   }, [clientId, entitiesByClient]);
+
+  const detectedEntityOptions = useMemo(
+    () => (headerMap?.['Entity'] ? extractEntitiesFromRows(combinedRows) : []),
+    [combinedRows, headerMap],
+  );
+
+  const availableEntityOptions = useMemo(() => {
+    const merged = new Map<string, { entity: ClientEntity; detectedCount: number }>();
+
+    const upsert = (candidate: ClientEntity, detectedCount = 0) => {
+      const normalizedId = candidate.id?.trim();
+      if (!normalizedId) {
+        return;
+      }
+      const key = normalizedId.toLowerCase();
+      const existing = merged.get(key);
+      const aliases = new Set<string>([
+        ...(existing?.entity.aliases ?? []),
+        ...(candidate.aliases ?? []),
+      ]);
+      [candidate.name, candidate.displayName, candidate.entityName].forEach((alias) => {
+        if (alias) {
+          aliases.add(alias);
+        }
+      });
+      const resolvedName = candidate.displayName ?? candidate.name ?? existing?.entity.name ?? normalizedId;
+      merged.set(key, {
+        detectedCount: Math.max(existing?.detectedCount ?? 0, detectedCount),
+        entity: {
+          ...candidate,
+          id: normalizedId,
+          name: resolvedName ?? normalizedId,
+          displayName: candidate.displayName ?? resolvedName ?? normalizedId,
+          aliases: Array.from(aliases),
+        },
+      });
+    };
+
+    detectedEntityOptions.forEach((entity) => upsert(entity, entity.detectedCount ?? 0));
+    clientEntityOptions.forEach((entity) => upsert(entity));
+
+    return Array.from(merged.values())
+      .sort((a, b) => {
+        if (a.detectedCount !== b.detectedCount) {
+          return b.detectedCount - a.detectedCount;
+        }
+        const aLabel = a.entity.displayName ?? a.entity.name ?? a.entity.id;
+        const bLabel = b.entity.displayName ?? b.entity.name ?? b.entity.id;
+        return aLabel.localeCompare(bLabel, undefined, { sensitivity: 'base' });
+      })
+      .map(({ entity }) => entity);
+  }, [clientEntityOptions, detectedEntityOptions]);
 
   const resolvedAssignments = useMemo(
     () => ensureAssignmentCount(requiredEntityCount, entityAssignments),
@@ -361,7 +482,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
         return acc;
       }
 
-      const knownEntity = entityOptions.find((entity) => entity.id === trimmedId);
+      const knownEntity = availableEntityOptions.find((entity) => entity.id === trimmedId);
       const hydrated: ClientEntity =
         knownEntity ?? {
           id: trimmedId,
@@ -374,7 +495,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       acc.push(hydrated);
       return acc;
     }, []);
-  }, [entityOptions, resolvedAssignments]);
+  }, [availableEntityOptions, resolvedAssignments]);
 
   const isEntitySelectionComplete = useMemo(() => {
     if (requiredEntityCount === 0) {
@@ -414,7 +535,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [combinedRows, resolvedAssignments, rowEntitySlots]);
 
   const entityAssignmentNeedsCustom =
-    requiredEntityCount > 0 && entityOptions.length < requiredEntityCount;
+    requiredEntityCount > 0 && availableEntityOptions.length < requiredEntityCount;
 
   useEffect(() => {
     if (clientId) {
@@ -480,7 +601,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
     const nextAssignments = hasManualEntitySelection
       ? ensureAssignmentCount(requiredEntityCount, entityAssignments)
-      : prepareEntityAssignments(requiredEntityCount, entityOptions, entityAssignments);
+      : prepareEntityAssignments(requiredEntityCount, availableEntityOptions, entityAssignments);
 
     const hasChanged =
       nextAssignments.length !== entityAssignments.length ||
@@ -500,7 +621,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     }
   }, [
     entityAssignments,
-    entityOptions,
+    availableEntityOptions,
     hasManualEntitySelection,
     requiredEntityCount,
   ]);
@@ -508,7 +629,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   useEffect(() => {
     if (
       hasManualEntitySelection ||
-      entityOptions.length === 0 ||
+      availableEntityOptions.length === 0 ||
       uploads.length === 0 ||
       requiredEntityCount === 0
     ) {
@@ -518,7 +639,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     const detected = detectLikelyEntities({
       uploads,
       selectedSheetIndexes: selectedSheets,
-      entities: entityOptions,
+      entities: availableEntityOptions,
       combinedRows,
       fileName: selectedFile?.name,
     }).slice(0, requiredEntityCount);
@@ -528,14 +649,18 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     }
 
     setEntityAssignments((prev) => {
-      const hydrated = prepareEntityAssignments(requiredEntityCount, entityOptions, prev);
+      const hydrated = prepareEntityAssignments(
+        requiredEntityCount,
+        availableEntityOptions,
+        prev,
+      );
 
       return hydrated.map((assignment, idx) => {
         const detectedId = detected[idx];
         if (!detectedId) {
           return assignment;
         }
-        const matched = entityOptions.find((entity) => entity.id === detectedId);
+        const matched = availableEntityOptions.find((entity) => entity.id === detectedId);
         if (!matched) {
           return assignment;
         }
@@ -550,7 +675,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     });
   }, [
     combinedRows,
-    entityOptions,
+    availableEntityOptions,
     hasManualEntitySelection,
     requiredEntityCount,
     selectedFile?.name,
@@ -647,7 +772,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
           };
         }
 
-        const matched = entityOptions.find((entity) => entity.id === value) ?? null;
+        const matched = availableEntityOptions.find((entity) => entity.id === value) ?? null;
         return {
           slot: assignment.slot,
           entityId: matched?.id ?? value,
@@ -1046,6 +1171,15 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                   const summary = entitySlotSummaries.find((slot) => slot.slot === assignment.slot);
                   const glMonthSummary = summary?.glMonths.join(', ') || 'Unspecified month';
                   const accountSummary = summary?.accountIds.join(', ') || 'Multiple accounts';
+                  const usedEntityIds = new Set(
+                    resolvedAssignments
+                      .filter((other) => other.slot !== assignment.slot)
+                      .map((other) => other.entityId.trim())
+                      .filter(Boolean),
+                  );
+                  const selectableEntities = availableEntityOptions.filter(
+                    (entity) => !usedEntityIds.has(entity.id),
+                  );
 
                   return (
                     <div
@@ -1076,7 +1210,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                           selectClassName="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:ring-blue-400/60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                         >
                           <option value="">Select an entity</option>
-                          {entityOptions.map((entity) => (
+                          {selectableEntities.map((entity) => (
                             <option key={entity.id} value={entity.id}>
                               {normalizeEntityLabel(entity)}
                             </option>
@@ -1195,6 +1329,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 export {
   normalizeGlMonth,
   extractGlMonthsFromRows,
+  extractEntitiesFromRows,
   filterRowsByGlMonth,
   inferEntitySlotsFromRows,
   prepareEntityAssignments,

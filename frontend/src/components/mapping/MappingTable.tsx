@@ -209,9 +209,20 @@ export default function MappingTable() {
     }
     return availablePeriods[availablePeriods.length - 1] ?? null;
   }, [availablePeriods]);
-  const latestPeriodLabel = latestPeriod
-    ? formatPeriodDate(latestPeriod) || latestPeriod
-    : null;
+  const normalizedLatestPeriod = latestPeriod?.trim() ?? null;
+  const getGlMonthLabel = (period?: string | null) => {
+    const formatted = formatPeriodDate(period);
+    if (formatted) {
+      return formatted;
+    }
+    if (period) {
+      const trimmed = period.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return 'Unspecified GL month';
+  };
 
   const splitIssueIds = useMemo(
     () => new Set(splitValidationIssues.map((issue) => issue.accountId)),
@@ -435,7 +446,7 @@ export default function MappingTable() {
     return sortConfig.direction === 'asc' ? 'ascending' : 'descending';
   };
 
-  let hasRenderedPriorPeriodDivider = false;
+  const renderedPriorPeriods = new Set<string>();
 
   return (
     <div className="space-y-4">
@@ -481,11 +492,15 @@ export default function MappingTable() {
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
             {sortedAccounts.map((account, index) => {
-              const isPriorPeriod = latestPeriod !== null && account.glMonth !== latestPeriod;
-              const shouldRenderDivider = isPriorPeriod && !hasRenderedPriorPeriodDivider;
+              const normalizedAccountPeriod = account.glMonth?.trim() ?? null;
+              const periodKey = normalizedAccountPeriod ?? 'unspecified';
+              const isPriorPeriod =
+                normalizedLatestPeriod !== null && periodKey !== normalizedLatestPeriod;
+              const shouldRenderDivider =
+                isPriorPeriod && !renderedPriorPeriods.has(periodKey);
 
               if (shouldRenderDivider) {
-                hasRenderedPriorPeriodDivider = true;
+                renderedPriorPeriods.add(periodKey);
               }
 
               const isSelected = selectedIds.has(account.id);
@@ -540,8 +555,7 @@ export default function MappingTable() {
                         className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-200"
                         colSpan={12}
                       >
-                        Earlier GL months
-                        {latestPeriodLabel ? ` (before ${latestPeriodLabel})` : ''}
+                        Records from GL month {getGlMonthLabel(normalizedAccountPeriod)}
                       </td>
                     </tr>
                   )}

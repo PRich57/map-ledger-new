@@ -31,6 +31,7 @@ jest.mock('../utils/clientHeaderMappings', () => ({
 import ImportForm, {
   filterRowsByGlMonth,
   inferEntitySlotsFromRows,
+  extractEntitiesFromRows,
   prepareEntityAssignments,
 } from '../components/import/ImportForm';
 import type { ClientEntity, TrialBalanceRow } from '../types';
@@ -92,6 +93,40 @@ describe('entity slot inference', () => {
     expect(result.requiredEntities).toBe(3);
     expect(result.rowSlots).toEqual([1, 2, 1, 2, 3]);
     expect(result.slotSummaries.find((summary) => summary.slot === 3)?.glMonths).toContain('2024-02-01');
+  });
+});
+
+describe('extractEntitiesFromRows', () => {
+  it('collects unique entities from mapped data', () => {
+    const rows: TrialBalanceRow[] = [
+      {
+        accountId: '1000',
+        description: 'Jan A',
+        netChange: 10,
+        entity: 'Alpha Logistics',
+        entityId: 'alpha-1',
+      },
+      {
+        accountId: '2000',
+        description: 'Feb A',
+        netChange: 20,
+        entity: 'alpha logistics',
+        entityId: 'alpha-1',
+      },
+      {
+        accountId: '3000',
+        description: 'Mar A',
+        netChange: 30,
+        entity: 'Beta Freight',
+        entityId: 'beta-2',
+      },
+    ];
+
+    const detected = extractEntitiesFromRows(rows);
+
+    expect(detected).toHaveLength(2);
+    expect(detected.find((entity) => entity.id === 'alpha-1')?.detectedCount).toBe(2);
+    expect(detected.find((entity) => entity.id === 'beta-2')?.name).toBe('Beta Freight');
   });
 });
 
