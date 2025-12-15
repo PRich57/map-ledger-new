@@ -317,7 +317,7 @@ const mapDistributionPayloadToLibraryEntry = (
     (payload.presetDetails ?? [])
       .map(detail => ({
         targetDatapoint: detail.operationCd?.trim() ?? '',
-        basisDatapoint: payload.scoaAccountId?.trim() ?? null,
+        basisDatapoint: detail.basisDatapoint?.trim() ?? null,
         isCalculated: detail.isCalculated ?? null,
         specifiedPct: detail.specifiedPct ?? null,
       }))
@@ -573,6 +573,13 @@ const buildDistributionPresetLibraryEntries = (
 
     const targetRow = rows.find(row => row.id === editingRowId);
     if (!targetRow || targetRow.type === 'direct') {
+      lastSyncedOperationsRef.current = null;
+      return;
+    }
+
+    // Dynamic rows manage operations via the preset builder/ratio store, not the inline draft state,
+    // so avoid overwriting those values with an empty operationsDraft.
+    if (targetRow.type === 'dynamic') {
       lastSyncedOperationsRef.current = null;
       return;
     }

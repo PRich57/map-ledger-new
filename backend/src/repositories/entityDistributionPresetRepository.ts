@@ -35,6 +35,51 @@ const normalizeText = (value?: string | null): string | null => {
 const normalizePresetGuid = (value?: string | null): string | null =>
   normalizeText(value);
 
+const findEntityDistributionPresetByAccount = async (
+  entityId: string,
+  scoaAccountId: string
+): Promise<EntityDistributionPresetRow | null> => {
+  const normalizedEntityId = normalizeText(entityId);
+  const normalizedScoaAccountId = normalizeText(scoaAccountId);
+
+  if (!normalizedEntityId || !normalizedScoaAccountId) {
+    return null;
+  }
+
+  const result = await runQuery<{
+    preset_guid: string;
+    entity_id: string;
+    preset_type: string;
+    preset_description?: string | null;
+    scoa_account_id: string;
+    metric?: string | null;
+    inserted_dttm?: Date | string | null;
+    updated_dttm?: Date | string | null;
+    updated_by?: string | null;
+  }>(
+    `SELECT TOP 1
+      PRESET_GUID as preset_guid,
+      ENTITY_ID as entity_id,
+      PRESET_TYPE as preset_type,
+      PRESET_DESCRIPTION as preset_description,
+      SCOA_ACCOUNT_ID as scoa_account_id,
+      METRIC as metric,
+      INSERTED_DTTM as inserted_dttm,
+      UPDATED_DTTM as updated_dttm,
+      UPDATED_BY as updated_by
+    FROM ${TABLE_NAME}
+    WHERE ENTITY_ID = @entityId AND SCOA_ACCOUNT_ID = @scoaAccountId
+    ORDER BY INSERTED_DTTM DESC`,
+    {
+      entityId: normalizedEntityId,
+      scoaAccountId: normalizedScoaAccountId,
+    }
+  );
+
+  const row = result.recordset?.[0];
+  return row ? mapBaseRow(row) : null;
+};
+
 const normalizePresetTypeValue = (value?: string | null): string => {
   const normalized = normalizeText(value);
   if (!normalized) {
@@ -174,10 +219,28 @@ export const createEntityDistributionPreset = async (
     return null;
   }
 
+  const entityId = normalizeText(input.entityId);
+  const scoaAccountId = normalizeText(input.scoaAccountId);
+  if (!entityId || !scoaAccountId) {
+    return null;
+  }
+
   const presetGuid = normalizePresetGuid(input.presetGuid);
   const presetDescription = normalizeText(input.presetDescription);
-  const scoaAccountId = normalizeText(input.scoaAccountId);
   const metric = normalizeText(input.metric);
+
+  const existingPreset = await findEntityDistributionPresetByAccount(entityId, scoaAccountId);
+  if (existingPreset) {
+    const updated = await updateEntityDistributionPreset(existingPreset.presetGuid, {
+      presetType: input.presetType,
+      presetDescription,
+      scoaAccountId,
+      metric,
+      updatedBy: null,
+    });
+
+    return updated ?? existingPreset;
+  }
 
   const columns = [
     'ENTITY_ID',
@@ -221,7 +284,7 @@ export const createEntityDistributionPreset = async (
       ${values.join(',\n      ')}
     )`,
     {
-      entityId: input.entityId,
+      entityId,
       presetType: input.presetType,
       presetDescription,
       scoaAccountId,

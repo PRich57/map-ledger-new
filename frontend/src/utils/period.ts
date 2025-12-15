@@ -89,6 +89,17 @@ export const formatPeriodDate = (value?: string | null): string => {
     return formatToYearMonthDay(parsed);
   }
 
+  const fallbackMatch = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/.exec(trimmed);
+  if (fallbackMatch) {
+    const [, yearPart, monthPart, dayPart] = fallbackMatch;
+    const year = Number(yearPart);
+    const monthIndex = Number(monthPart) - 1;
+    const day = dayPart ? Number(dayPart) : 1;
+    if (!Number.isNaN(year) && !Number.isNaN(monthIndex) && !Number.isNaN(day)) {
+      return formatToYearMonthDay(new Date(year, monthIndex, day));
+    }
+  }
+
   const [primary] = trimmed.split('T');
   if (primary) {
     return primary.length >= 10 ? primary.slice(0, 10) : primary;

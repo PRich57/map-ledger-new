@@ -4,6 +4,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 export interface DistributionPresetDetailPayload {
   operationCd: string;
+  basisDatapoint?: string | null;
   isCalculated?: boolean | null;
   specifiedPct?: number | null;
 }
@@ -66,12 +67,13 @@ const buildPresetRow = (
   detail: DistributionPresetDetailPayload,
 ): DynamicAllocationPresetRow | null => {
   const operationCd = normalizeOperationCode(detail.operationCd);
-  const accountId = preset.scoaAccountId?.trim() ?? '';
-  if (!operationCd || !accountId) {
+  const basisDatapoint = detail.basisDatapoint?.trim() ?? null;
+  const sourceAccountId = basisDatapoint ?? preset.scoaAccountId?.trim() ?? '';
+  if (!operationCd || !sourceAccountId) {
     return null;
   }
   return {
-    dynamicAccountId: accountId,
+    dynamicAccountId: sourceAccountId,
     targetAccountId: operationCd,
   };
 };

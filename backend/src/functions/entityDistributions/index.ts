@@ -280,9 +280,12 @@ const ensurePreset = async (
   updatedBy: string | null,
 ): Promise<{ created: boolean; preset: EntityDistributionPresetWithDetailsRow }> => {
   const cacheKey = normalizePresetKey(entityId, scoaAccountId);
-  presetLookup.set(cacheKey, presetGuid);
+  const cachedPresetGuid = presetLookup.get(cacheKey);
+  const targetPresetGuid = cachedPresetGuid ?? presetGuid;
 
-  const existingPreset = presetMetadata.get(presetGuid);
+  const existingPreset =
+    (targetPresetGuid ? presetMetadata.get(targetPresetGuid) : undefined) ??
+    (presetGuid && presetGuid !== targetPresetGuid ? presetMetadata.get(presetGuid) : undefined);
 
   if (existingPreset) {
     const currentPresetType = normalizeDistributionType(existingPreset.presetType);
@@ -293,7 +296,7 @@ const ensurePreset = async (
     const needsScoaAccountUpdate = existingPreset.scoaAccountId !== scoaAccountId;
 
     if (needsTypeRepair || needsTypeUpdate || needsDescriptionRepair || needsScoaAccountUpdate) {
-      const updatedPreset = await updateEntityDistributionPreset(presetGuid, {
+      const updatedPreset = await updateEntityDistributionPreset(existingPreset.presetGuid, {
         presetType: needsTypeRepair || needsTypeUpdate ? distributionType : undefined,
         presetDescription: needsDescriptionRepair ? presetDescription : undefined,
         scoaAccountId: needsScoaAccountUpdate ? scoaAccountId : undefined,
@@ -305,11 +308,13 @@ const ensurePreset = async (
           ...updatedPreset,
           presetDetails: existingPreset.presetDetails ?? [],
         };
-        presetMetadata.set(presetGuid, updatedWithDetails);
+        presetMetadata.set(updatedWithDetails.presetGuid, updatedWithDetails);
+        presetLookup.set(cacheKey, updatedWithDetails.presetGuid);
         return { created: false, preset: updatedWithDetails };
       }
     }
 
+    presetLookup.set(cacheKey, existingPreset.presetGuid);
     return { created: false, preset: existingPreset };
   }
 
@@ -319,7 +324,7 @@ const ensurePreset = async (
     presetDescription,
     scoaAccountId,
     metric: null,
-    presetGuid,
+    presetGuid: targetPresetGuid,
   };
 
   const created = await createEntityDistributionPreset(presetInput);
@@ -331,7 +336,8 @@ const ensurePreset = async (
     ...created,
     presetDetails: [],
   };
-  presetMetadata.set(presetGuid, newPreset);
+  presetLookup.set(cacheKey, created.presetGuid);
+  presetMetadata.set(created.presetGuid, newPreset);
 
   return { created: true, preset: newPreset };
 };
@@ -467,10 +473,11 @@ const saveHandler = async (
         const existingDistribution = distributionLookup.get(key);
 
         // Resolve preset GUID: use provided GUID, fallback to existing account's GUID, or generate new
+        const requestedPresetGuid = normalizeText(row.presetGuid);
         const existingPresetGuidForAccount = presetLookup.get(key);
         const resolvedPresetGuid =
-          normalizeText(row.presetGuid) ??
           existingPresetGuidForAccount ??
+          requestedPresetGuid ??
           crypto.randomUUID();
 
         // Look up existing preset by GUID (not by account key)
@@ -478,7 +485,7 @@ const saveHandler = async (
 
         const presetDescription = row.presetDescription ?? normalizedScoa;
 
-        const detailInputs = buildDetailInputs(
+        let detailInputs = buildDetailInputs(
           row.operations,
           resolvedPresetGuid,
           normalizedType,
@@ -493,11 +500,6 @@ const saveHandler = async (
         const normalizedExistingDistributionType = normalizeDistributionType(
           existingDistribution?.distributionType,
         );
-        const distributionChanged =
-          normalizedExistingDistributionType !== normalizedType ||
-          normalizeDistributionStatus(existingDistribution?.distributionStatus) !==
-            normalizedStatus ||
-          (existingDistribution?.presetGuid ?? null) !== resolvedPresetGuid;
 
         // Use ensurePreset to create or update the preset (like mapping does)
         const { preset: currentPreset } = await ensurePreset(
@@ -511,10 +513,26 @@ const saveHandler = async (
           row.updatedBy ?? null,
         );
 
+        const effectivePresetGuid = currentPreset.presetGuid;
+        if (effectivePresetGuid !== resolvedPresetGuid) {
+          presetLookup.set(key, effectivePresetGuid);
+          presetMetadata.set(effectivePresetGuid, currentPreset);
+          detailInputs = detailInputs.map(detail => ({
+            ...detail,
+            presetGuid: effectivePresetGuid,
+          }));
+        }
+
+        const distributionChanged =
+          normalizedExistingDistributionType !== normalizedType ||
+          normalizeDistributionStatus(existingDistribution?.distributionStatus) !==
+            normalizedStatus ||
+          (existingDistribution?.presetGuid ?? null) !== effectivePresetGuid;
+
         // Sync preset details if they've changed
         if (!detailsUnchanged) {
           await syncPresetDetails(
-            resolvedPresetGuid,
+            effectivePresetGuid,
             detailInputs,
             currentPreset.presetDetails ?? [],
             row.updatedBy ?? null,
@@ -542,7 +560,7 @@ const saveHandler = async (
               normalizedScoa,
               normalizedType,
               {
-                presetGuid: resolvedPresetGuid,
+                presetGuid: effectivePresetGuid,
                 distributionStatus: normalizedStatus,
                 updatedBy: row.updatedBy ?? null,
               },
@@ -556,7 +574,7 @@ const saveHandler = async (
               entityId,
               scoaAccountId: normalizedScoa,
               distributionType: normalizedType,
-              presetGuid: resolvedPresetGuid,
+              presetGuid: effectivePresetGuid,
               distributionStatus: normalizedStatus,
               updatedBy: row.updatedBy ?? null,
             };
@@ -580,7 +598,7 @@ const saveHandler = async (
 
         savedItems.push({
           scoaAccountId: normalizedScoa,
-          presetGuid: resolvedPresetGuid,
+          presetGuid: effectivePresetGuid,
           distributionType: normalizedType,
           distributionStatus: normalizedStatus,
         });

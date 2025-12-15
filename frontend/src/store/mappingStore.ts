@@ -1376,6 +1376,8 @@ interface MappingState {
     entityIds?: string[],
   ) => Promise<void>;
   saveMappings: (accountIds?: string[]) => Promise<number>;
+  queueAutoSave: (ids: string[], options?: { immediate?: boolean }) => void;
+  flushAutoSaveQueue: (options?: { immediate?: boolean }) => Promise<void>;
   loadImportedAccounts: (payload: {
     uploadId: string;
     clientId?: string | number | null;
@@ -2773,10 +2775,10 @@ export const useMappingStore = create<MappingState>((set, get) => {
       return 0;
     }
   },
-  queueAutoSave: (ids, options) => {
+  queueAutoSave: (ids: string[], options?: { immediate?: boolean }) => {
     queueRowsForAutoSave(ids, options);
   },
-  flushAutoSaveQueue: async options => {
+  flushAutoSaveQueue: async (options?: { immediate?: boolean }) => {
     await flushAutoSaveQueue(options);
   },
   loadImportedAccounts: async ({
@@ -3220,6 +3222,22 @@ const getSplitValidationIssues = (accounts: GLAccountMappingRow[]) => {
   return issues;
 };
 
+const isAccountResolvedForSummary = (account: GLAccountMappingRow): boolean => {
+  const derivedStatus = deriveMappingStatus(account);
+  if (derivedStatus === 'Mapped' || derivedStatus === 'Excluded') {
+    return true;
+  }
+
+  if (account.mappingType === 'direct') {
+    const hasManualTarget = typeof account.manualCOAId === 'string' && account.manualCOAId.trim().length > 0;
+    const hasSuggestedTarget =
+      typeof account.suggestedCOAId === 'string' && account.suggestedCOAId.trim().length > 0;
+    return hasManualTarget || hasSuggestedTarget;
+  }
+
+  return false;
+};
+
 const selectEntityScopedAccounts = (
   state: MappingState,
 ): GLAccountMappingRow[] => getAccountsForEntity(state.accounts, state.activeEntityId);
@@ -3231,9 +3249,7 @@ export const selectTotalAccounts = (state: MappingState): number =>
   selectEntityScopedAccounts(state).length;
 
 export const selectMappedAccounts = (state: MappingState): number =>
-  selectEntityScopedAccounts(state).filter(
-    account => account.manualCOAId || account.suggestedCOAId,
-  ).length;
+  selectEntityScopedAccounts(state).filter(isAccountResolvedForSummary).length;
 
 export const selectGrossTotal = (state: MappingState): number =>
   calculateGrossTotal(selectEntityScopedAccounts(state));
@@ -3260,7 +3276,7 @@ export const selectSummaryMetrics = (state: MappingState): SummarySelector => {
   const excludedTotal = calculateExcludedTotal(scopedAccounts);
   return {
     totalAccounts: scopedAccounts.length,
-    mappedAccounts: scopedAccounts.filter(account => account.manualCOAId || account.suggestedCOAId).length,
+    mappedAccounts: scopedAccounts.filter(isAccountResolvedForSummary).length,
     grossTotal,
     excludedTotal,
     netTotal: grossTotal - excludedTotal,

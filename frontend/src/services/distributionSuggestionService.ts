@@ -13,6 +13,7 @@ type DistributionSuggestionApiOperation = {
   code?: string;
   name?: string;
   allocation?: number | null;
+  basisDatapoint?: string | null;
 };
 
 type DistributionSuggestionApiRow = {
@@ -59,11 +60,13 @@ const sanitizeOperation = (
       ? Math.max(0, Math.min(100, operation.allocation))
       : undefined;
   const name = operation.name?.trim() || id;
+  const basisDatapoint = operation.basisDatapoint?.trim();
   return {
     id,
     code: operation.code?.trim() || id,
     name,
     allocation,
+    basisDatapoint: basisDatapoint && basisDatapoint.length > 0 ? basisDatapoint : undefined,
   };
 };
 

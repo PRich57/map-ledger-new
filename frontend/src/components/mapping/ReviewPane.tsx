@@ -6,7 +6,13 @@ import {
   type DistributionOperationCatalogItem,
   useDistributionStore,
 } from '../../store/distributionStore';
-import type { DistributionOperationShare, DistributionRow, GLAccountMappingRow } from '../../types';
+import { findChartOfAccountOption } from '../../store/chartOfAccountsStore';
+import type {
+  DistributionOperationShare,
+  DistributionRow,
+  GLAccountEntityBreakdown,
+  GLAccountMappingRow,
+} from '../../types';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { useOrganizationStore } from '../../store/organizationStore';
 import { useClientStore } from '../../store/clientStore';
@@ -41,7 +47,11 @@ const formatDistributionTypeLabel = (value: DistributionRow['type']) => {
 
 const formatAllocationShare = (row: DistributionRow, share: DistributionOperationShare) => {
   if (typeof share.allocation === 'number') {
-    return `${share.allocation}%`;
+    const formattedAllocation = share.allocation.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+    return `${formattedAllocation}%`;
   }
   if (row.type === 'direct') {
     return '100%';
@@ -73,6 +83,165 @@ interface EntitySourceGroup {
     amount: number;
   }[];
 }
+
+const normalizeScoaKey = (value?: string | null): string | null => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const match = findChartOfAccountOption(trimmed);
+  return match?.id ?? trimmed;
+};
+
+const resolveEntityBreakdowns = (account: GLAccountMappingRow): GLAccountEntityBreakdown[] => {
+  if (account.entities && account.entities.length > 0) {
+    return account.entities;
+  }
+
+  const fallbackId = account.entityId?.trim() || account.id;
+  const fallbackName = account.entityName?.trim() || account.entityId?.trim() || 'Unknown Entity';
+  return [
+    {
+      id: fallbackId,
+      entity: fallbackName,
+      balance: account.netChange,
+    },
+  ];
+};
+
+const getSplitSignedAmount = (
+  account: GLAccountMappingRow,
+  split: { allocationType: string; allocationValue: number },
+): number => {
+  if (account.netChange === 0) {
+    return 0;
+  }
+
+  if (split.allocationType === 'amount') {
+    const absolute = Math.max(0, Math.abs(split.allocationValue ?? 0));
+    const capped = Math.min(absolute, Math.abs(account.netChange));
+    return account.netChange >= 0 ? capped : -capped;
+  }
+
+  const percentage = Math.max(0, split.allocationValue ?? 0);
+  const base = Math.abs(account.netChange);
+  const rawAmount = (base * percentage) / 100;
+  return account.netChange >= 0 ? rawAmount : -rawAmount;
+};
+
+const buildEntityContributionsByScoa = (accounts: GLAccountMappingRow[]): Map<string, EntitySourceGroup[]> => {
+  const accumulator = new Map<string, Map<string, EntitySourceGroup>>();
+
+  const addContribution = (
+    scoaKey: string,
+    entityId: string,
+    entityName: string,
+    accountId: string,
+    accountName: string,
+    amount: number,
+  ) => {
+    const existingEntities = accumulator.get(scoaKey) ?? new Map<string, EntitySourceGroup>();
+    const current = existingEntities.get(entityId) ?? {
+      entityId,
+      entityName,
+      total: 0,
+      sources: [],
+    };
+
+    const nextSources = [...current.sources, { accountId, accountName, amount }];
+    existingEntities.set(entityId, {
+      ...current,
+      total: current.total + amount,
+      sources: nextSources,
+    });
+    accumulator.set(scoaKey, existingEntities);
+  };
+
+  const distributeAmountToEntities = (scoaKey: string | null, account: GLAccountMappingRow, amount: number) => {
+    if (!scoaKey || !Number.isFinite(amount) || amount === 0) {
+      return;
+    }
+
+    const breakdowns = resolveEntityBreakdowns(account);
+    if (breakdowns.length === 0) {
+      return;
+    }
+
+    const magnitude = Math.abs(amount);
+    const sign = amount >= 0 ? 1 : -1;
+    const balanceTotal = breakdowns.reduce((sum, breakdown) => sum + Math.abs(breakdown.balance), 0);
+    const proportionalBasis = balanceTotal || Math.abs(account.netChange) || magnitude;
+    const fallbackProportion = breakdowns.length > 0 ? 1 / breakdowns.length : 1;
+
+    breakdowns.forEach(breakdown => {
+      const weight =
+        proportionalBasis > 0 ? Math.abs(breakdown.balance) / proportionalBasis : fallbackProportion;
+      const entityAmount = sign * magnitude * weight;
+      const entityId = breakdown.id?.toString().trim() || account.entityId?.trim() || 'unknown-entity';
+      const entityName =
+        breakdown.entity?.trim() ||
+        account.entityName?.trim() ||
+        account.entityId?.trim() ||
+        breakdown.id?.toString().trim() ||
+        'Unknown Entity';
+
+      addContribution(scoaKey, entityId, entityName, account.accountId, account.accountName, entityAmount);
+    });
+  };
+
+  accounts.forEach(account => {
+    if (account.mappingType === 'direct') {
+      if (account.status !== 'Mapped') {
+        return;
+      }
+      const targetKey = normalizeScoaKey(account.manualCOAId ?? account.suggestedCOAId);
+      if (!targetKey) {
+        return;
+      }
+      distributeAmountToEntities(targetKey, account, account.netChange);
+      return;
+    }
+
+    if (account.mappingType === 'percentage') {
+      account.splitDefinitions.forEach(split => {
+        if (split.isExclusion) {
+          return;
+        }
+        const targetKey = normalizeScoaKey(split.targetId);
+        if (!targetKey) {
+          return;
+        }
+        const amount = getSplitSignedAmount(account, split);
+        distributeAmountToEntities(targetKey, account, amount);
+      });
+      return;
+    }
+
+    if (account.mappingType === 'dynamic') {
+      const targetKey = normalizeScoaKey(account.manualCOAId ?? account.suggestedCOAId);
+      if (!targetKey) {
+        return;
+      }
+      const baseAmount = Math.abs(account.netChange);
+      const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
+      const allocatable = Math.max(0, baseAmount - excluded);
+      const signedAmount = account.netChange >= 0 ? allocatable : -allocatable;
+      distributeAmountToEntities(targetKey, account, signedAmount);
+    }
+  });
+
+  const normalized = new Map<string, EntitySourceGroup[]>();
+  accumulator.forEach((entityMap, scoaKey) => {
+    normalized.set(
+      scoaKey,
+      Array.from(entityMap.values()).map(entity => ({
+        ...entity,
+        sources: [...entity.sources],
+      })),
+    );
+  });
+  return normalized;
+};
 
 const ToggleIcon = ({ isOpen }: { isOpen: boolean }) =>
   isOpen ? (
@@ -156,38 +325,122 @@ const ReviewPane = () => {
     return lookup;
   }, [accounts]);
 
-  // Build entity source groups for a given distribution row
-  const getEntitySourceGroups = (row: DistributionRow): EntitySourceGroup[] => {
+  const entityContributionsByScoa = useMemo(
+    () => buildEntityContributionsByScoa(accounts),
+    [accounts],
+  );
+
+  // Build entity source groups for a given distribution row, scaled to the allocated activity
+  const getEntitySourceGroups = (row: DistributionRow, allocatedAmount: number): EntitySourceGroup[] => {
+    const normalizedKeys = [normalizeScoaKey(row.mappingRowId), normalizeScoaKey(row.accountId)].filter(
+      (key): key is string => Boolean(key),
+    );
+
+    const contributionGroups =
+      normalizedKeys
+        .map(key => entityContributionsByScoa.get(key))
+        .find(groups => groups && groups.length > 0) ?? null;
+
+    if (contributionGroups && contributionGroups.length > 0) {
+      const totalMagnitude = contributionGroups.reduce(
+        (sum, group) => sum + Math.abs(group.total),
+        0,
+      );
+      const shareMagnitude = Math.abs(allocatedAmount);
+      const shareSign = allocatedAmount >= 0 ? 1 : -1;
+      const entityFallbackWeight = contributionGroups.length > 0 ? 1 / contributionGroups.length : 1;
+
+      return contributionGroups.map(group => {
+        const entityWeight =
+          totalMagnitude > 0 ? Math.abs(group.total) / totalMagnitude : entityFallbackWeight;
+        const entityAmount = shareSign * shareMagnitude * entityWeight;
+        const entityMagnitude = Math.abs(entityAmount);
+        const sourceTotalMagnitude = group.sources.reduce(
+          (sum, source) => sum + Math.abs(source.amount),
+          0,
+        );
+        const sourceFallbackWeight = group.sources.length > 0 ? 1 / group.sources.length : 1;
+        const entitySign = entityAmount >= 0 ? 1 : -1;
+
+        return {
+          entityId: group.entityId,
+          entityName: group.entityName,
+          total: entityAmount,
+          sources: group.sources.map(source => {
+            const weight =
+              sourceTotalMagnitude > 0
+                ? Math.abs(source.amount) / sourceTotalMagnitude
+                : sourceFallbackWeight;
+            return {
+              accountId: source.accountId,
+              accountName: source.accountName,
+              amount: entitySign * entityMagnitude * weight,
+            };
+          }),
+        };
+      });
+    }
+
     const mappingRow = mappingRowLookup.get(row.mappingRowId);
+
+    // If we cannot find the mapping row, show a single bucket with the allocated amount
     if (!mappingRow) {
-      return [];
+      return [
+        {
+          entityId: row.id,
+          entityName: 'Unassigned Entity',
+          total: allocatedAmount,
+          sources: [
+            {
+              accountId: row.accountId,
+              accountName: row.description,
+              amount: allocatedAmount,
+            },
+          ],
+        },
+      ];
     }
 
-    // If the mapping row has entities breakdown, use it
-    if (mappingRow.entities && mappingRow.entities.length > 0) {
-      return mappingRow.entities.map(entityBreakdown => ({
-        entityId: entityBreakdown.id,
-        entityName: entityBreakdown.entity || 'Unknown Entity',
-        total: entityBreakdown.balance,
-        sources: [{
-          accountId: mappingRow.accountId,
-          accountName: mappingRow.accountName,
-          amount: entityBreakdown.balance,
-        }],
-      }));
-    }
+    const entityBreakdowns =
+      mappingRow.entities && mappingRow.entities.length > 0
+        ? mappingRow.entities
+        : [
+            {
+              id: mappingRow.entityId || 'default',
+              entity: mappingRow.entityName || 'Default Entity',
+              balance: mappingRow.netChange,
+            },
+          ];
 
-    // Fallback: use the mapping row's entity info directly
-    return [{
-      entityId: mappingRow.entityId || 'default',
-      entityName: mappingRow.entityName || 'Default Entity',
-      total: mappingRow.netChange,
-      sources: [{
-        accountId: mappingRow.accountId,
-        accountName: mappingRow.accountName,
-        amount: mappingRow.netChange,
-      }],
-    }];
+    const totalBalance = entityBreakdowns.reduce(
+      (sum, breakdown) => sum + Math.abs(breakdown.balance),
+      0,
+    );
+    const proportionalBasis = totalBalance || Math.abs(mappingRow.netChange);
+    const allocatedMagnitude = Math.abs(allocatedAmount);
+    const sign = allocatedAmount >= 0 ? 1 : -1;
+    const fallbackProportion =
+      entityBreakdowns.length > 0 ? 1 / entityBreakdowns.length : 1;
+
+    return entityBreakdowns.map(breakdown => {
+      const weight =
+        proportionalBasis > 0
+          ? Math.abs(breakdown.balance) / proportionalBasis
+          : fallbackProportion;
+      const entityAmount = sign * allocatedMagnitude * weight;
+      return {
+        entityId: breakdown.id,
+        entityName: breakdown.entity || mappingRow.entityName || 'Unknown Entity',
+        total: entityAmount,
+        sources: [
+          {
+            accountId: mappingRow.accountId,
+            accountName: mappingRow.accountName,
+            amount: entityAmount,
+          },
+        ],
+      };
+    });
   };
 
   const toggleRowExpansion = (rowKey: string) => {
@@ -544,8 +797,9 @@ const ReviewPane = () => {
                           entry.items.map(({ row, share }) => {
                             const allocatedAmount = getDistributedActivityForShare(row, share);
                             const rowKey = `${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`;
+                            const rowDetailId = `${rowKey}-details`;
                             const isRowExpanded = expandedRows[rowKey] ?? false;
-                            const entityGroups = getEntitySourceGroups(row);
+                            const entityGroups = getEntitySourceGroups(row, allocatedAmount);
                             const hasEntityData = entityGroups.length > 0;
 
                             return (
@@ -559,8 +813,9 @@ const ReviewPane = () => {
                                         type="button"
                                         onClick={() => toggleRowExpansion(rowKey)}
                                         aria-expanded={isRowExpanded}
+                                        aria-controls={rowDetailId}
                                         aria-label={`${isRowExpanded ? 'Collapse' : 'Expand'} details for ${row.accountId}`}
-                                        className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-slate-200 dark:hover:bg-slate-700"
+                                        className="flex h-6 w-6 items-center justify-center rounded transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-900"
                                       >
                                         <ToggleIcon isOpen={isRowExpanded} />
                                       </button>
@@ -583,78 +838,88 @@ const ReviewPane = () => {
 
                                 {/* Nested accordion: Entity breakdown (Level 1) */}
                                 {isRowExpanded && hasEntityData && (
-                                  <tr>
-                                    <td colSpan={6} className="bg-slate-50/80 px-0 py-0 dark:bg-slate-800/50">
-                                      <div className="ml-10 border-l-2 border-slate-200 pl-4 py-3 dark:border-slate-600">
-                                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-                                          Contributing Entities
-                                        </div>
-                                        <div className="space-y-2">
-                                          {entityGroups.map(entityGroup => {
-                                            const entityKey = `${rowKey}-${entityGroup.entityId}`;
-                                            const isEntityExpanded = expandedEntities[entityKey] ?? false;
+                                  <tr id={rowDetailId}>
+                                    <td colSpan={6} className="bg-slate-50/80 px-0 py-0 dark:bg-slate-800/40">
+                                      <div className="relative px-3 py-3 sm:px-6 sm:py-4">
+                                        <div aria-hidden className="absolute left-4 top-0 h-full w-px bg-slate-200 dark:bg-slate-700" />
+                                        <div className="pl-6 sm:pl-10">
+                                          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                                            Contributing entities
+                                          </div>
+                                          <div className="space-y-3 border-l-2 border-dashed border-slate-200 pl-4 sm:pl-8 dark:border-slate-600">
+                                            {entityGroups.map(entityGroup => {
+                                              const entityKey = `${rowKey}-${entityGroup.entityId}`;
+                                              const entityContentId = `${entityKey}-sources`;
+                                              const isEntityExpanded = expandedEntities[entityKey] ?? false;
 
-                                            return (
-                                              <div
-                                                key={entityKey}
-                                                className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
-                                              >
-                                                {/* Entity header - Level 2 accordion */}
-                                                <button
-                                                  type="button"
-                                                  onClick={() => toggleEntityExpansion(entityKey)}
-                                                  aria-expanded={isEntityExpanded}
-                                                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800"
+                                              return (
+                                                <div
+                                                  key={entityKey}
+                                                  className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
                                                 >
-                                                  <div className="flex items-center gap-2">
-                                                    <ToggleIcon isOpen={isEntityExpanded} />
-                                                    <div>
-                                                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                        {entityGroup.entityName}
-                                                      </p>
-                                                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                        {entityGroup.sources.length} source account{entityGroup.sources.length !== 1 ? 's' : ''}
-                                                      </p>
-                                                    </div>
-                                                  </div>
-                                                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                    {formatCurrencyAmount(entityGroup.total)}
-                                                  </p>
-                                                </button>
-
-                                                {/* Source accounts - Level 3 content */}
-                                                {isEntityExpanded && (
-                                                  <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/50">
-                                                    <div className="ml-6 border-l-2 border-slate-300 pl-4 dark:border-slate-600">
-                                                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">
-                                                        Source Accounts from Import
+                                                  {/* Entity header - Level 2 accordion */}
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => toggleEntityExpansion(entityKey)}
+                                                    aria-expanded={isEntityExpanded}
+                                                    aria-controls={entityContentId}
+                                                    className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:hover:bg-slate-800 dark:focus-visible:ring-offset-slate-900"
+                                                  >
+                                                    <div className="flex items-start gap-3">
+                                                      <span className="mt-0.5 rounded-full bg-slate-100 p-1 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                                        <ToggleIcon isOpen={isEntityExpanded} />
+                                                      </span>
+                                                      <div>
+                                                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                          {entityGroup.entityName}
+                                                        </p>
+                                                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                          {entityGroup.sources.length} original account{entityGroup.sources.length !== 1 ? 's' : ''} mapped to the SCoA
+                                                        </p>
                                                       </div>
-                                                      <ul className="space-y-2">
-                                                        {entityGroup.sources.map((source, sourceIndex) => (
-                                                          <li
-                                                            key={`${entityKey}-source-${sourceIndex}`}
-                                                            className="flex items-start justify-between gap-3 rounded-md bg-white px-3 py-2 shadow-sm dark:bg-slate-900"
-                                                          >
-                                                            <div>
-                                                              <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                                {source.accountId}
-                                                              </p>
-                                                              <p className="text-xs text-slate-500 dark:text-slate-400">
-                                                                {source.accountName}
-                                                              </p>
-                                                            </div>
-                                                            <p className="text-sm font-mono font-semibold text-slate-900 dark:text-white">
-                                                              {formatCurrencyAmount(source.amount)}
-                                                            </p>
-                                                          </li>
-                                                        ))}
-                                                      </ul>
                                                     </div>
-                                                  </div>
-                                                )}
-                                              </div>
-                                            );
-                                          })}
+                                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                      {formatCurrencyAmount(entityGroup.total)}
+                                                    </p>
+                                                  </button>
+
+                                                  {/* Source accounts - Level 3 content */}
+                                                  {isEntityExpanded && (
+                                                    <div
+                                                      id={entityContentId}
+                                                      className="border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/60"
+                                                    >
+                                                      <div className="ml-7 border-l-2 border-slate-300 pl-4 dark:border-slate-600">
+                                                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                                          Original accounts from import
+                                                        </div>
+                                                        <ul className="space-y-2">
+                                                          {entityGroup.sources.map((source, sourceIndex) => (
+                                                            <li
+                                                              key={`${entityKey}-source-${source.accountId}-${sourceIndex}`}
+                                                              className="flex items-start justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                                                            >
+                                                              <div>
+                                                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                                  {source.accountId}
+                                                                </p>
+                                                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                                                  {source.accountName}
+                                                                </p>
+                                                              </div>
+                                                              <p className="text-sm font-mono font-semibold text-slate-900 dark:text-white">
+                                                                {formatCurrencyAmount(source.amount)}
+                                                              </p>
+                                                            </li>
+                                                          ))}
+                                                        </ul>
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
                                         </div>
                                       </div>
                                     </td>

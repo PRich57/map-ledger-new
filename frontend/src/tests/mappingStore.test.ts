@@ -83,6 +83,43 @@ describe('mappingStore selectors', () => {
     );
   });
 
+  it('counts percentage, dynamic, and exclusion mappings toward summary coverage', () => {
+    act(() => {
+      useRatioAllocationStore.setState(state => ({
+        ...state,
+        allocations: [
+          {
+            id: 'alloc-dynamic',
+            name: 'Dynamic mapping',
+            sourceAccount: {
+              id: 'acct-3',
+              number: '6100',
+              description: 'Fuel Expense',
+            },
+            targetDatapoints: [
+              {
+                datapointId: 'dynamic-target',
+                name: 'Dynamic Target',
+                ratioMetric: { id: 'ratio-1', name: 'Basis metric', value: 1 },
+                isExclusion: false,
+              },
+            ],
+            effectiveDate: '2024-01-01',
+            status: 'active',
+          },
+        ],
+      }));
+    });
+
+    const summary = selectSummaryMetrics(useMappingStore.getState());
+    expect(summary).toEqual(
+      expect.objectContaining({
+        totalAccounts: 4,
+        mappedAccounts: 4,
+      }),
+    );
+  });
+
   it('recalculates totals when accounts are excluded', () => {
     act(() => {
       useMappingStore.getState().updateMappingType('acct-2', 'exclude');
