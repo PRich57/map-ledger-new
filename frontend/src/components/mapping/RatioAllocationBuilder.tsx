@@ -150,8 +150,14 @@ const RatioAllocationBuilder = ({
   const computeNewPresetDynamicOptions = useCallback(
     (rowIndex?: number) => {
       const dropdownKey = typeof rowIndex === 'number' ? `basis-${rowIndex}` : null;
+      // Get the source account ID to exclude from basis options (prevents circular reference)
+      const sourceAccountId = selectedAllocation?.sourceAccount.id;
       return basisAccounts
         .filter(account => {
+          // Exclude the source account to prevent circular logic
+          if (sourceAccountId && account.id === sourceAccountId) {
+            return false;
+          }
           const dynamicUsers = newPresetDynamicUsage.get(account.id);
           if (dynamicUsers && dynamicUsers.size > 0) {
             if (!dropdownKey || dynamicUsers.size > 1 || !dynamicUsers.has(dropdownKey)) {
@@ -174,7 +180,7 @@ const RatioAllocationBuilder = ({
         })
         .map(account => ({ id: account.id, value: account.id, label: account.name }));
     },
-    [basisAccounts, newPresetDynamicUsage, newPresetCanonicalUsage],
+    [basisAccounts, newPresetDynamicUsage, newPresetCanonicalUsage, selectedAllocation?.sourceAccount.id],
   );
 
   const computeNewPresetTargetOptions = useCallback(
@@ -365,6 +371,19 @@ const RatioAllocationBuilder = ({
       return basisAccount ? getBasisValue(basisAccount, selectedPeriod) : 0;
     },
     [basisAccounts, selectedPeriod],
+  );
+
+  // Wrapper to filter out source account from existing preset basis options (prevents circular reference)
+  const getFilteredPresetDynamicAccounts = useCallback(
+    (presetId: string, rowIndex?: number) => {
+      const options = getPresetAvailableDynamicAccounts(presetId, rowIndex);
+      const sourceAccountId = selectedAllocation?.sourceAccount.id;
+      if (!sourceAccountId) {
+        return options;
+      }
+      return options.filter(account => account.id !== sourceAccountId);
+    },
+    [getPresetAvailableDynamicAccounts, selectedAllocation?.sourceAccount.id],
   );
 
   const addNewPresetRow = useCallback(() => {
@@ -601,7 +620,7 @@ const RatioAllocationBuilder = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const dynamicOptions = getPresetAvailableDynamicAccounts(preset.id);
+                            const dynamicOptions = getFilteredPresetDynamicAccounts(preset.id);
                             const targetOptions = getPresetTargetOptions(preset.id);
                             if (dynamicOptions.length === 0 || targetOptions.length === 0) {
                               return;
@@ -613,7 +632,7 @@ const RatioAllocationBuilder = ({
                           }}
                           className="inline-flex items-center rounded-md border border-slate-300 bg-white p-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:focus:ring-offset-slate-900"
                           disabled={
-                            getPresetAvailableDynamicAccounts(preset.id).length === 0 ||
+                            getFilteredPresetDynamicAccounts(preset.id).length === 0 ||
                             getPresetTargetOptions(preset.id).length === 0
                           }
                           title="Add row"
@@ -694,7 +713,7 @@ const RatioAllocationBuilder = ({
                           ) : (
                             preset.rows.map((row, index) => {
                               const basisValue = formatCurrency(resolveBasisValue(row.dynamicAccountId));
-                              const dynamicOptions = getPresetAvailableDynamicAccounts(preset.id, index);
+                              const dynamicOptions = getFilteredPresetDynamicAccounts(preset.id, index);
                               const targetOptions = getPresetTargetOptions(preset.id, index);
 
                               return (
