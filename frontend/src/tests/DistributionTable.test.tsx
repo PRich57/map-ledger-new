@@ -1,11 +1,26 @@
 import { act, fireEvent, render, screen, within } from './testUtils';
 import DistributionTable from '../components/mapping/DistributionTable';
-import { useDistributionStore } from '../store/distributionStore';
+import { selectDistributionProgress, useDistributionStore } from '../store/distributionStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import type { DistributionRow, DistributionStatus } from '../types';
 
 const resetDistributionStore = () => {
-  useDistributionStore.setState({ rows: [], searchTerm: '', statusFilters: [] });
+  useDistributionStore.setState({
+    rows: [],
+    operationsCatalog: [],
+    searchTerm: '',
+    statusFilters: [],
+    currentEntityId: null,
+    currentUpdatedBy: null,
+    historyByAccount: {},
+    historyEntityId: null,
+    isAutoSaving: false,
+    autoSaveMessage: null,
+    isSavingDistributions: false,
+    saveError: null,
+    saveSuccess: null,
+    lastSavedCount: 0,
+  });
 };
 
 const resetOrganizationStore = () => {
@@ -212,6 +227,38 @@ describe('DistributionTable', () => {
 
     expect(await screen.findByText('Dynamic allocations')).toBeInTheDocument();
     expect(await screen.findByText('Target operation')).toBeInTheDocument();
+  });
+
+  test('treats zero-activity rows as distributed for completion calculations', () => {
+    resetDistributionStore();
+    act(() => {
+      useDistributionStore.setState(state => ({
+        ...state,
+        rows: [
+          {
+            id: 'row-zero',
+            mappingRowId: 'map-zero',
+            accountId: 'ZERO',
+            description: 'Zero activity row',
+            activity: 0,
+            type: 'direct',
+            operations: [],
+            presetId: null,
+            notes: undefined,
+            status: 'Undistributed',
+            isDirty: false,
+            autoSaveState: 'idle',
+            autoSaveError: null,
+          },
+        ],
+        searchTerm: '',
+        statusFilters: [],
+      }));
+    });
+
+    const progress = selectDistributionProgress(useDistributionStore.getState());
+    expect(progress.distributedRows).toBe(1);
+    expect(progress.isComplete).toBe(true);
   });
 
   test('sorts distribution rows by activity when the column header is clicked', async () => {

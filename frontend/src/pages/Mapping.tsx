@@ -12,9 +12,11 @@ import EntityTabs from '../components/mapping/EntityTabs';
 import {
   selectActiveEntityId,
   selectAvailableEntities,
+  selectEntityMappingProgress,
   type HydrationMode,
   useMappingStore,
 } from '../store/mappingStore';
+import { selectDistributionProgress, useDistributionStore } from '../store/distributionStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import { useClientStore } from '../store/clientStore';
 import { useAuthStore } from '../store/authStore';
@@ -53,7 +55,12 @@ export default function Mapping() {
   const activeUploadId = useMappingStore(state => state.activeUploadId);
   const availableEntities = useMappingStore(selectAvailableEntities);
   const activeEntityId = useMappingStore(selectActiveEntityId);
+  const entityMappingProgress = useMappingStore(selectEntityMappingProgress);
+  const distributionProgress = useDistributionStore(selectDistributionProgress);
   const [entityStages, setEntityStages] = useState<Record<string, MappingStep>>({});
+  const [distributionCompletionByEntity, setDistributionCompletionByEntity] = useState<
+    Record<string, boolean>
+  >({});
   const activeStep = useMemo(() => {
     if (activeEntityId && entityStages[activeEntityId]) {
       return entityStages[activeEntityId];
@@ -72,6 +79,42 @@ export default function Mapping() {
     [availableEntities],
   );
   const lastActiveEntityId = useRef<string | null>(null);
+  const entityCompletion = useMemo<Record<string, boolean>>(() => {
+    const completion: Record<string, boolean> = {};
+    availableEntities.forEach(entity => {
+      const mappingProgress = entityMappingProgress[entity.id];
+      const totalAccounts = mappingProgress?.totalAccounts ?? 0;
+      const resolvedAccounts = mappingProgress?.resolvedAccounts ?? 0;
+      const mappingComplete = totalAccounts === 0 || resolvedAccounts === totalAccounts;
+      const distributionComplete =
+        totalAccounts === 0
+          ? true
+          : distributionCompletionByEntity[entity.id] ?? false;
+
+      completion[entity.id] = mappingComplete && distributionComplete;
+    });
+    return completion;
+  }, [availableEntities, distributionCompletionByEntity, entityMappingProgress]);
+
+  useEffect(() => {
+    if (!activeEntityId) {
+      return;
+    }
+
+    const mappingProgress = entityMappingProgress[activeEntityId];
+    const totalAccounts = mappingProgress?.totalAccounts ?? 0;
+    const distributionComplete =
+      distributionProgress.totalRows > 0
+        ? distributionProgress.isComplete
+        : totalAccounts === 0;
+
+    setDistributionCompletionByEntity(prev => {
+      if (prev[activeEntityId] === distributionComplete) {
+        return prev;
+      }
+      return { ...prev, [activeEntityId]: distributionComplete };
+    });
+  }, [activeEntityId, distributionProgress, entityMappingProgress]);
 
   useEffect(() => {
     if (!userEmail) {
@@ -283,6 +326,7 @@ export default function Mapping() {
           activeEntityId={activeEntityId}
           onSelect={handleEntityChange}
           entityStages={entityStages}
+          entityCompletion={entityCompletion}
         />
       )}
       <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">

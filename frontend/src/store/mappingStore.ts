@@ -318,6 +318,9 @@ const getSplitAmount = (
   split: MappingSplitDefinition,
 ): number => Math.abs(getSplitSignedAmount(account, split));
 
+const isEffectivelyZero = (value: number, tolerance = 0.0001): boolean =>
+  Math.abs(value) <= tolerance;
+
 const deriveEntitySummaries = (accounts: GLAccountMappingRow[]): EntitySummary[] => {
   const entities = new Map<string, EntitySummary>();
 
@@ -997,6 +1000,11 @@ const buildSaveInputFromAccount = (
 function deriveMappingStatus(account: GLAccountMappingRow): MappingStatus {
   if (account.mappingType === 'exclude' || account.status === 'Excluded') {
     return 'Excluded';
+  }
+
+  const allocatableAmount = Math.abs(getAllocatableNetChange(account));
+  if (isEffectivelyZero(allocatableAmount)) {
+    return 'Mapped';
   }
 
   if (account.mappingType === 'dynamic') {
@@ -3308,6 +3316,38 @@ export const selectAvailableEntities = (
     return state.activeEntities;
   }
   return deriveEntitySummaries(state.accounts);
+};
+
+type EntityMappingProgress = {
+  totalAccounts: number;
+  resolvedAccounts: number;
+};
+
+const getEntityPeriodScopedAccounts = (
+  state: MappingState,
+  entityId: string,
+): GLAccountMappingRow[] => {
+  const scopedAccounts = getAccountsForEntity(state.accounts, entityId);
+  const resolvedPeriod = resolveActivePeriod(state.accounts, entityId, state.activePeriod);
+  if (!resolvedPeriod) {
+    return scopedAccounts;
+  }
+  const normalizedPeriod = normalizePeriod(resolvedPeriod);
+  return scopedAccounts.filter(account => normalizePeriod(account.glMonth) === normalizedPeriod);
+};
+
+export const selectEntityMappingProgress = (
+  state: MappingState,
+): Record<string, EntityMappingProgress> => {
+  const entities = selectAvailableEntities(state);
+  return entities.reduce<Record<string, EntityMappingProgress>>((accumulator, entity) => {
+    const scopedAccounts = getEntityPeriodScopedAccounts(state, entity.id);
+    accumulator[entity.id] = {
+      totalAccounts: scopedAccounts.length,
+      resolvedAccounts: scopedAccounts.filter(isAccountResolvedForSummary).length,
+    };
+    return accumulator;
+  }, {});
 };
 
 export const selectAvailablePeriods = (state: MappingState): string[] =>

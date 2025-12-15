@@ -120,6 +120,34 @@ describe('mappingStore selectors', () => {
     );
   });
 
+  it('treats zero-balance GL accounts as mapped for coverage', () => {
+    const zeroBalanceAccount = buildMappingAccount({
+      id: 'acct-zero',
+      netChange: 0,
+      activity: 0,
+      mappingType: 'direct',
+      accountId: 'Z-100',
+      accountName: 'Zero Balance',
+      entityId: 'ent-1',
+      entityName: 'Entity One',
+    });
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts: [zeroBalanceAccount],
+        activeEntityId: 'ent-1',
+        activeEntities: [{ id: 'ent-1', name: 'Entity One' }],
+        activeEntityIds: ['ent-1'],
+        activePeriod: null,
+      }));
+    });
+
+    const summary = selectSummaryMetrics(useMappingStore.getState());
+    expect(summary.totalAccounts).toBe(1);
+    expect(summary.mappedAccounts).toBe(1);
+  });
+
   it('recalculates totals when accounts are excluded', () => {
     act(() => {
       useMappingStore.getState().updateMappingType('acct-2', 'exclude');

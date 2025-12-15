@@ -16,12 +16,14 @@ jest.mock('../store/organizationStore', () => ({
 
 (globalThis as any).scrollTo = jest.fn();
 
+import { act } from 'react-dom/test-utils';
 import { render, screen, waitFor } from './testUtils';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Mapping from '../pages/Mapping';
 import { useClientStore } from '../store/clientStore';
 import { useMappingStore, createInitialMappingAccounts } from '../store/mappingStore';
 import { useRatioAllocationStore } from '../store/ratioAllocationStore';
+import { useDistributionStore } from '../store/distributionStore';
 import userEvent from './userEvent';
 
 const clientSnapshot = (() => {
@@ -126,17 +128,38 @@ const resetRatioStore = () => {
   });
 };
 
+const resetDistributionStore = () => {
+  useDistributionStore.setState({
+    rows: [],
+    operationsCatalog: [],
+    searchTerm: '',
+    statusFilters: [],
+    currentEntityId: null,
+    currentUpdatedBy: null,
+    historyByAccount: {},
+    historyEntityId: null,
+    isAutoSaving: false,
+    autoSaveMessage: null,
+    isSavingDistributions: false,
+    saveError: null,
+    saveSuccess: null,
+    lastSavedCount: 0,
+  });
+};
+
 describe('Mapping page layout', () => {
   beforeEach(() => {
     resetClientStore();
     resetMappingStore();
     resetRatioStore();
+    resetDistributionStore();
   });
 
   afterEach(() => {
     resetClientStore();
     resetMappingStore();
     resetRatioStore();
+    resetDistributionStore();
   });
 
   it('renders full-width workspace while preserving responsive padding', () => {
@@ -214,6 +237,74 @@ describe('Mapping page layout', () => {
       'aria-current',
       'page',
     );
+  });
+
+  it('shows a completed indicator on an entity tab once mapping and distribution are finished', () => {
+    const entityId = 'entity-complete';
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts: [
+          {
+            id: 'acct-zero',
+            entityId,
+            entityName: 'Complete Entity',
+            accountId: '1000',
+            accountName: 'Zero Balance',
+            activity: 0,
+            status: 'Unmapped',
+            mappingType: 'direct',
+            netChange: 0,
+            operation: 'Ops',
+            polarity: 'Debit',
+            splitDefinitions: [],
+            entities: [],
+          },
+        ],
+        activeEntityId: entityId,
+        activeEntities: [{ id: entityId, name: 'Complete Entity' }],
+        activeEntityIds: [entityId],
+        activeUploadId: 'demo',
+        activeStatuses: [],
+        searchTerm: '',
+        activePeriod: null,
+      }));
+      useDistributionStore.setState(state => ({
+        ...state,
+        rows: [
+          {
+            id: 'dist-zero',
+            mappingRowId: 'acct-zero',
+            accountId: '1000',
+            description: 'Zero balance target',
+            activity: 0,
+            type: 'direct',
+            operations: [],
+            presetId: null,
+            notes: undefined,
+            status: 'Undistributed',
+            isDirty: false,
+            autoSaveState: 'idle',
+            autoSaveError: null,
+          },
+        ],
+        searchTerm: '',
+        statusFilters: [],
+        currentEntityId: entityId,
+      }));
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/gl/mapping/demo']}>
+        <Routes>
+          <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const completeTab = screen.getByRole('tab', { name: 'Complete Entity' });
+    expect(completeTab).toHaveAttribute('aria-label', 'Complete Entity, Complete');
   });
 
   it('hydrates entity tabs from fetched upload metadata', async () => {

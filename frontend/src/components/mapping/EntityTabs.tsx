@@ -8,9 +8,16 @@ interface EntityTabsProps {
   activeEntityId: string | null;
   onSelect: (entityId: string) => void;
   entityStages?: Record<string, MappingStep>;
+  entityCompletion?: Record<string, boolean>;
 }
 
-const EntityTabs = ({ entities, activeEntityId, onSelect, entityStages }: EntityTabsProps) => {
+const EntityTabs = ({
+  entities,
+  activeEntityId,
+  onSelect,
+  entityStages,
+  entityCompletion,
+}: EntityTabsProps) => {
   const tabs = React.useMemo<EntitySummary[]>(() => {
     const uniqueEntities = new Map(entities.map(entity => [entity.id, entity]));
     return Array.from(uniqueEntities.values());
@@ -27,7 +34,7 @@ const EntityTabs = ({ entities, activeEntityId, onSelect, entityStages }: Entity
         {tabs.map(tab => {
           const isActive = tab.id === activeEntityId;
           const stage = entityStages?.[tab.id] ?? 'mapping';
-          const isComplete = stage === 'review';
+          const isComplete = entityCompletion?.[tab.id] ?? stage === 'review';
           const StatusIcon = isComplete ? CheckCircle : Circle;
           const statusLabel = isComplete ? 'Complete' : 'Needs work';
           return (

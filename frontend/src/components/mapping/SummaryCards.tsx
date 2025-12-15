@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   getAccountExcludedAmount,
   selectAccounts,
+  selectActiveEntityId,
+  selectStandardScoaSummaries,
   selectSummaryMetrics,
   useMappingStore,
 } from '../../store/mappingStore';
+import { useDistributionStore } from '../../store/distributionStore';
 import { useRatioAllocationStore } from '../../store/ratioAllocationStore';
 import { computeDynamicExclusionSummaries, sumDynamicExclusionAmounts } from '../../utils/dynamicExclusions';
 import { formatCurrencyAmount } from '../../utils/currency';
@@ -12,6 +15,8 @@ import { formatCurrencyAmount } from '../../utils/currency';
 const SummaryCards = () => {
   const accounts = useMappingStore(selectAccounts);
   const { totalAccounts, mappedAccounts, grossTotal, excludedTotal } = useMappingStore(selectSummaryMetrics);
+  const standardScoaSummaries = useMappingStore(selectStandardScoaSummaries);
+  const activeEntityId = useMappingStore(selectActiveEntityId);
   const { allocations, results, selectedPeriod, basisAccounts, groups } = useRatioAllocationStore(state => ({
     allocations: state.allocations,
     results: state.results,
@@ -19,6 +24,42 @@ const SummaryCards = () => {
     basisAccounts: state.basisAccounts,
     groups: state.groups,
   }));
+  const {
+    rows: distributionRows,
+    syncRowsFromStandardTargets,
+    loadHistoryForEntity,
+    historyEntityId,
+  } = useDistributionStore(state => ({
+    rows: state.rows,
+    syncRowsFromStandardTargets: state.syncRowsFromStandardTargets,
+    loadHistoryForEntity: state.loadHistoryForEntity,
+    historyEntityId: state.historyEntityId,
+  }));
+
+  const scoaSummarySignature = useMemo(
+    () => standardScoaSummaries.map(summary => `${summary.id}:${summary.mappedAmount}`).join('|'),
+    [standardScoaSummaries],
+  );
+  const previousScoaSignature = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (scoaSummarySignature === previousScoaSignature.current) {
+      return;
+    }
+    previousScoaSignature.current = scoaSummarySignature;
+    syncRowsFromStandardTargets(standardScoaSummaries);
+  }, [scoaSummarySignature, standardScoaSummaries, syncRowsFromStandardTargets]);
+
+  useEffect(() => {
+    if (!activeEntityId) {
+      void loadHistoryForEntity(null);
+      return;
+    }
+    if (historyEntityId === activeEntityId) {
+      return;
+    }
+    void loadHistoryForEntity(activeEntityId);
+  }, [activeEntityId, historyEntityId, loadHistoryForEntity]);
 
   const dynamicExclusionSummaries = useMemo(
     () =>
@@ -46,23 +87,18 @@ const SummaryCards = () => {
     };
   }, [accounts, dynamicExclusionSummaries, excludedTotal, grossTotal]);
 
-  const { executedRules, totalTargets } = useMemo(() => {
-    const relevantResults = selectedPeriod
-      ? results.filter(result => result.periodId === selectedPeriod)
-      : [];
-    const totalTargetsForPeriod = relevantResults.reduce(
-      (sum, result) => sum + result.allocations.length,
-      0
-    );
+  const mappedCoverage = Math.round((mappedAccounts / Math.max(totalAccounts, 1)) * 100);
+
+  const { distributedAccounts, distributionCoverage } = useMemo(() => {
+    const rowsWithActivity = distributionRows.filter(row => Math.abs(row.activity) > 0);
+    const distributedCount = rowsWithActivity.filter(row => row.status === 'Distributed').length;
+    const coverage = Math.round((distributedCount / Math.max(rowsWithActivity.length, 1)) * 100);
 
     return {
-      executedRules: relevantResults.length,
-      totalTargets: totalTargetsForPeriod,
+      distributedAccounts: distributedCount,
+      distributionCoverage: coverage,
     };
-  }, [results, selectedPeriod]);
-  const mappedCoverage = Math.round(
-    (mappedAccounts / Math.max(totalAccounts, 1)) * 100,
-  );
+  }, [distributionRows]);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -82,21 +118,23 @@ const SummaryCards = () => {
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <p className="text-sm text-gray-500 dark:text-gray-400">Total balance</p>
-        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">{formatCurrencyAmount(grossTotal)}</p>
+        <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">
+          {formatCurrencyAmount(grossTotal)}
+        </p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
           Net after exclusions {formatCurrencyAmount(adjustedTotals.net)}
         </p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">Excluded {formatCurrencyAmount(adjustedTotals.excluded)}</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          Excluded {formatCurrencyAmount(adjustedTotals.excluded)}
+        </p>
       </div>
       <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <p className="text-sm text-gray-500 dark:text-gray-400">Current period allocations</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Distributed SCOA accounts</p>
         <p className="mt-2 text-2xl font-semibold text-gray-900 dark:text-white">
-          {selectedPeriod ? totalTargets.toLocaleString() : '—'}
+          {distributedAccounts.toLocaleString()}
         </p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {selectedPeriod
-            ? `${executedRules} dynamic ${executedRules === 1 ? 'rule' : 'rules'} processed`
-            : 'Select a reporting period'}
+          {`${distributionCoverage}% coverage`}
         </p>
       </div>
     </div>

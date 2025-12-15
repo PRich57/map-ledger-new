@@ -73,10 +73,18 @@ interface DistributionState {
   ) => Promise<number>;
 }
 
+const isEffectivelyZero = (value: number, tolerance = 0.0001): boolean =>
+  Math.abs(value) <= tolerance;
+
 const deriveDistributionStatus = (
   type: DistributionType,
   operations: DistributionRow['operations'],
+  activity: number,
 ): DistributionStatus => {
+  if (isEffectivelyZero(activity)) {
+    return 'Distributed';
+  }
+
   if (type === 'direct') {
     return operations.length === 1 ? 'Distributed' : 'Undistributed';
   }
@@ -100,8 +108,27 @@ const deriveDistributionStatus = (
 
 const applyDistributionStatus = (row: DistributionRow): DistributionRow => ({
   ...row,
-  status: deriveDistributionStatus(row.type, row.operations),
+  status: deriveDistributionStatus(row.type, row.operations, row.activity),
 });
+
+export type DistributionProgress = {
+  totalRows: number;
+  distributedRows: number;
+  isComplete: boolean;
+};
+
+export const selectDistributionProgress = (state: DistributionState): DistributionProgress => {
+  const totalRows = state.rows.length;
+  const distributedRows = state.rows.filter(
+    row => deriveDistributionStatus(row.type, row.operations, row.activity) === 'Distributed',
+  ).length;
+
+  return {
+    totalRows,
+    distributedRows,
+    isComplete: totalRows > 0 && distributedRows === totalRows,
+  };
+};
 
 const createBlankPercentageOperation = (): DistributionOperationShare => ({
   id: '',
