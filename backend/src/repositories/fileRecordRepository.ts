@@ -47,9 +47,9 @@ export interface FileRecordRow extends FileRecordInput {
 
 const TABLE_NAME = 'ml.FILE_RECORDS';
 
-// SQL Server has a 2100 parameter limit. Each record uses 12 parameters,
-// so we use 150 records per batch (150 * 12 = 1800) to stay safely under the limit.
-const BATCH_SIZE = 150;
+// SQL Server has a 2100 parameter limit. Each record uses 12 parameters.
+// Using 70 records per batch as a known safe limit.
+const BATCH_SIZE = 70;
 
 const insertFileRecordsBatch = async (
   fileUploadGuid: string,
