@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { AlertTriangle, Calculator, Layers, XCircle } from 'lucide-react';
 import type { DistributionOperationShare, DistributionRow } from '../../types';
 import type { DistributionOperationCatalogItem } from '../../store/distributionStore';
@@ -146,9 +146,30 @@ const DistributionDynamicAllocationRow = ({
     [row.accountId, sourceAccounts],
   );
 
+  // Track last synced activity to avoid redundant sync calls
+  const lastSyncedActivityRef = useRef<{ accountId: string; activity: number; period: string | null } | null>(null);
+
   useEffect(() => {
     const normalizedActivity = Number.isFinite(row.activity) ? row.activity : 0;
-    syncSourceAccountBalance(row.accountId, normalizedActivity, selectedPeriod ?? null);
+    const normalizedPeriod = selectedPeriod ?? null;
+
+    // Skip if we already synced this exact value
+    const lastSync = lastSyncedActivityRef.current;
+    if (
+      lastSync &&
+      lastSync.accountId === row.accountId &&
+      Math.abs(lastSync.activity - normalizedActivity) < 0.001 &&
+      lastSync.period === normalizedPeriod
+    ) {
+      return;
+    }
+
+    lastSyncedActivityRef.current = {
+      accountId: row.accountId,
+      activity: normalizedActivity,
+      period: normalizedPeriod,
+    };
+    syncSourceAccountBalance(row.accountId, normalizedActivity, normalizedPeriod);
   }, [row.accountId, row.activity, selectedPeriod, syncSourceAccountBalance]);
 
   const sourceValue = useMemo(() => {
@@ -329,6 +350,11 @@ const DistributionDynamicAllocationRow = ({
 
   const activePreset = getActivePresetForSource(row.accountId);
 
+  // Track last synced preset to avoid redundant syncs
+  const lastSyncedPresetRef = useRef<string | null>(null);
+  // Track if a preset change is in progress to prevent effect from duplicating updates
+  const presetChangeInProgressRef = useRef(false);
+
 const buildPresetOperations = useCallback(
   (presetId: string | null) => {
     if (!presetId) {
@@ -397,43 +423,62 @@ const operationsMatch = useCallback(
   [normalizeOperationId, row.operations],
 );
 
+  // Sync preset from ratioAllocationStore to distributionStore when it changes externally.
+  // This effect should NOT sync operations - that's handled by handlePresetChange when
+  // the user explicitly selects a preset. This prevents infinite loops where:
+  // 1. Effect updates operations -> row.operations changes
+  // 2. operationsMatch callback recreates -> effect runs again
+  // 3. Repeat infinitely
   useEffect(() => {
+    // Skip if a preset change is already in progress (handlePresetChange is running)
+    if (presetChangeInProgressRef.current) {
+      return;
+    }
+
     const resolvedPresetId = activePreset?.id ?? null;
     const currentPresetId = row.presetId ?? null;
 
     // Skip syncing when no active preset is attached in the ratio store; this avoids
     // repeatedly clearing a server-assigned preset while presets are still hydrating.
     if (!resolvedPresetId) {
+      lastSyncedPresetRef.current = null;
       return;
     }
 
+    // Skip if we already synced this preset
+    if (lastSyncedPresetRef.current === resolvedPresetId) {
+      return;
+    }
+
+    // Only sync the presetId, not operations
     if (currentPresetId !== resolvedPresetId) {
+      lastSyncedPresetRef.current = resolvedPresetId;
       updateRowPreset(row.id, resolvedPresetId);
     }
-    const derivedOperations = buildPresetOperations(resolvedPresetId);
-    if (!operationsMatch(derivedOperations)) {
-      updateRowOperations(row.id, derivedOperations);
-    }
-  }, [
-    activePreset?.id,
-    buildPresetOperations,
-    operationsMatch,
-    row.id,
-    row.presetId,
-    updateRowOperations,
-    updateRowPreset,
-  ]);
+  }, [activePreset?.id, row.id, row.presetId, updateRowPreset]);
 
   const handlePresetChange = (presetId: string | null) => {
-    syncSourceAccountBalance(row.accountId, sourceValue, selectedPeriod ?? null);
-    setActivePresetForSource(row.accountId, presetId);
-    updateRowPreset(row.id, presetId);
-    if (!presetId) {
-      updateRowOperations(row.id, []);
-      return;
+    // Mark that a preset change is in progress to prevent the useEffect from
+    // duplicating updates and causing an infinite loop
+    presetChangeInProgressRef.current = true;
+    lastSyncedPresetRef.current = presetId;
+
+    try {
+      syncSourceAccountBalance(row.accountId, sourceValue, selectedPeriod ?? null);
+      setActivePresetForSource(row.accountId, presetId);
+      updateRowPreset(row.id, presetId);
+      if (!presetId) {
+        updateRowOperations(row.id, []);
+        return;
+      }
+      const derivedOperations = buildPresetOperations(presetId);
+      updateRowOperations(row.id, derivedOperations);
+    } finally {
+      // Reset the flag after a microtask to ensure all synchronous updates complete
+      queueMicrotask(() => {
+        presetChangeInProgressRef.current = false;
+      });
     }
-    const derivedOperations = buildPresetOperations(presetId);
-    updateRowOperations(row.id, derivedOperations);
   };
 
   return (
