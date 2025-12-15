@@ -364,14 +364,25 @@ const buildPresetOperations = useCallback(
     if (!preset) {
       return [];
     }
-    return preset.rows
-      .map(presetRow => {
+
+    // Calculate total basis value to derive allocation percentages
+    const rowsWithBasis = preset.rows.map(presetRow => {
+      const basisAccount = basisAccounts.find(acc => acc.id === presetRow.dynamicAccountId);
+      const basisValue = basisAccount ? getBasisValue(basisAccount, selectedPeriod) : 0;
+      return { presetRow, basisValue };
+    });
+    const totalBasis = rowsWithBasis.reduce((sum, item) => sum + item.basisValue, 0);
+
+    return rowsWithBasis
+      .map(({ presetRow, basisValue }) => {
         const targetId = normalizeOperationId(presetRow.targetAccountId);
         if (!targetId) {
           return null;
         }
         const catalogMatch = operationLabelLookup.get(targetId);
         const code = targetId;
+        // Calculate allocation percentage based on basis value ratio
+        const allocationPct = totalBasis > 0 ? (basisValue / totalBasis) * 100 : 0;
         return {
           id: code,
           code,
@@ -381,12 +392,13 @@ const buildPresetOperations = useCallback(
             name: catalogMatch?.name ?? code,
           }),
           basisDatapoint: presetRow.dynamicAccountId?.trim() || undefined,
+          allocation: allocationPct,
         };
       })
       .filter((op): op is DistributionOperationShare => Boolean(op))
       .sort((a, b) => a.code.localeCompare(b.code));
   },
-  [distributionContextPresets, normalizeOperationId, operationLabelLookup],
+  [distributionContextPresets, normalizeOperationId, operationLabelLookup, basisAccounts, selectedPeriod],
 );
 
 const operationsMatch = useCallback(
@@ -424,11 +436,9 @@ const operationsMatch = useCallback(
 );
 
   // Sync preset from ratioAllocationStore to distributionStore when it changes externally.
-  // This effect should NOT sync operations - that's handled by handlePresetChange when
-  // the user explicitly selects a preset. This prevents infinite loops where:
-  // 1. Effect updates operations -> row.operations changes
-  // 2. operationsMatch callback recreates -> effect runs again
-  // 3. Repeat infinitely
+  // This handles the case where a preset is created via the RatioAllocationBuilder and
+  // automatically applied to this row. We need to sync both the presetId AND the operations
+  // so that the backend receives the correct basisDatapoint values for each operation.
   useEffect(() => {
     // Skip if a preset change is already in progress (handlePresetChange is running)
     if (presetChangeInProgressRef.current) {
@@ -450,12 +460,18 @@ const operationsMatch = useCallback(
       return;
     }
 
-    // Only sync the presetId, not operations
+    lastSyncedPresetRef.current = resolvedPresetId;
+
+    // Sync presetId if it changed
     if (currentPresetId !== resolvedPresetId) {
-      lastSyncedPresetRef.current = resolvedPresetId;
       updateRowPreset(row.id, resolvedPresetId);
     }
-  }, [activePreset?.id, row.id, row.presetId, updateRowPreset]);
+
+    // Also sync operations from the preset - this ensures basisDatapoint values
+    // are included when the row is saved to the backend
+    const derivedOperations = buildPresetOperations(resolvedPresetId);
+    updateRowOperations(row.id, derivedOperations);
+  }, [activePreset?.id, row.id, row.presetId, updateRowPreset, buildPresetOperations, updateRowOperations]);
 
   const handlePresetChange = (presetId: string | null) => {
     // Mark that a preset change is in progress to prevent the useEffect from
