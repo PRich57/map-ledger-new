@@ -117,6 +117,19 @@ const RatioAllocationBuilder = ({
     return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
   }, [defaultTargetCatalog, targetCatalog]);
 
+  const selectedAllocation = useMemo(() => {
+    if (selectedAllocationId) {
+      return allocations.find(allocation => allocation.id === selectedAllocationId) ?? null;
+    }
+    if (initialSourceAccountId) {
+      const match = allocations.find(
+        allocation => allocation.sourceAccount.id === initialSourceAccountId,
+      );
+      return match ?? null;
+    }
+    return allocations[0] ?? null;
+  }, [allocations, initialSourceAccountId, selectedAllocationId]);
+
   const { newPresetDynamicUsage, newPresetCanonicalUsage } = useMemo(() => {
     const dynamicUsage = new Map<string, Set<string>>();
     const canonicalUsage = new Map<string, Set<string>>();
@@ -318,19 +331,6 @@ const RatioAllocationBuilder = ({
     isCreatingPreset,
     newPresetRows.length,
   ]);
-
-  const selectedAllocation = useMemo(() => {
-    if (selectedAllocationId) {
-      return allocations.find(allocation => allocation.id === selectedAllocationId) ?? null;
-    }
-    if (initialSourceAccountId) {
-      const match = allocations.find(
-        allocation => allocation.sourceAccount.id === initialSourceAccountId,
-      );
-      return match ?? null;
-    }
-    return allocations[0] ?? null;
-  }, [allocations, initialSourceAccountId, selectedAllocationId]);
 
   const selectedPresetIds = useMemo(() => {
     if (!selectedAllocation) {
