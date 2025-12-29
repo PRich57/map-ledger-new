@@ -52,6 +52,12 @@ const toOption = (account: ChartOfAccount): ChartOfAccountOption => {
   };
 };
 
+const compareAccountIds = (left: ChartOfAccountOption, right: ChartOfAccountOption): number =>
+  left.value.localeCompare(right.value, undefined, { numeric: true, sensitivity: 'base' });
+
+const sortOptionsByAccountId = (options: ChartOfAccountOption[]): ChartOfAccountOption[] =>
+  [...options].sort(compareAccountIds);
+
 const buildIndex = (options: ChartOfAccountOption[]): ChartOfAccountIndex => {
   const byId: Record<string, ChartOfAccountOption> = {};
   const byValue: Record<string, ChartOfAccountOption> = {};
@@ -85,7 +91,7 @@ const buildFallbackAccounts = (): ChartOfAccount[] =>
 const hydrateInitialState = () => {
   const cached = loadCachedChartOfAccounts();
   if (cached) {
-    const options = cached.accounts.map(toOption);
+    const options = sortOptionsByAccountId(cached.accounts.map(toOption));
     return {
       accounts: cached.accounts,
       options,
@@ -95,7 +101,7 @@ const hydrateInitialState = () => {
   }
 
   const fallbackAccounts = buildFallbackAccounts();
-  const options = fallbackAccounts.map(toOption);
+  const options = sortOptionsByAccountId(fallbackAccounts.map(toOption));
   return {
     accounts: fallbackAccounts,
     options,
@@ -118,7 +124,7 @@ export const useChartOfAccountsStore = create<ChartOfAccountsState>((set) => ({
 
     try {
       const { accounts, fetchedAt } = await fetchChartOfAccounts(forceRefresh);
-      const options = accounts.map(toOption);
+      const options = sortOptionsByAccountId(accounts.map(toOption));
       set({
         accounts,
         options,
