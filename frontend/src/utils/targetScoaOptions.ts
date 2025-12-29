@@ -23,7 +23,9 @@ export const buildTargetScoaOptions = (
     }
   });
 
-  return Array.from(uniqueById.values()).sort((a, b) => a.label.localeCompare(b.label));
+  return Array.from(uniqueById.values()).sort((a, b) =>
+    a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: 'base' }),
+  );
 };
 
 export { convertDatapointToOption as toTargetScoaOption };
