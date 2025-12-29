@@ -6,7 +6,8 @@ const openApiSpec = {
   },
   paths: {
     '/industries': {
-      get: { summary: 'List industries' }
+      get: { summary: 'List industries' },
+      post: { summary: 'Create an industry' }
     },
     '/masterclients': {
       get: { summary: 'List master clients' }
@@ -22,6 +23,15 @@ const openApiSpec = {
     },
     '/chart-of-accounts': {
       get: { summary: 'List chart of accounts' }
+    },
+    '/coa-manager/industry/{industry}': {
+      get: { summary: 'Fetch chart of accounts by industry' }
+    },
+    '/coa-manager/industry/{industry}/cost-type': {
+      patch: { summary: 'Update cost type for a single COA record' }
+    },
+    '/coa-manager/industry/{industry}/cost-type/batch': {
+      patch: { summary: 'Batch update cost types for COA records' }
     },
     '/user-clients': {
       get: { summary: 'List clients available to the current user' }
