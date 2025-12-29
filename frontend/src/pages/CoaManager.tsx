@@ -59,6 +59,12 @@ export default function CoaManager() {
   };
 
   const handleRowCostTypeChange = (rowId: string, costType: CostType) => {
+    const hasBatchSelection =
+      selectedRowIds.has(rowId) && selectedRowIds.size > 1;
+    if (hasBatchSelection) {
+      updateBatchCostType(Array.from(selectedRowIds), costType);
+      return;
+    }
     updateRowCostType(rowId, costType);
   };
 

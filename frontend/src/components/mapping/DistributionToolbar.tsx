@@ -1,22 +1,14 @@
 import { ChangeEvent, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import {
-  selectActiveEntityId,
-  useMappingStore,
-} from '../../store/mappingStore';
-import { useOrganizationStore } from '../../store/organizationStore';
-import {
   selectDistributionPresetSummaries,
   useRatioAllocationStore,
 } from '../../store/ratioAllocationStore';
 import { useDistributionStore } from '../../store/distributionStore';
 import { useDistributionSelectionStore } from '../../store/distributionSelectionStore';
-import DistributionBatchModal from './DistributionBatchModal';
 import DistributionPresetModal from './DistributionPresetModal';
 import type {
-  DistributionOperationShare,
   DistributionStatus,
-  DistributionType,
 } from '../../types';
 
 const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
@@ -30,13 +22,10 @@ export default function DistributionToolbar() {
   const setSearchTerm = useDistributionStore(state => state.setSearchTerm);
   const toggleStatusFilter = useDistributionStore(state => state.toggleStatusFilter);
   const clearStatusFilters = useDistributionStore(state => state.clearStatusFilters);
-  const operationsCatalog = useDistributionStore(state => state.operationsCatalog);
-  const applyBatchDistribution = useDistributionStore(state => state.applyBatchDistribution);
   const applyPresetToRows = useDistributionStore(state => state.applyPresetToRows);
   const saveError = useDistributionStore(state => state.saveError);
   const presetOptions = useRatioAllocationStore(selectDistributionPresetSummaries);
   const { selectedIds, clearSelection } = useDistributionSelectionStore();
-  const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [isPresetModalOpen, setPresetModalOpen] = useState(false);
   const hasSelection = selectedIds.size > 0;
   const selectedCount = selectedIds.size;
@@ -47,18 +36,6 @@ export default function DistributionToolbar() {
 
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(event.target.value);
-  };
-
-  const handleApplyBatch = (updates: {
-    type?: DistributionType;
-    operation?: DistributionOperationShare | null;
-  }) => {
-    if (!hasSelection) {
-      return;
-    }
-    applyBatchDistribution(selectedIdList, updates);
-    clearSelection();
-    setBatchModalOpen(false);
   };
 
   const handleApplyPreset = (presetId: string | null) => {
@@ -131,18 +108,6 @@ export default function DistributionToolbar() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setBatchModalOpen(true)}
-              disabled={!hasSelection}
-              className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-                hasSelection
-                  ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                  : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400 focus:ring-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500'
-              }`}
-            >
-              Batch distribution
-            </button>
-            <button
-              type="button"
               onClick={() => setPresetModalOpen(true)}
               disabled={!hasSelection}
               className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
@@ -162,14 +127,6 @@ export default function DistributionToolbar() {
           )}
         </div>
       </div>
-
-      <DistributionBatchModal
-        open={isBatchModalOpen && hasSelection}
-        selectedCount={selectedCount}
-        operations={operationsCatalog}
-        onClose={() => setBatchModalOpen(false)}
-        onApply={handleApplyBatch}
-      />
       <DistributionPresetModal
         open={isPresetModalOpen && hasSelection}
         selectedCount={selectedCount}
