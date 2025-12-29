@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Plus } from 'lucide-react';
+import { useCoaManagerStore } from '../store/coaManagerStore';
 
 const costTypeOptions = [
   { label: 'None', value: '' },
@@ -9,167 +10,63 @@ const costTypeOptions = [
 
 type CostType = (typeof costTypeOptions)[number]['value'];
 
-type UpdateStatus =
-  | { state: 'idle' }
-  | { state: 'loading' }
-  | { state: 'success' }
-  | { state: 'error'; message: string };
-
-interface CoaRow {
-  id: string;
-  accountNumber: string;
-  accountName: string;
-  category: string;
-  department: string;
-  costType: CostType;
-}
-
-const baseRows: Omit<CoaRow, 'id' | 'costType'>[] = [
-  {
-    accountNumber: '4000',
-    accountName: 'Product Revenue',
-    category: 'Revenue',
-    department: 'Sales',
-  },
-  {
-    accountNumber: '5100',
-    accountName: 'Direct Labor',
-    category: 'Cost of Sales',
-    department: 'Operations',
-  },
-  {
-    accountNumber: '6200',
-    accountName: 'Software Subscriptions',
-    category: 'Operating Expense',
-    department: 'Technology',
-  },
-  {
-    accountNumber: '7100',
-    accountName: 'Facilities',
-    category: 'Operating Expense',
-    department: 'General & Admin',
-  },
-  {
-    accountNumber: '8200',
-    accountName: 'Marketing Campaigns',
-    category: 'Operating Expense',
-    department: 'Marketing',
-  },
-];
-
-const initialIndustries = ['Healthcare', 'Manufacturing', 'Technology'];
-
-const buildRowsForIndustry = (industry: string): CoaRow[] =>
-  baseRows.map(row => ({
-    ...row,
-    id: `${industry}-${row.accountNumber}`,
-    costType: '',
-  }));
-
 export default function CoaManager() {
-  const [industries, setIndustries] = useState<string[]>(initialIndustries);
-  const [industryData, setIndustryData] = useState<Record<string, CoaRow[]>>(() =>
-    initialIndustries.reduce<Record<string, CoaRow[]>>((accumulator, industry) => {
-      accumulator[industry] = buildRowsForIndustry(industry);
-      return accumulator;
-    }, {}),
+  const industries = useCoaManagerStore(state => state.industries);
+  const industriesLoading = useCoaManagerStore(state => state.industriesLoading);
+  const industriesError = useCoaManagerStore(state => state.industriesError);
+  const selectedIndustry = useCoaManagerStore(state => state.selectedIndustry);
+  const rows = useCoaManagerStore(state => state.rows);
+  const rowsLoading = useCoaManagerStore(state => state.rowsLoading);
+  const rowsError = useCoaManagerStore(state => state.rowsError);
+  const columns = useCoaManagerStore(state => state.columns);
+  const selectedRowIds = useCoaManagerStore(state => state.selectedRowIds);
+  const rowStatus = useCoaManagerStore(state => state.rowUpdateStatus);
+  const createIndustryError = useCoaManagerStore(state => state.createIndustryError);
+  const createIndustryLoading = useCoaManagerStore(state => state.createIndustryLoading);
+  const loadIndustries = useCoaManagerStore(state => state.loadIndustries);
+  const selectIndustry = useCoaManagerStore(state => state.selectIndustry);
+  const createIndustry = useCoaManagerStore(state => state.createIndustry);
+  const clearCreateIndustryError = useCoaManagerStore(
+    state => state.clearCreateIndustryError,
   );
-  const [selectedIndustry, setSelectedIndustry] = useState<string>('');
+  const toggleRowSelection = useCoaManagerStore(state => state.toggleRowSelection);
+  const toggleSelectAll = useCoaManagerStore(state => state.toggleSelectAll);
+  const updateRowCostType = useCoaManagerStore(state => state.updateRowCostType);
+  const updateBatchCostType = useCoaManagerStore(state => state.updateBatchCostType);
   const [newIndustryName, setNewIndustryName] = useState('');
-  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [batchCostType, setBatchCostType] = useState<CostType>('');
-  const [rowStatus, setRowStatus] = useState<Record<string, UpdateStatus>>({});
+  const columnLabels = useMemo(() => {
+    return new Map(columns.map(column => [column.key, column.label]));
+  }, [columns]);
 
-  const rows = useMemo(
-    () => (selectedIndustry ? industryData[selectedIndustry] ?? [] : []),
-    [industryData, selectedIndustry],
-  );
+  const resolveLabel = (key: string, fallback: string) =>
+    columnLabels.get(key) ?? fallback;
 
-  const handleAddIndustry = () => {
+  useEffect(() => {
+    loadIndustries();
+  }, [loadIndustries]);
+
+  const handleAddIndustry = async () => {
     const trimmed = newIndustryName.trim();
-    if (!trimmed || industries.includes(trimmed)) {
+    if (!trimmed) {
       return;
     }
-    setIndustries(prev => [...prev, trimmed]);
-    setIndustryData(prev => ({
-      ...prev,
-      [trimmed]: buildRowsForIndustry(trimmed),
-    }));
-    setNewIndustryName('');
-    setSelectedIndustry(trimmed);
-    setSelectedRowIds(new Set());
-  };
-
-  const updateRows = (rowIds: string[], costType: CostType) => {
-    if (!selectedIndustry) {
-      return;
+    clearCreateIndustryError();
+    const created = await createIndustry(trimmed);
+    if (created) {
+      setNewIndustryName('');
     }
-
-    setIndustryData(prev => ({
-      ...prev,
-      [selectedIndustry]: (prev[selectedIndustry] ?? []).map(row =>
-        rowIds.includes(row.id) ? { ...row, costType } : row,
-      ),
-    }));
-
-    setRowStatus(prev => {
-      const next = { ...prev };
-      rowIds.forEach(rowId => {
-        next[rowId] = { state: 'loading' };
-      });
-      return next;
-    });
-
-    rowIds.forEach(rowId => {
-      const shouldFail = rowId.includes('-5100');
-      window.setTimeout(() => {
-        setRowStatus(prev => ({
-          ...prev,
-          [rowId]: shouldFail
-            ? { state: 'error', message: 'Update failed. Try again.' }
-            : { state: 'success' },
-        }));
-      }, 700);
-
-      if (!shouldFail) {
-        window.setTimeout(() => {
-          setRowStatus(prev => ({
-            ...prev,
-            [rowId]: { state: 'idle' },
-          }));
-        }, 2500);
-      }
-    });
   };
 
   const handleRowCostTypeChange = (rowId: string, costType: CostType) => {
-    updateRows([rowId], costType);
-  };
-
-  const toggleRowSelection = (rowId: string) => {
-    setSelectedRowIds(prev => {
-      const next = new Set(prev);
-      if (next.has(rowId)) {
-        next.delete(rowId);
-      } else {
-        next.add(rowId);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAll = () => {
-    if (rows.length === 0) {
-      return;
-    }
-    setSelectedRowIds(prev => (prev.size === rows.length ? new Set() : new Set(rows.map(row => row.id))));
+    updateRowCostType(rowId, costType);
   };
 
   const handleBatchApply = () => {
     if (selectedRowIds.size === 0) {
       return;
     }
-    updateRows(Array.from(selectedRowIds), batchCostType);
+    updateBatchCostType(Array.from(selectedRowIds), batchCostType);
   };
 
   const selectedCount = selectedRowIds.size;
@@ -197,9 +94,9 @@ export default function CoaManager() {
               id="industry"
               value={selectedIndustry}
               onChange={event => {
-                setSelectedIndustry(event.target.value);
-                setSelectedRowIds(new Set());
+                selectIndustry(event.target.value);
               }}
+              disabled={industriesLoading}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
             >
               <option value="">Choose an industry</option>
@@ -219,21 +116,40 @@ export default function CoaManager() {
                 id="new-industry"
                 type="text"
                 value={newIndustryName}
-                onChange={event => setNewIndustryName(event.target.value)}
+                onChange={event => {
+                  setNewIndustryName(event.target.value);
+                  clearCreateIndustryError();
+                }}
                 placeholder="New industry name"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
               />
               <button
                 type="button"
                 onClick={handleAddIndustry}
+                disabled={createIndustryLoading}
                 className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
               >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Industry
+                {createIndustryLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Adding…
+                  </>
+                ) : (
+                  <>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Industry
+                  </>
+                )}
               </button>
             </div>
+            {createIndustryError ? (
+              <p className="text-sm text-red-600">{createIndustryError}</p>
+            ) : null}
           </div>
         </div>
+        {industriesError ? (
+          <p className="text-sm text-red-600">{industriesError}</p>
+        ) : null}
       </section>
 
       {selectedIndustry ? (
@@ -249,7 +165,7 @@ export default function CoaManager() {
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <label htmlFor="batch-cost-type" className="text-sm font-medium text-gray-700">
-                Batch update COST_TYPE
+                Batch update {resolveLabel('costType', 'COST_TYPE')}
               </label>
               <select
                 id="batch-cost-type"
@@ -274,111 +190,125 @@ export default function CoaManager() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow">
-            <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={isAllSelected}
-                        onChange={handleSelectAll}
-                        aria-label="Select all rows"
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Select
-                      </span>
-                    </div>
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Account
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Name
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Category
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Department
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    COST_TYPE
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {rows.map(row => {
-                  const status = rowStatus[row.id] ?? { state: 'idle' };
-                  return (
-                    <tr key={row.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
+          {rowsLoading ? (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-gray-200 bg-white p-6 text-sm text-gray-500">
+              <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+              Loading COA rows…
+            </div>
+          ) : rowsError ? (
+            <div className="rounded-lg border border-dashed border-red-200 bg-red-50 p-6 text-sm text-red-700">
+              {rowsError}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow">
+              <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-3">
+                      <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          checked={selectedRowIds.has(row.id)}
-                          onChange={() => toggleRowSelection(row.id)}
-                          aria-label={`Select account ${row.accountNumber}`}
+                          checked={isAllSelected}
+                          onChange={toggleSelectAll}
+                          aria-label="Select all rows"
                           className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                         />
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-900">
-                        {row.accountNumber}
-                      </td>
-                      <td className="px-4 py-3 text-gray-700">{row.accountName}</td>
-                      <td className="px-4 py-3 text-gray-700">{row.category}</td>
-                      <td className="px-4 py-3 text-gray-700">{row.department}</td>
-                      <td className="px-4 py-3">
-                        <label className="sr-only" htmlFor={`cost-type-${row.id}`}>
-                          COST_TYPE for account {row.accountNumber}
-                        </label>
-                        <select
-                          id={`cost-type-${row.id}`}
-                          value={row.costType}
-                          onChange={event =>
-                            handleRowCostTypeChange(row.id, event.target.value as CostType)
-                          }
-                          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
-                        >
-                          {costTypeOptions.map(option => (
-                            <option key={option.label} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2" role="status" aria-live="polite">
-                          {status.state === 'loading' && (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-                              <span className="text-xs text-gray-500">Updating…</span>
-                            </>
-                          )}
-                          {status.state === 'success' && (
-                            <>
-                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                              <span className="text-xs text-emerald-600">Updated</span>
-                            </>
-                          )}
-                          {status.state === 'error' && (
-                            <>
-                              <AlertTriangle className="h-4 w-4 text-amber-500" />
-                              <span className="text-xs text-amber-700">{status.message}</span>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                          Select
+                        </span>
+                      </div>
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {resolveLabel('accountNumber', 'Account')}
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {resolveLabel('accountName', 'Name')}
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {resolveLabel('category', 'Category')}
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {resolveLabel('department', 'Department')}
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      {resolveLabel('costType', 'COST_TYPE')}
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rows.map(row => {
+                    const status = rowStatus[row.id] ?? { state: 'idle' };
+                    return (
+                      <tr key={row.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedRowIds.has(row.id)}
+                            onChange={() => toggleRowSelection(row.id)}
+                            aria-label={`Select account ${row.accountNumber}`}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-900">
+                          {row.accountNumber}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{row.accountName}</td>
+                        <td className="px-4 py-3 text-gray-700">{row.category}</td>
+                        <td className="px-4 py-3 text-gray-700">{row.department}</td>
+                        <td className="px-4 py-3">
+                          <label className="sr-only" htmlFor={`cost-type-${row.id}`}>
+                            {resolveLabel('costType', 'COST_TYPE')} for account{' '}
+                            {row.accountNumber}
+                          </label>
+                          <select
+                            id={`cost-type-${row.id}`}
+                            value={row.costType}
+                            onChange={event =>
+                              handleRowCostTypeChange(row.id, event.target.value as CostType)
+                            }
+                            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                          >
+                            {costTypeOptions.map(option => (
+                              <option key={option.label} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2" role="status" aria-live="polite">
+                            {status.state === 'pending' && (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
+                                <span className="text-xs text-gray-500">Updating…</span>
+                              </>
+                            )}
+                            {status.state === 'success' && (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                <span className="text-xs text-emerald-600">Updated</span>
+                              </>
+                            )}
+                            {status.state === 'error' && (
+                              <>
+                                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                <span className="text-xs text-amber-700">
+                                  {status.message ?? 'Update failed.'}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       ) : (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-sm text-gray-500">
