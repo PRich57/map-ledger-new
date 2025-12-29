@@ -9,7 +9,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { isKsmDomainUser } from '../utils/auth';
+import { canAccessCoaManager } from '../utils/auth';
 
 const linkBaseClass =
   'group flex items-center text-sm font-medium rounded-xl transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500';
@@ -36,7 +36,7 @@ interface NavItem {
 export default function Sidebar({ isOpen }: SidebarProps) {
   const { user } = useAuthStore();
   const isSuperUser = user?.role === 'super';
-  const canAccessCoaManager = isKsmDomainUser(user);
+  const hasCoaManagerAccess = canAccessCoaManager(user);
   const location = useLocation();
   const isMappingRoute = location.pathname.startsWith('/gl/mapping');
 
@@ -62,7 +62,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       label: 'COA Manager',
       icon: <FileSpreadsheet className="h-5 w-5" />,
       to: '/coa-manager',
-      isVisible: canAccessCoaManager,
+      isVisible: hasCoaManagerAccess,
     },
     {
       label: 'Data Import',

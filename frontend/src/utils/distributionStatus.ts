@@ -1,8 +1,5 @@
 import type { DistributionStatus } from '../types';
 
-const capitalizeValue = (value: string) =>
-  value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
-
 export const normalizeDistributionStatus = (
   value?: string | null,
 ): DistributionStatus => {
@@ -13,6 +10,13 @@ export const normalizeDistributionStatus = (
   if (!trimmed) {
     return 'Undistributed';
   }
-  const normalized = capitalizeValue(trimmed);
-  return normalized === 'Distributed' ? 'Distributed' : 'Undistributed';
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'distributed') {
+    return 'Distributed';
+  }
+  const collapsed = normalized.replace(/[\s_-]/g, '');
+  if (collapsed === 'nobalance') {
+    return 'No balance';
+  }
+  return 'Undistributed';
 };

@@ -154,6 +154,49 @@ const applyNormalizedStatusRows = () => {
   });
 };
 
+const NO_BALANCE_ROWS: DistributionRow[] = [
+  {
+    id: 'custom-row-no-balance',
+    mappingRowId: 'custom-mapping-3',
+    accountId: 'ACC-003',
+    description: 'No balance account description',
+    activity: 0,
+    type: 'direct',
+    operations: [],
+    presetId: null,
+    notes: undefined,
+    status: 'No balance',
+    isDirty: false,
+    autoSaveState: 'idle',
+    autoSaveError: null,
+  },
+  {
+    id: 'custom-row-distributed-2',
+    mappingRowId: 'custom-mapping-4',
+    accountId: 'ACC-004',
+    description: 'Another distributed account description',
+    activity: 150,
+    type: 'direct',
+    operations: [{ id: 'OP-002', code: 'OP-002', name: 'Operation 002' }],
+    presetId: null,
+    notes: undefined,
+    status: 'Distributed',
+    isDirty: false,
+    autoSaveState: 'idle',
+    autoSaveError: null,
+  },
+];
+
+const applyNoBalanceRows = () => {
+  act(() => {
+    useDistributionStore.setState({
+      rows: NO_BALANCE_ROWS,
+      searchTerm: '',
+      statusFilters: [],
+    });
+  });
+};
+
 describe('DistributionTable', () => {
   beforeEach(() => {
     resetDistributionStore();
@@ -297,6 +340,18 @@ describe('DistributionTable', () => {
     fireEvent.click(undistributedFilter);
     expect(screen.getByText('Undistributed account description')).toBeInTheDocument();
     expect(screen.queryByText('Distributed account description')).toBeNull();
+  });
+
+  test('filters distribution rows based on no balance status', async () => {
+    render(<DistributionTable />);
+    applyNoBalanceRows();
+    await screen.findByText('No balance account description');
+
+    const noBalanceFilter = screen.getByRole('button', { name: /^No balance$/i });
+    fireEvent.click(noBalanceFilter);
+
+    expect(screen.getByText('No balance account description')).toBeInTheDocument();
+    expect(screen.queryByText('Another distributed account description')).toBeNull();
   });
 
   test('status filter honors normalized status values before matching', async () => {

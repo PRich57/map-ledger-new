@@ -8,7 +8,7 @@ import {
 import Layout from './components/Layout';
 import { useAuthStore } from './store/authStore';
 import { useChartOfAccountsStore } from './store/chartOfAccountsStore';
-import { isKsmDomainUser } from './utils/auth';
+import { canAccessCoaManager } from './utils/auth';
 import { msalInstance } from './utils/msal';
 import { env } from './utils/env';
 import type { GroupTokenClaims } from './types';
@@ -29,7 +29,7 @@ const SageIntacct = React.lazy(() => import('./pages/integrations/SageIntacct'))
 
 function ProtectedRoutes() {
   const { user } = useAuthStore();
-  const canAccessCoaManager = isKsmDomainUser(user);
+  const hasCoaManagerAccess = canAccessCoaManager(user);
 
   return (
     <Routes>
@@ -69,7 +69,7 @@ function ProtectedRoutes() {
         <Route
           path="coa-manager"
           element={
-            canAccessCoaManager ? (
+            hasCoaManagerAccess ? (
               <React.Suspense fallback={<div>Loading...</div>}>
                 <CoaManager />
               </React.Suspense>

@@ -1,5 +1,6 @@
 import { ChangeEvent, Fragment, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpDown, Check, ChevronRight, HelpCircle, Loader2, X } from 'lucide-react';
+import { ArrowUpDown, Check, ChevronRight, HelpCircle, Loader2, Minus, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import RatioAllocationManager from './RatioAllocationManager';
 import DistributionDynamicAllocationRow from './DistributionDynamicAllocationRow';
 import {
@@ -43,12 +44,14 @@ interface DistributionTableProps {
 const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
   { value: 'Undistributed', label: 'Undistributed' },
   { value: 'Distributed', label: 'Distributed' },
+  { value: 'No balance', label: 'No balance' },
 ];
 
 const STATUS_BADGE_CLASSES: Record<DistributionStatus, string> = {
   Undistributed:
     'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
   Distributed: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
+  'No balance': 'bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200',
 };
 
 const TYPE_OPTIONS: { value: DistributionType; label: string }[] = [
@@ -84,9 +87,10 @@ const COLUMN_SPACING_CLASSES: Partial<Record<SortKey, string>> = {
   operations: 'pr-6',
 };
 
-const STATUS_ICONS: Record<DistributionStatus, typeof Check | typeof HelpCircle> = {
+const STATUS_ICONS: Record<DistributionStatus, LucideIcon> = {
   Distributed: Check,
   Undistributed: HelpCircle,
+  'No balance': Minus,
 };
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {

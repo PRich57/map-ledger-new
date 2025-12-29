@@ -14,6 +14,7 @@ import type {
 const STATUS_DEFINITIONS: { value: DistributionStatus; label: string }[] = [
   { value: 'Undistributed', label: 'Undistributed' },
   { value: 'Distributed', label: 'Distributed' },
+  { value: 'No balance', label: 'No balance' },
 ];
 
 export default function DistributionToolbar() {

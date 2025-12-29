@@ -76,13 +76,20 @@ interface DistributionState {
 const isEffectivelyZero = (value: number, tolerance = 0.0001): boolean =>
   Math.abs(value) <= tolerance;
 
+const resolveDistributionStatusForSave = (
+  status: DistributionStatus,
+): DistributionStatus => (status === 'No balance' ? 'Distributed' : status);
+
+const isCompletedDistributionStatus = (status: DistributionStatus): boolean =>
+  status === 'Distributed' || status === 'No balance';
+
 const deriveDistributionStatus = (
   type: DistributionType,
   operations: DistributionRow['operations'],
   activity: number,
 ): DistributionStatus => {
   if (isEffectivelyZero(activity)) {
-    return 'Distributed';
+    return 'No balance';
   }
 
   if (type === 'direct') {
@@ -120,7 +127,10 @@ export type DistributionProgress = {
 export const selectDistributionProgress = (state: DistributionState): DistributionProgress => {
   const totalRows = state.rows.length;
   const distributedRows = state.rows.filter(
-    row => deriveDistributionStatus(row.type, row.operations, row.activity) === 'Distributed',
+    row =>
+      isCompletedDistributionStatus(
+        deriveDistributionStatus(row.type, row.operations, row.activity),
+      ),
   ).length;
 
   return {
@@ -269,7 +279,7 @@ const buildDistributionPayloadRows = (
     distributionType: row.type,
     presetGuid: row.presetId ?? null,
     presetDescription: row.description ?? row.accountId,
-    distributionStatus: row.status,
+    distributionStatus: resolveDistributionStatusForSave(row.status),
     operations: row.operations
       .map(buildOperationPayload)
       .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
@@ -294,7 +304,7 @@ const applySaveResults = (
       return row;
     }
     const match = lookup.get(row.accountId);
-    return {
+    const nextRow: DistributionRow = {
       ...row,
       presetId: match?.presetGuid ?? row.presetId,
       status: normalizeDistributionStatus(match?.distributionStatus ?? row.status),
@@ -302,6 +312,7 @@ const applySaveResults = (
       autoSaveState,
       autoSaveError: null,
     };
+    return applyDistributionStatus(nextRow);
   });
 };
 
