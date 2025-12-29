@@ -19,7 +19,7 @@ const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Users = React.lazy(() => import('./pages/Users'));
 const Clients = React.lazy(() => import('./pages/Clients'));
 const Templates = React.lazy(() => import('./pages/Templates'));
-const COAManager = React.lazy(() => import('./pages/COAManager'));
+const CoaManager = React.lazy(() => import('./pages/CoaManager'));
 const Import = React.lazy(() => import('./pages/Import'));
 const Mapping = React.lazy(() => import('./pages/Mapping'));
 const Settings = React.lazy(() => import('./pages/Settings'));
@@ -71,7 +71,7 @@ function ProtectedRoutes() {
           element={
             canAccessCoaManager ? (
               <React.Suspense fallback={<div>Loading...</div>}>
-                <COAManager />
+                <CoaManager />
               </React.Suspense>
             ) : (
               <Navigate to="/" replace />
