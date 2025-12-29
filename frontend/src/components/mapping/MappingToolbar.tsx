@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useState } from 'react';
 import { Search } from 'lucide-react';
 import {
   selectActiveStatuses,
@@ -6,10 +6,7 @@ import {
   useMappingStore,
 } from '../../store/mappingStore';
 import { useMappingSelectionStore } from '../../store/mappingSelectionStore';
-import { useTemplateStore } from '../../store/templateStore';
 import type { GLAccountMappingRow } from '../../types';
-import { buildTargetScoaOptions } from '../../utils/targetScoaOptions';
-import BatchMapModal from './BatchMapModal';
 import PresetModal from './PresetModal';
 import BatchExclude from './BatchExclude';
 
@@ -52,9 +49,6 @@ export default function MappingToolbar() {
   const applyPresetToAccounts = useMappingStore(state => state.applyPresetToAccounts);
   const saveError = useMappingStore(state => state.saveError);
   const { selectedIds, clearSelection } = useMappingSelectionStore();
-  const datapoints = useTemplateStore(state => state.datapoints);
-  const coaOptions = useMemo(() => buildTargetScoaOptions(datapoints), [datapoints]);
-  const [isBatchMapOpen, setBatchMapOpen] = useState(false);
   const [isPresetOpen, setPresetOpen] = useState(false);
   const [isBatchExcludeOpen, setBatchExcludeOpen] = useState(false);
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
@@ -84,22 +78,6 @@ export default function MappingToolbar() {
 
   const handleClearFilters = () => {
     clearStatusFilters();
-  };
-
-  const handleApplyBatchMap = (updates: {
-    target?: string | null;
-    mappingType?: GLAccountMappingRow['mappingType'];
-    presetId?: string | null;
-    polarity?: GLAccountMappingRow['polarity'];
-    status?: GLAccountMappingRow['status'];
-  }) => {
-    if (!selectedIds.size) {
-      return;
-    }
-    applyBatchMapping(Array.from(selectedIds), updates);
-    setBatchMapOpen(false);
-    clearSelection();
-    setFinalizeError(null);
   };
 
   const handleApplyPreset = (presetId: string) => {
@@ -189,18 +167,6 @@ export default function MappingToolbar() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setBatchMapOpen(true)}
-            disabled={!hasSelection}
-            className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-              hasSelection
-                ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
-                : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400 focus:ring-0 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-600'
-            }`}
-          >
-            Batch map
-          </button>
-          <button
-            type="button"
             onClick={() => setPresetOpen(true)}
             disabled={!hasSelection}
             className={`rounded-md px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
@@ -260,13 +226,6 @@ export default function MappingToolbar() {
           </div>
         )}
       </div>
-      <BatchMapModal
-        open={isBatchMapOpen && hasSelection}
-        targetOptions={coaOptions}
-        selectedCount={selectedCount}
-        onClose={() => setBatchMapOpen(false)}
-        onApply={handleApplyBatchMap}
-      />
       <PresetModal
         open={isPresetOpen && hasSelection}
         selectedCount={selectedCount}

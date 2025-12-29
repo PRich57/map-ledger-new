@@ -213,6 +213,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType,
     updateRowOperations,
     updateRowPreset,
+    applyBatchDistribution,
     queueAutoSave,
     setSaveContext,
     setOperationsCatalog,
@@ -226,6 +227,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
     updateRowType: state.updateRowType,
     updateRowOperations: state.updateRowOperations,
     updateRowPreset: state.updateRowPreset,
+    applyBatchDistribution: state.applyBatchDistribution,
     queueAutoSave: state.queueAutoSave,
     setSaveContext: state.setSaveContext,
     setOperationsCatalog: state.setOperationsCatalog,
@@ -608,19 +610,44 @@ const buildDistributionPresetLibraryEntries = (
   }, [editingRowId, operationsDraft, rows, sanitizeOperationsDraft, updateRowOperations]);
 
   const handleDirectOperationChange = (row: DistributionRow, operationId: string) => {
+    const hasBatchSelection = selectedIds.has(row.id) && selectedIds.size > 1;
     if (!operationId) {
-      updateRowOperations(row.id, []);
+      if (hasBatchSelection) {
+        applyBatchDistribution(Array.from(selectedIds), { operation: null });
+      } else {
+        updateRowOperations(row.id, []);
+      }
       return;
     }
     const catalogItem = operationsCatalog.find(item => item.id === operationId);
     if (!catalogItem) {
-      updateRowOperations(row.id, []);
+      if (hasBatchSelection) {
+        applyBatchDistribution(Array.from(selectedIds), { operation: null });
+      } else {
+        updateRowOperations(row.id, []);
+      }
       return;
     }
-    updateRowOperations(row.id, [
-      { id: catalogItem.id, code: catalogItem.code, name: catalogItem.name },
-    ]);
+    const operationShare = {
+      id: catalogItem.id,
+      code: catalogItem.code,
+      name: catalogItem.name,
+    };
+    if (hasBatchSelection) {
+      applyBatchDistribution(Array.from(selectedIds), { operation: operationShare });
+      return;
+    }
+    updateRowOperations(row.id, [operationShare]);
     queueAutoSave([row.id], { immediate: true });
+  };
+
+  const handleDistributionTypeChange = (rowId: string, type: DistributionType) => {
+    const hasBatchSelection = selectedIds.has(rowId) && selectedIds.size > 1;
+    if (hasBatchSelection) {
+      applyBatchDistribution(Array.from(selectedIds), { type });
+      return;
+    }
+    updateRowType(rowId, type);
   };
 
   const getAriaSort = (columnKey: SortKey): 'ascending' | 'descending' | 'none' => {
@@ -756,7 +783,12 @@ const buildDistributionPresetLibraryEntries = (
                       <select
                         id={`distribution-type-${row.id}`}
                         value={row.type}
-                        onChange={event => updateRowType(row.id, event.target.value as DistributionType)}
+                        onChange={event =>
+                          handleDistributionTypeChange(
+                            row.id,
+                            event.target.value as DistributionType
+                          )
+                        }
                         className="w-full min-w-[8rem] rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                       >
                         {TYPE_OPTIONS.map(option => (

@@ -166,6 +166,7 @@ export default function MappingTable() {
   const updateTarget = useMappingStore((state) => state.updateTarget);
   const updateMappingType = useMappingStore((state) => state.updateMappingType);
   const updatePolarity = useMappingStore((state) => state.updatePolarity);
+  const applyBatchMapping = useMappingStore((state) => state.applyBatchMapping);
   const applyPresetToAccounts = useMappingStore(
     (state) => state.applyPresetToAccounts
   );
@@ -373,6 +374,44 @@ export default function MappingTable() {
     };
     return [...filteredAccounts].sort(safeCompare);
   }, [filteredAccounts, sortConfig, getDisplayStatus]);
+
+  const shouldAutoMapNextAccount = (account: GLAccountMappingRow) =>
+    account.mappingType === 'direct' &&
+    !account.manualCOAId?.trim() &&
+    account.status !== 'Mapped' &&
+    account.status !== 'Excluded';
+
+  const handleTargetChange = (
+    account: GLAccountMappingRow,
+    index: number,
+    nextValue: string
+  ) => {
+    const hasBatchSelection = selectedIds.has(account.id) && selectedIds.size > 1;
+    if (hasBatchSelection) {
+      applyBatchMapping(Array.from(selectedIds), { target: nextValue || null });
+      return;
+    }
+
+    updateTarget(account.id, nextValue);
+
+    if (!nextValue) {
+      return;
+    }
+
+    const nextAccount = sortedAccounts[index + 1];
+    if (nextAccount && shouldAutoMapNextAccount(nextAccount)) {
+      updateTarget(nextAccount.id, nextValue);
+    }
+  };
+
+  const handleMappingTypeChange = (accountId: string, nextType: MappingType) => {
+    const hasBatchSelection = selectedIds.has(accountId) && selectedIds.size > 1;
+    if (hasBatchSelection) {
+      applyBatchMapping(Array.from(selectedIds), { mappingType: nextType });
+      return;
+    }
+    updateMappingType(accountId, nextType);
+  };
 
   const derivedSelectedPeriod = activePeriod ?? selectedPeriod ?? null;
 
@@ -644,7 +683,7 @@ export default function MappingTable() {
                         id={`mapping-type-${account.id}`}
                         value={account.mappingType}
                         onChange={(event) =>
-                          updateMappingType(
+                          handleMappingTypeChange(
                             account.id,
                             event.target.value as MappingType
                           )
@@ -682,7 +721,9 @@ export default function MappingTable() {
                             value={targetScoa}
                             options={coaOptions}
                             placeholder="Search target"
-                            onChange={nextValue => updateTarget(account.id, nextValue)}
+                            onChange={(nextValue) =>
+                              handleTargetChange(account, index, nextValue)
+                            }
                             noOptionsMessage="No matching accounts"
                             className="w-full"
                           />
