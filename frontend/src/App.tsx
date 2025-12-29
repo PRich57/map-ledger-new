@@ -8,6 +8,7 @@ import {
 import Layout from './components/Layout';
 import { useAuthStore } from './store/authStore';
 import { useChartOfAccountsStore } from './store/chartOfAccountsStore';
+import { isKsmDomainUser } from './utils/auth';
 import { msalInstance } from './utils/msal';
 import { env } from './utils/env';
 import type { GroupTokenClaims } from './types';
@@ -18,6 +19,7 @@ const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Users = React.lazy(() => import('./pages/Users'));
 const Clients = React.lazy(() => import('./pages/Clients'));
 const Templates = React.lazy(() => import('./pages/Templates'));
+const COAManager = React.lazy(() => import('./pages/COAManager'));
 const Import = React.lazy(() => import('./pages/Import'));
 const Mapping = React.lazy(() => import('./pages/Mapping'));
 const Settings = React.lazy(() => import('./pages/Settings'));
@@ -26,6 +28,9 @@ const QuickBooks = React.lazy(() => import('./pages/integrations/QuickBooks'));
 const SageIntacct = React.lazy(() => import('./pages/integrations/SageIntacct'));
 
 function ProtectedRoutes() {
+  const { user } = useAuthStore();
+  const canAccessCoaManager = isKsmDomainUser(user);
+
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
@@ -59,6 +64,18 @@ function ProtectedRoutes() {
             <React.Suspense fallback={<div>Loading...</div>}>
               <Templates />
             </React.Suspense>
+          }
+        />
+        <Route
+          path="coa-manager"
+          element={
+            canAccessCoaManager ? (
+              <React.Suspense fallback={<div>Loading...</div>}>
+                <COAManager />
+              </React.Suspense>
+            ) : (
+              <Navigate to="/" replace />
+            )
           }
         />
         <Route
