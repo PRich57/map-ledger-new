@@ -70,6 +70,7 @@ const formatAllocationShare = (row: DistributionRow, share: DistributionOperatio
 type OperationReviewItem = {
   row: DistributionRow;
   share: DistributionOperationShare;
+  allocatedAmount: number;
 };
 
 interface OperationReviewEntry {
@@ -542,6 +543,10 @@ const ReviewPane = () => {
         if (!key) {
           return;
         }
+        const allocatedAmount = getAllocatedActivityForShare(row, share);
+        if (Math.abs(allocatedAmount) < 1e-6) {
+          return;
+        }
         let entry = entries.get(key);
         if (!entry) {
           const code = share.code?.trim() || share.id?.trim() || share.name?.trim() || key;
@@ -552,7 +557,7 @@ const ReviewPane = () => {
           };
           entries.set(key, entry);
         }
-        entry.items.push({ row, share });
+        entry.items.push({ row, share, allocatedAmount });
       });
     });
 
@@ -563,7 +568,7 @@ const ReviewPane = () => {
       entry.items.sort((a, b) => a.row.accountId.localeCompare(b.row.accountId));
     });
     return sortedEntries;
-  }, [clientOperations, distributedRows]);
+  }, [clientOperations, distributedRows, getAllocatedActivityForShare]);
 
   const appendLog = (entry: Omit<PublishLogEntry, 'id' | 'timestamp'> & { timestamp?: string }) => {
     setPublishLog(previous => [
@@ -790,10 +795,7 @@ const ReviewPane = () => {
           </div>
           <div className="space-y-6">
             {operationReviewEntries.map(entry => {
-              const totalActivity = entry.items.reduce(
-                (sum, { row, share }) => sum + getAllocatedActivityForShare(row, share),
-                0,
-              );
+              const totalActivity = entry.items.reduce((sum, item) => sum + item.allocatedAmount, 0);
               return (
                 <Card key={entry.operation.code}>
                 <CardHeader>
@@ -835,8 +837,7 @@ const ReviewPane = () => {
                             </td>
                           </tr>
                         ) : (
-                          entry.items.map(({ row, share }) => {
-                            const allocatedAmount = getAllocatedActivityForShare(row, share);
+                          entry.items.map(({ row, share, allocatedAmount }) => {
                             const rowKey = `${row.id}-${share.id ?? share.code ?? share.name ?? entry.operation.code}`;
                             const rowDetailId = `${rowKey}-details`;
                             const isRowExpanded = expandedRows[rowKey] ?? false;

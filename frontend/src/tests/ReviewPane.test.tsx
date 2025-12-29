@@ -276,6 +276,57 @@ describe('ReviewPane', () => {
     expect(allocatedCell).toBeInTheDocument();
   });
 
+  test('hides rows with zero allocated activity', () => {
+    useMappingStore.setState(state => ({
+      ...state,
+      accounts: [
+        ...state.accounts,
+        {
+          id: 'acct-zero-activity',
+          entityId: 'entity-acme',
+          entityName: 'Acme Freight',
+          accountId: '5400',
+          accountName: 'Zero Activity Account',
+          activity: 0,
+          status: 'Mapped',
+          mappingType: 'direct',
+          netChange: 0,
+          operation: 'Shared Services',
+          suggestedCOAId: '5400',
+          manualCOAId: '5400',
+          polarity: 'Debit',
+          splitDefinitions: [],
+          entities: [{ id: 'entity-acme', entity: 'Acme Freight', balance: 0 }],
+          glMonth: TEST_PERIOD,
+        },
+      ],
+    }));
+
+    useDistributionStore.setState(state => ({
+      ...state,
+      rows: [
+        ...state.rows,
+        {
+          id: 'row-zero-activity',
+          mappingRowId: 'acct-zero-activity',
+          accountId: '5400',
+          description: 'Zero Activity Account',
+          activity: 0,
+          type: 'direct',
+          operations: [
+            { id: 'shared_services', code: 'Shared Services', name: 'Shared Services' },
+          ],
+          status: 'Distributed',
+        },
+      ],
+    }));
+
+    render(<ReviewPane />);
+
+    expect(screen.queryByText('Zero Activity Account')).not.toBeInTheDocument();
+    expect(screen.getByText(/\$120,000 total mapped activity/i)).toBeInTheDocument();
+  });
+
   test('exports SCoA activity when export button is clicked', async () => {
     const mockedExport = exportOperationScoaWorkbook as jest.MockedFunction<
       typeof exportOperationScoaWorkbook
