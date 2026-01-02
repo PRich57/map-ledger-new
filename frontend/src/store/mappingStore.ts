@@ -877,7 +877,7 @@ export const buildDistributionSourceSummaries = (
   const summaries: DistributionSourceSummary[] = [];
 
   const addEntry = (
-    mappingRowId: string,
+    account: GLAccountMappingRow,
     target: { id: string; label: string },
     amount: number,
     suffix?: string,
@@ -886,8 +886,10 @@ export const buildDistributionSourceSummaries = (
       return;
     }
     summaries.push({
-      id: createDistributionRowId(mappingRowId, target.id, suffix),
-      mappingRowId,
+      id: createDistributionRowId(account.id, target.id, suffix),
+      mappingRowId: account.id,
+      entityAccountId: account.accountId,
+      entityAccountName: account.accountName ?? undefined,
       accountId: target.id,
       description: target.label,
       mappedAmount: amount,
@@ -907,7 +909,7 @@ export const buildDistributionSourceSummaries = (
       if (!target) {
         return;
       }
-      addEntry(account.id, target, account.netChange);
+      addEntry(account, target, account.netChange);
       return;
     }
 
@@ -926,7 +928,7 @@ export const buildDistributionSourceSummaries = (
         }
         const amount = getSplitSignedAmount(account, split);
         const splitSuffix = split.id?.trim() || `split-${index + 1}`;
-        addEntry(account.id, target, amount, splitSuffix);
+        addEntry(account, target, amount, splitSuffix);
       });
       return;
     }
@@ -944,7 +946,7 @@ export const buildDistributionSourceSummaries = (
       const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
       const allocatable = Math.max(0, baseAmount - excluded);
       const signedAmount = getSignedAmountForAccount(account, allocatable);
-      addEntry(account.id, target, signedAmount);
+      addEntry(account, target, signedAmount);
     }
   });
 

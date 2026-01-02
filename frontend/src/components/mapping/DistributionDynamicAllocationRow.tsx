@@ -463,7 +463,7 @@ const buildPresetOperations = useCallback(
     const totalBasis = rowsWithBasis.reduce((sum, item) => sum + item.basisValue, 0);
 
     return rowsWithBasis
-      .map(({ presetRow, basisValue }) => {
+      .map<DistributionOperationShare | null>(({ presetRow, basisValue }) => {
         const targetId = normalizeOperationId(presetRow.targetAccountId);
         if (!targetId) {
           return null;
@@ -484,8 +484,8 @@ const buildPresetOperations = useCallback(
           allocation: allocationPct,
         };
       })
-      .filter((op): op is DistributionOperationShare => Boolean(op))
-      .sort((a, b) => a.code.localeCompare(b.code));
+      .filter((operation): operation is DistributionOperationShare => operation !== null)
+      .sort((a, b) => (a.code ?? a.id).localeCompare(b.code ?? b.id));
   },
   [distributionContextPresets, normalizeOperationId, operationLabelLookup, basisAccounts, selectedPeriod],
 );

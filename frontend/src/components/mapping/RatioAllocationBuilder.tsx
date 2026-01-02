@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '../ui/Card';
 import SearchableSelect from '../ui/SearchableSelect';
 import { useChartOfAccountsStore } from '../../store/chartOfAccountsStore';
@@ -60,9 +60,7 @@ const RatioAllocationBuilder = ({
     allocations,
     presets: allPresets,
     basisAccounts,
-    sourceAccounts,
     selectedPeriod,
-    validationErrors,
     createPreset,
     updatePreset,
     addPresetRow,
@@ -70,7 +68,6 @@ const RatioAllocationBuilder = ({
     removePresetRow,
     getPresetAvailableDynamicAccounts,
     toggleAllocationPresetTargets,
-    toggleTargetExclusion,
     setActivePresetForSource,
   } = useRatioAllocationStore();
 
@@ -151,7 +148,6 @@ const RatioAllocationBuilder = ({
 
   const defaultPresetName = useMemo(() => {
     return (
-      selectedAllocation?.sourceAccount.name?.trim() ||
       selectedAllocation?.sourceAccount.description?.trim() ||
       selectedAllocation?.sourceAccount.number?.trim() ||
       selectedAllocation?.sourceAccount.id?.trim() ||
@@ -392,17 +388,6 @@ const RatioAllocationBuilder = ({
       selectedAllocation.targetDatapoints
         .filter(target => target.groupId)
         .map(target => target.groupId as string),
-    );
-  }, [selectedAllocation]);
-
-  const excludedTargetIds = useMemo(() => {
-    if (!selectedAllocation) {
-      return new Set<string>();
-    }
-    return new Set(
-      selectedAllocation.targetDatapoints
-        .filter(target => target.isExclusion)
-        .map(target => target.datapointId),
     );
   }, [selectedAllocation]);
 

@@ -227,16 +227,7 @@ const ReviewPane = () => {
       ];
     }
 
-    const entityBreakdowns =
-      mappingRow.entities && mappingRow.entities.length > 0
-        ? mappingRow.entities
-        : [
-            {
-              id: mappingRow.entityId || 'default',
-              entity: mappingRow.entityName || 'Default Entity',
-              balance: mappingRow.netChange,
-            },
-          ];
+    const entityBreakdowns = resolveEntityBreakdowns(mappingRow);
 
     const totalBalance = entityBreakdowns.reduce(
       (sum, breakdown) => sum + Math.abs(breakdown.balance),

@@ -3,6 +3,7 @@ import type { EntityDistributionPresetDetailRow } from './entityDistributionPres
 
 export interface EntityScoaDistributionInput {
   entityId: string;
+  entityAccountId: string;
   scoaAccountId: string;
   distributionType: string;
   presetGuid?: string | null;
@@ -24,6 +25,66 @@ export interface EntityScoaDistributionWithDetailsRow
 
 const TABLE_NAME = 'ml.ENTITY_SCOA_DISTRIBUTION';
 
+const ENTITY_ACCOUNT_COLUMN_CANDIDATES = [
+  'ENTITY_ACCOUNT_ID',
+  'ACCOUNT_ID',
+  'GL_ACCOUNT_ID',
+  'SOURCE_ACCOUNT_ID',
+  'ENTITY_GL_ACCOUNT_ID',
+];
+
+const SCOA_ACCOUNT_COLUMN_CANDIDATES = [
+  'SCOA_ACCOUNT_ID',
+  'TARGET_ACCOUNT_ID',
+  'SCOA_ID',
+  'SCOA_ACCOUNT',
+];
+
+export type DistributionTableSchema = {
+  entityAccountColumn: string | null;
+  scoaAccountColumn: string | null;
+};
+
+let distributionTableSchemaPromise: Promise<DistributionTableSchema> | null = null;
+
+const resolveColumnName = (
+  columns: Set<string>,
+  candidates: string[],
+): string | null => {
+  const match = candidates.find((candidate) => columns.has(candidate));
+  return match ?? null;
+};
+
+const loadDistributionTableSchema = async (): Promise<DistributionTableSchema> => {
+  if (!distributionTableSchemaPromise) {
+    distributionTableSchemaPromise = (async () => {
+      const result = await runQuery<{ column_name: string }>(
+        `SELECT COLUMN_NAME as column_name
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = PARSENAME(@tableName, 2)
+          AND TABLE_NAME = PARSENAME(@tableName, 1)`,
+        {
+          tableName: TABLE_NAME,
+        },
+      );
+
+      const columns = new Set(
+        (result.recordset ?? []).map((row) => row.column_name.toUpperCase()),
+      );
+
+      return {
+        entityAccountColumn: resolveColumnName(columns, ENTITY_ACCOUNT_COLUMN_CANDIDATES),
+        scoaAccountColumn: resolveColumnName(columns, SCOA_ACCOUNT_COLUMN_CANDIDATES),
+      };
+    })();
+  }
+
+  return distributionTableSchemaPromise;
+};
+
+export const getEntityScoaDistributionSchema = async (): Promise<DistributionTableSchema> =>
+  loadDistributionTableSchema();
+
 const normalizeText = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
     return null;
@@ -32,11 +93,35 @@ const normalizeText = (value?: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeMeaningfulText = (value?: string | null): string | null => {
+  const normalized = normalizeText(value);
+  return normalized && normalized.length > 1 ? normalized : null;
+};
+
 const normalizeGuid = (value?: string | null): string | null => normalizeText(value);
+
+const normalizeDistributionTypeValue = (value?: string | null): string | null => {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    return null;
+  }
+  const lower = normalized.toLowerCase();
+  if (lower === 'direct' || lower === 'd') {
+    return 'direct';
+  }
+  if (lower === 'percentage' || lower === 'p') {
+    return 'percentage';
+  }
+  if (lower === 'dynamic') {
+    return 'dynamic';
+  }
+  return lower.length > 1 ? lower : null;
+};
 
 const mapRow = (row: {
   entity_id: string;
-  scoa_account_id: string;
+  entity_account_id?: string | null;
+  scoa_account_id?: string | null;
   distribution_type: string;
   preset_guid?: string | null;
   distribution_status?: string | null;
@@ -45,7 +130,8 @@ const mapRow = (row: {
   updated_by?: string | null;
 }): EntityScoaDistributionRow => ({
   entityId: row.entity_id,
-  scoaAccountId: row.scoa_account_id,
+  entityAccountId: row.entity_account_id ?? '',
+  scoaAccountId: row.scoa_account_id ?? '',
   distributionType: row.distribution_type,
   presetGuid: row.preset_guid ?? null,
   distributionStatus: row.distribution_status ?? null,
@@ -67,9 +153,19 @@ export const listEntityScoaDistributions = async (
     return [];
   }
 
+  const schema = await loadDistributionTableSchema();
+  const entityAccountSelect = schema.entityAccountColumn
+    ? `${schema.entityAccountColumn} as entity_account_id`
+    : 'NULL as entity_account_id';
+  const scoaAccountSelect = schema.scoaAccountColumn
+    ? `${schema.scoaAccountColumn} as scoa_account_id`
+    : 'NULL as scoa_account_id';
+  const orderBy = schema.scoaAccountColumn ?? 'PRESET_GUID';
+
   const result = await runQuery<{
     entity_id: string;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     distribution_type: string;
     preset_guid?: string | null;
     distribution_status?: string | null;
@@ -79,7 +175,8 @@ export const listEntityScoaDistributions = async (
   }>(
     `SELECT
       ENTITY_ID as entity_id,
-      SCOA_ACCOUNT_ID as scoa_account_id,
+      ${entityAccountSelect},
+      ${scoaAccountSelect},
       DISTRIBUTION_TYPE as distribution_type,
       PRESET_GUID as preset_guid,
       DISTRIBUTION_STATUS as distribution_status,
@@ -88,7 +185,7 @@ export const listEntityScoaDistributions = async (
       UPDATED_BY as updated_by
     FROM ${TABLE_NAME}
     WHERE ENTITY_ID = @entityId
-    ORDER BY SCOA_ACCOUNT_ID ASC`,
+    ORDER BY ${orderBy} ASC`,
     { entityId }
   );
 
@@ -102,21 +199,44 @@ export const insertEntityScoaDistributions = async (
     return [];
   }
 
+  const schema = await loadDistributionTableSchema();
+  const columns = [
+    'ENTITY_ID',
+    ...(schema.entityAccountColumn ? [schema.entityAccountColumn] : []),
+    ...(schema.scoaAccountColumn ? [schema.scoaAccountColumn] : []),
+    'DISTRIBUTION_TYPE',
+    'PRESET_GUID',
+    'DISTRIBUTION_STATUS',
+  ];
   const params: Record<string, unknown> = {};
   const valuesClause = inputs
     .map((input, index) => {
       params[`entityId${index}`] = input.entityId;
-      params[`scoaAccountId${index}`] = normalizeText(input.scoaAccountId);
-      params[`distributionType${index}`] = normalizeText(input.distributionType);
+      if (schema.entityAccountColumn) {
+        params[`entityAccountId${index}`] = normalizeMeaningfulText(input.entityAccountId);
+      }
+      if (schema.scoaAccountColumn) {
+        params[`scoaAccountId${index}`] = normalizeMeaningfulText(input.scoaAccountId);
+      }
+      params[`distributionType${index}`] = normalizeDistributionTypeValue(input.distributionType);
       params[`presetGuid${index}`] = normalizeGuid(input.presetGuid ?? null);
       params[`distributionStatus${index}`] = normalizeText(input.distributionStatus);
-      return `(@entityId${index}, @scoaAccountId${index}, @distributionType${index}, @presetGuid${index}, @distributionStatus${index})`;
+      const rowValues = [
+        `@entityId${index}`,
+        ...(schema.entityAccountColumn ? [`@entityAccountId${index}`] : []),
+        ...(schema.scoaAccountColumn ? [`@scoaAccountId${index}`] : []),
+        `@distributionType${index}`,
+        `@presetGuid${index}`,
+        `@distributionStatus${index}`,
+      ];
+      return `(${rowValues.join(', ')})`;
     })
     .join(', ');
 
   const result = await runQuery<{
     entity_id: string;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     distribution_type: string;
     preset_guid?: string | null;
     distribution_status?: string | null;
@@ -125,15 +245,12 @@ export const insertEntityScoaDistributions = async (
     updated_by?: string | null;
   }>(
     `INSERT INTO ${TABLE_NAME} (
-      ENTITY_ID,
-      SCOA_ACCOUNT_ID,
-      DISTRIBUTION_TYPE,
-      PRESET_GUID,
-      DISTRIBUTION_STATUS
+      ${columns.join(',\n      ')}
     )
     OUTPUT
       INSERTED.ENTITY_ID as entity_id,
-      INSERTED.SCOA_ACCOUNT_ID as scoa_account_id,
+      ${schema.entityAccountColumn ? `INSERTED.${schema.entityAccountColumn} as entity_account_id,` : 'NULL as entity_account_id,'}
+      ${schema.scoaAccountColumn ? `INSERTED.${schema.scoaAccountColumn} as scoa_account_id,` : 'NULL as scoa_account_id,'}
       INSERTED.DISTRIBUTION_TYPE as distribution_type,
       INSERTED.PRESET_GUID as preset_guid,
       INSERTED.DISTRIBUTION_STATUS as distribution_status,
@@ -149,13 +266,38 @@ export const insertEntityScoaDistributions = async (
 
 export const updateEntityScoaDistribution = async (
   entityId: string,
+  entityAccountId: string,
   scoaAccountId: string,
   distributionType: string,
-  updates: Partial<Omit<EntityScoaDistributionInput, 'entityId' | 'scoaAccountId' | 'distributionType'>>
+  updates: Partial<
+    Omit<
+      EntityScoaDistributionInput,
+      'entityId' | 'entityAccountId' | 'scoaAccountId' | 'distributionType'
+    >
+  >
 ): Promise<EntityScoaDistributionRow | null> => {
   if (!entityId || !scoaAccountId || !distributionType) {
     return null;
   }
+
+  const normalizedDistributionType = normalizeDistributionTypeValue(distributionType);
+  if (!normalizedDistributionType) {
+    return null;
+  }
+
+  const schema = await loadDistributionTableSchema();
+  if (!schema.entityAccountColumn && !schema.scoaAccountColumn) {
+    return null;
+  }
+  const whereClauses = [
+    ...(schema.entityAccountColumn ? [`${schema.entityAccountColumn} = @entityAccountId`] : []),
+    ...(schema.scoaAccountColumn ? [`${schema.scoaAccountColumn} = @scoaAccountId`] : []),
+    'DISTRIBUTION_TYPE = @distributionType',
+  ];
+
+  const whereClause = whereClauses.length
+    ? `AND ${whereClauses.join('\n      AND ')}`
+    : '';
 
   await runQuery(
     `UPDATE ${TABLE_NAME}
@@ -165,12 +307,12 @@ export const updateEntityScoaDistribution = async (
       UPDATED_BY = @updatedBy,
       UPDATED_DTTM = SYSUTCDATETIME()
     WHERE ENTITY_ID = @entityId
-      AND SCOA_ACCOUNT_ID = @scoaAccountId
-      AND DISTRIBUTION_TYPE = @distributionType`,
+      ${whereClause}`,
     {
       entityId,
-      scoaAccountId: normalizeText(scoaAccountId),
-      distributionType: normalizeText(distributionType),
+      entityAccountId: normalizeMeaningfulText(entityAccountId),
+      scoaAccountId: normalizeMeaningfulText(scoaAccountId),
+      distributionType: normalizedDistributionType,
       presetGuid: normalizeGuid(updates.presetGuid ?? null),
       distributionStatus: normalizeText(updates.distributionStatus),
       updatedBy: normalizeText(updates.updatedBy),
@@ -180,25 +322,45 @@ export const updateEntityScoaDistribution = async (
   const records = await listEntityScoaDistributions(entityId);
   return records.find(
     (row) =>
-      row.scoaAccountId === scoaAccountId && row.distributionType === distributionType
+      row.entityAccountId === entityAccountId &&
+      row.scoaAccountId === scoaAccountId &&
+      row.distributionType === distributionType
   ) ?? null;
 };
 
 export const deleteEntityScoaDistribution = async (
   entityId: string,
-  scoaAccountId: string
+  entityAccountId: string,
+  scoaAccountId: string,
+  distributionType?: string | null
 ): Promise<number> => {
   if (!entityId || !scoaAccountId) {
     return 0;
   }
 
+  const schema = await loadDistributionTableSchema();
+  if (!schema.entityAccountColumn && !schema.scoaAccountColumn) {
+    return 0;
+  }
+  const whereClauses = [
+    ...(schema.entityAccountColumn ? [`${schema.entityAccountColumn} = @entityAccountId`] : []),
+    ...(schema.scoaAccountColumn ? [`${schema.scoaAccountColumn} = @scoaAccountId`] : []),
+    ...(distributionType ? ['DISTRIBUTION_TYPE = @distributionType'] : []),
+  ];
+
+  const whereClause = whereClauses.length
+    ? `AND ${whereClauses.join('\n      AND ')}`
+    : '';
+
   const result = await runQuery(
     `DELETE FROM ${TABLE_NAME}
     WHERE ENTITY_ID = @entityId
-      AND SCOA_ACCOUNT_ID = @scoaAccountId`,
+      ${whereClause}`,
     {
       entityId,
-      scoaAccountId: normalizeText(scoaAccountId),
+      entityAccountId: normalizeMeaningfulText(entityAccountId),
+      scoaAccountId: normalizeMeaningfulText(scoaAccountId),
+      distributionType: distributionType ? normalizeDistributionTypeValue(distributionType) : null,
     }
   );
 
@@ -243,9 +405,21 @@ export const listEntityScoaDistributionsWithDetails = async (
     return [];
   }
 
+  const schema = await loadDistributionTableSchema();
+  const entityAccountSelect = schema.entityAccountColumn
+    ? `esd.${schema.entityAccountColumn} as entity_account_id`
+    : 'NULL as entity_account_id';
+  const scoaAccountSelect = schema.scoaAccountColumn
+    ? `esd.${schema.scoaAccountColumn} as scoa_account_id`
+    : 'NULL as scoa_account_id';
+  const orderBy = schema.scoaAccountColumn
+    ? `esd.${schema.scoaAccountColumn}`
+    : 'esd.PRESET_GUID';
+
   const result = await runQuery<{
     entity_id: string;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     distribution_type: string;
     preset_guid?: string | null;
     distribution_status?: string | null;
@@ -261,7 +435,8 @@ export const listEntityScoaDistributionsWithDetails = async (
   }>(
     `SELECT
       esd.ENTITY_ID as entity_id,
-      esd.SCOA_ACCOUNT_ID as scoa_account_id,
+      ${entityAccountSelect},
+      ${scoaAccountSelect},
       esd.DISTRIBUTION_TYPE as distribution_type,
       esd.PRESET_GUID as preset_guid,
       esd.DISTRIBUTION_STATUS as distribution_status,
@@ -278,7 +453,7 @@ export const listEntityScoaDistributionsWithDetails = async (
     LEFT JOIN ml.ENTITY_DISTRIBUTION_PRESETS edp ON edp.PRESET_GUID = esd.PRESET_GUID
     LEFT JOIN ml.ENTITY_DISTRIBUTION_PRESET_DETAIL edpd ON edpd.PRESET_GUID = esd.PRESET_GUID
     WHERE esd.ENTITY_ID = @entityId
-    ORDER BY esd.SCOA_ACCOUNT_ID ASC`,
+    ORDER BY ${orderBy} ASC`,
     { entityId },
   );
 
@@ -306,8 +481,12 @@ export const listEntityScoaDistributionsWithDetails = async (
     }
   >();
 
+  const useEntityAccountKey = Boolean(schema.entityAccountColumn);
+
   rows.forEach(({ distribution, presetDescription, presetType, detail }) => {
-    const key = `${distribution.entityId}|${distribution.scoaAccountId}`;
+    const key = useEntityAccountKey
+      ? `${distribution.entityId}|${distribution.entityAccountId}|${distribution.scoaAccountId}`
+      : `${distribution.entityId}|${distribution.scoaAccountId}|${distribution.distributionType}|${distribution.presetGuid ?? ''}`;
     const existing = grouped.get(key);
     if (existing) {
       if (detail) {

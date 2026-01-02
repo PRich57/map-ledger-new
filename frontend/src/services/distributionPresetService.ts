@@ -12,6 +12,7 @@ export interface DistributionPresetDetailPayload {
 export interface DistributionPresetPayload {
   presetGuid: string;
   entityId: string;
+  entityAccountId?: string | null;
   presetType?: string | null;
   presetDescription?: string | null;
   scoaAccountId: string;
@@ -24,10 +25,10 @@ const normalizeDistributionPresetType = (value?: string | null): MappingType => 
     return 'percentage';
   }
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'dynamic' || normalized === 'd') {
+  if (normalized === 'dynamic') {
     return 'dynamic';
   }
-  if (normalized === 'direct') {
+  if (normalized === 'direct' || normalized === 'd') {
     return 'direct';
   }
   if (normalized === 'exclude' || normalized === 'excluded' || normalized === 'x') {

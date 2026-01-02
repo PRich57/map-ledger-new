@@ -29,6 +29,11 @@ const normalizeOptionalText = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeIdentifier = (value: unknown): string | null => {
+  const normalized = normalizeOptionalText(value);
+  return normalized && normalized.length > 1 ? normalized : null;
+};
+
 const createHandler = async (
   request: HttpRequest,
   context: InvocationContext
@@ -36,18 +41,23 @@ const createHandler = async (
   try {
     const body = await readJson(request);
     const entityId = getFirstStringValue(body?.entityId);
+    const entityAccountId = normalizeIdentifier(body?.entityAccountId);
     const presetType = getFirstStringValue(body?.presetType);
-    const scoaAccountId = getFirstStringValue(body?.scoaAccountId);
+    const scoaAccountId = normalizeIdentifier(body?.scoaAccountId);
     const presetDescription = normalizeOptionalText(body?.presetDescription);
     const metric = normalizeOptionalText(body?.metric);
     const presetGuid = parsePresetGuid(body?.presetGuid) ?? crypto.randomUUID();
 
-    if (!entityId || !presetType || !scoaAccountId) {
-      return json({ message: 'entityId, presetType, and scoaAccountId are required' }, 400);
+    if (!entityId || !entityAccountId || !presetType || !scoaAccountId) {
+      return json(
+        { message: 'entityId, entityAccountId, presetType, and scoaAccountId are required' },
+        400,
+      );
     }
 
     const created = await createEntityDistributionPreset({
       entityId,
+      entityAccountId,
       presetType,
       presetDescription,
       presetGuid,
@@ -90,7 +100,8 @@ const updateHandler = async (
     const presetGuid = parsePresetGuid(body?.presetGuid);
     const presetType = getFirstStringValue(body?.presetType);
     const presetDescription = normalizeOptionalText(body?.presetDescription);
-    const scoaAccountId = getFirstStringValue(body?.scoaAccountId);
+    const entityAccountId = normalizeIdentifier(body?.entityAccountId);
+    const scoaAccountId = normalizeIdentifier(body?.scoaAccountId);
     const metric = normalizeOptionalText(body?.metric);
     const updatedBy = normalizeOptionalText(body?.updatedBy);
 
@@ -101,6 +112,7 @@ const updateHandler = async (
     const updated = await updateEntityDistributionPreset(presetGuid, {
       presetType: presetType ?? undefined,
       presetDescription: presetDescription ?? undefined,
+      entityAccountId: entityAccountId ?? undefined,
       scoaAccountId: scoaAccountId ?? undefined,
       metric: metric ?? undefined,
       updatedBy,

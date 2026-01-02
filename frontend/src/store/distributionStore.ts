@@ -119,6 +119,56 @@ const applyDistributionStatus = (row: DistributionRow): DistributionRow => ({
   status: deriveDistributionStatus(row.type, row.operations, row.activity),
 });
 
+const normalizeIdentifier = (value?: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeMeaningfulText = (value?: string | null): string | null => {
+  const normalized = normalizeIdentifier(value);
+  return normalized && normalized.length > 1 ? normalized : null;
+};
+
+const buildDistributionKey = (
+  entityAccountId?: string | null,
+  scoaAccountId?: string | null,
+): string | null => {
+  const normalizedScoa = normalizeIdentifier(scoaAccountId);
+  if (!normalizedScoa) {
+    return null;
+  }
+  const normalizedEntityAccount = normalizeIdentifier(entityAccountId);
+  return normalizedEntityAccount
+    ? `${normalizedEntityAccount}|||${normalizedScoa}`
+    : normalizedScoa;
+};
+
+const buildPresetDescription = (
+  row: DistributionRow,
+  entityAccountId: string | null,
+): string | null => {
+  const glAccountId = normalizeMeaningfulText(entityAccountId);
+  const scoaDescription = normalizeMeaningfulText(row.description);
+  const scoaAccountId = normalizeMeaningfulText(row.accountId);
+
+  if (glAccountId && scoaDescription) {
+    return `${glAccountId} - ${scoaDescription}`;
+  }
+
+  if (scoaDescription) {
+    return scoaDescription;
+  }
+
+  if (glAccountId && scoaAccountId) {
+    return `${glAccountId} - ${scoaAccountId}`;
+  }
+
+  return scoaAccountId;
+};
+
 export type DistributionProgress = {
   totalRows: number;
   distributedRows: number;
@@ -222,7 +272,8 @@ const applyHistorySuggestions = (
   }
   const ratioState = useRatioAllocationStore.getState();
   return rows.map(row => {
-    const suggestion = history[row.accountId];
+    const historyKey = buildDistributionKey(row.entityAccountId, row.accountId);
+    const suggestion = historyKey ? history[historyKey] : undefined;
     if (!suggestion || row.isDirty) {
       return row;
     }
@@ -274,18 +325,36 @@ const buildOperationPayload = (
 const buildDistributionPayloadRows = (
   rows: DistributionRow[],
   updatedBy: string | null,
-): DistributionSaveRowInput[] =>
-  rows.map(row => ({
-    scoaAccountId: row.accountId,
-    distributionType: row.type,
-    presetGuid: row.presetId ?? null,
-    presetDescription: row.description ?? row.accountId,
-    distributionStatus: resolveDistributionStatusForSave(row.status),
-    operations: row.operations
-      .map(buildOperationPayload)
-      .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
-    updatedBy,
-  }));
+): DistributionSaveRowInput[] => {
+  const mappingAccounts = selectAccounts(useMappingStore.getState());
+  const mappingLookup = new Map(mappingAccounts.map(account => [account.id, account]));
+
+  return rows
+    .map(row => {
+      const mappedAccount = mappingLookup.get(row.mappingRowId);
+      const resolvedEntityAccountId =
+        normalizeIdentifier(row.entityAccountId) ??
+        normalizeIdentifier(mappedAccount?.accountId);
+
+      if (!resolvedEntityAccountId) {
+        return null;
+      }
+
+      return {
+        entityAccountId: resolvedEntityAccountId,
+        scoaAccountId: row.accountId,
+        distributionType: row.type,
+        presetGuid: row.presetId ?? null,
+        presetDescription: buildPresetDescription(row, resolvedEntityAccountId),
+        distributionStatus: resolveDistributionStatusForSave(row.status),
+        operations: row.operations
+          .map(buildOperationPayload)
+          .filter((entry): entry is DistributionSaveOperation => Boolean(entry)),
+        updatedBy,
+      };
+    })
+    .filter((row): row is DistributionSaveRowInput => Boolean(row));
+};
 
 const applySaveResults = (
   rows: DistributionRow[],
@@ -295,16 +364,24 @@ const applySaveResults = (
 ): DistributionRow[] => {
   const lookup = new Map<string, DistributionSaveResponseItem>();
   savedItems.forEach(item => {
-    lookup.set(item.scoaAccountId, item);
+    const key = buildDistributionKey(item.entityAccountId, item.scoaAccountId);
+    if (key) {
+      lookup.set(key, item);
+    }
   });
 
-  const savedAccountIds = new Set(payloadRows.map(row => row.scoaAccountId));
+  const savedAccountIds = new Set(
+    payloadRows
+      .map(row => buildDistributionKey(row.entityAccountId, row.scoaAccountId))
+      .filter((key): key is string => Boolean(key)),
+  );
 
   return rows.map(row => {
-    if (!savedAccountIds.has(row.accountId)) {
+    const key = buildDistributionKey(row.entityAccountId, row.accountId);
+    if (!key || !savedAccountIds.has(key)) {
       return row;
     }
-    const match = lookup.get(row.accountId);
+    const match = lookup.get(key);
     const nextRow: DistributionRow = {
       ...row,
       presetId: match?.presetGuid ?? row.presetId,
@@ -527,6 +604,8 @@ const persistActivityForRows = async (
           return applyDistributionStatus({
             id: summary.id,
             mappingRowId: summary.mappingRowId,
+            entityAccountId: summary.entityAccountId ?? existing?.entityAccountId,
+            entityAccountName: summary.entityAccountName ?? existing?.entityAccountName,
             accountId: summary.accountId,
             description: summary.description,
             activity: summary.mappedAmount,
@@ -768,7 +847,19 @@ const persistActivityForRows = async (
         const suggestions = await fetchDistributionHistory(normalized);
         const lookup: Record<string, DistributionHistorySuggestion> = {};
         suggestions.forEach(suggestion => {
-          lookup[suggestion.accountId] = suggestion;
+          const normalizedEntityAccountId = normalizeIdentifier(
+            suggestion.entityAccountId ?? null,
+          );
+          if (!normalizedEntityAccountId) {
+            return;
+          }
+          const key = buildDistributionKey(
+            normalizedEntityAccountId,
+            suggestion.accountId,
+          );
+          if (key) {
+            lookup[key] = { ...suggestion, entityAccountId: normalizedEntityAccountId };
+          }
         });
         set(state => ({
           historyByAccount: lookup,

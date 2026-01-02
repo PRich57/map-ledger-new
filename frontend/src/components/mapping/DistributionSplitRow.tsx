@@ -263,7 +263,11 @@ export default function DistributionSplitRow({
       option => option.id === operation.id || !usedOperationIds.has(option.id),
     );
     if (!filtered.some(option => option.id === operation.id) && operation.id) {
-      filtered.unshift({ id: operation.id, name: operation.name ?? operation.id });
+      filtered.unshift({
+        id: operation.id,
+        code: operation.code ?? operation.id,
+        name: operation.name ?? operation.id,
+      });
     }
     return filtered;
   };

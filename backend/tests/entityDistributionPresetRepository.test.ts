@@ -25,6 +25,7 @@ describe('entityDistributionPresetRepository', () => {
             entity_id: 'ent-1',
             preset_type: 'direct',
             preset_description: 'Existing desc',
+            entity_account_id: 'EA-1',
             scoa_account_id: 'SCOA-1',
             metric: 'old-metric',
             inserted_dttm: new Date('2023-01-01T00:00:00Z'),
@@ -41,6 +42,7 @@ describe('entityDistributionPresetRepository', () => {
             entity_id: 'ent-1',
             preset_type: 'percentage',
             preset_description: 'Updated desc',
+            entity_account_id: 'EA-1',
             scoa_account_id: 'SCOA-1',
             metric: 'metric-new',
             inserted_dttm: new Date('2023-01-01T00:00:00Z'),
@@ -51,6 +53,7 @@ describe('entityDistributionPresetRepository', () => {
 
     const input: EntityDistributionPresetInput = {
       entityId: 'ent-1',
+      entityAccountId: 'EA-1',
       presetType: 'percentage',
       presetDescription: 'Updated desc',
       scoaAccountId: 'SCOA-1',
@@ -84,6 +87,7 @@ describe('entityDistributionPresetRepository', () => {
             entity_id: 'ent-2',
             preset_type: 'direct',
             preset_description: 'New preset',
+            entity_account_id: 'EA-2',
             scoa_account_id: 'SCOA-2',
             metric: null,
             inserted_dttm: new Date('2023-01-03T00:00:00Z'),
@@ -93,6 +97,7 @@ describe('entityDistributionPresetRepository', () => {
 
     const input: EntityDistributionPresetInput = {
       entityId: 'ent-2',
+      entityAccountId: 'EA-2',
       presetType: 'direct',
       presetDescription: 'New preset',
       scoaAccountId: 'SCOA-2',

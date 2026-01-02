@@ -3,6 +3,7 @@ import type { EntityDistributionPresetDetailRow } from './entityDistributionPres
 
 export interface EntityDistributionPresetInput {
   entityId: string;
+  entityAccountId: string;
   presetType: string;
   presetDescription?: string | null;
   presetGuid?: string;
@@ -23,6 +24,174 @@ export interface EntityDistributionPresetWithDetailsRow extends EntityDistributi
 }
 
 const TABLE_NAME = 'ml.ENTITY_DISTRIBUTION_PRESETS';
+const DISTRIBUTION_TABLE_NAME = 'ml.ENTITY_SCOA_DISTRIBUTION';
+
+const ENTITY_ACCOUNT_COLUMN_CANDIDATES = [
+  'ENTITY_ACCOUNT_ID',
+  'ACCOUNT_ID',
+  'GL_ACCOUNT_ID',
+  'SOURCE_ACCOUNT_ID',
+  'ENTITY_GL_ACCOUNT_ID',
+];
+
+const SCOA_ACCOUNT_COLUMN_CANDIDATES = [
+  'SCOA_ACCOUNT_ID',
+  'TARGET_ACCOUNT_ID',
+  'SCOA_ID',
+  'SCOA_ACCOUNT',
+];
+
+type PresetTableSchema = {
+  hasEntityAccountId: boolean;
+  hasScoaAccountId: boolean;
+};
+
+type DistributionTableSchema = {
+  entityAccountColumn: string | null;
+  scoaAccountColumn: string | null;
+};
+
+let presetTableSchemaPromise: Promise<PresetTableSchema> | null = null;
+let distributionTableSchemaPromise: Promise<DistributionTableSchema> | null = null;
+
+const resolveColumnName = (
+  columns: Set<string>,
+  candidates: string[],
+): string | null => {
+  const match = candidates.find((candidate) => columns.has(candidate));
+  return match ?? null;
+};
+
+const loadPresetTableSchema = async (): Promise<PresetTableSchema> => {
+  if (!presetTableSchemaPromise) {
+    presetTableSchemaPromise = (async () => {
+      const result = await runQuery<{ column_name: string }>(
+        `SELECT COLUMN_NAME as column_name
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = PARSENAME(@tableName, 2)
+          AND TABLE_NAME = PARSENAME(@tableName, 1)`,
+        {
+          tableName: TABLE_NAME,
+        },
+      );
+
+      const columns = new Set(
+        (result.recordset ?? []).map((row) => row.column_name.toUpperCase()),
+      );
+
+      return {
+        hasEntityAccountId: columns.has('ENTITY_ACCOUNT_ID'),
+        hasScoaAccountId: columns.has('SCOA_ACCOUNT_ID'),
+      };
+    })();
+  }
+
+  return presetTableSchemaPromise;
+};
+
+const loadDistributionTableSchema = async (): Promise<DistributionTableSchema> => {
+  if (!distributionTableSchemaPromise) {
+    distributionTableSchemaPromise = (async () => {
+      const result = await runQuery<{ column_name: string }>(
+        `SELECT COLUMN_NAME as column_name
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = PARSENAME(@tableName, 2)
+          AND TABLE_NAME = PARSENAME(@tableName, 1)`,
+        {
+          tableName: DISTRIBUTION_TABLE_NAME,
+        },
+      );
+
+      const columns = new Set(
+        (result.recordset ?? []).map((row) => row.column_name.toUpperCase()),
+      );
+
+      return {
+        entityAccountColumn: resolveColumnName(columns, ENTITY_ACCOUNT_COLUMN_CANDIDATES),
+        scoaAccountColumn: resolveColumnName(columns, SCOA_ACCOUNT_COLUMN_CANDIDATES),
+      };
+    })();
+  }
+
+  return distributionTableSchemaPromise;
+};
+
+const buildDistributionJoinFilters = (
+  presetSchema: PresetTableSchema,
+  distributionSchema: DistributionTableSchema,
+): string[] => {
+  const filters = [
+    'esd.PRESET_GUID = edp.PRESET_GUID',
+    'esd.ENTITY_ID = edp.ENTITY_ID',
+  ];
+
+  if (presetSchema.hasEntityAccountId && distributionSchema.entityAccountColumn) {
+    filters.push(
+      `esd.${distributionSchema.entityAccountColumn} = edp.ENTITY_ACCOUNT_ID`,
+    );
+  }
+
+  if (presetSchema.hasScoaAccountId && distributionSchema.scoaAccountColumn) {
+    filters.push(`esd.${distributionSchema.scoaAccountColumn} = edp.SCOA_ACCOUNT_ID`);
+  }
+
+  return filters;
+};
+
+const buildDistributionApply = (
+  presetSchema: PresetTableSchema,
+  distributionSchema: DistributionTableSchema,
+): string => {
+  const filters = buildDistributionJoinFilters(presetSchema, distributionSchema).join(
+    '\n      AND ',
+  );
+  const entityAccountSelect = distributionSchema.entityAccountColumn
+    ? `esd.${distributionSchema.entityAccountColumn} as entity_account_id`
+    : 'NULL as entity_account_id';
+  const scoaAccountSelect = distributionSchema.scoaAccountColumn
+    ? `esd.${distributionSchema.scoaAccountColumn} as scoa_account_id`
+    : 'NULL as scoa_account_id';
+  return `OUTER APPLY (
+      SELECT TOP 1
+        ${entityAccountSelect},
+        ${scoaAccountSelect}
+      FROM ${DISTRIBUTION_TABLE_NAME} esd
+      WHERE ${filters}
+      ORDER BY esd.INSERTED_DTTM DESC
+    ) esd`;
+};
+
+const resolvePresetAccountQuery = async (): Promise<{
+  entityAccountSelect: string;
+  scoaAccountSelect: string;
+  distributionJoin: string;
+  schema: PresetTableSchema;
+  hasEntityAccountSupport: boolean;
+  hasScoaAccountSupport: boolean;
+}> => {
+  const schema = await loadPresetTableSchema();
+  const distributionSchema = await loadDistributionTableSchema();
+  const needsDistributionJoin = !schema.hasEntityAccountId || !schema.hasScoaAccountId;
+  const hasEntityAccountSupport =
+    schema.hasEntityAccountId || Boolean(distributionSchema.entityAccountColumn);
+  const hasScoaAccountSupport =
+    schema.hasScoaAccountId || Boolean(distributionSchema.scoaAccountColumn);
+
+  return {
+    entityAccountSelect: schema.hasEntityAccountId
+      ? 'edp.ENTITY_ACCOUNT_ID'
+      : 'esd.entity_account_id',
+    scoaAccountSelect: schema.hasScoaAccountId
+      ? 'edp.SCOA_ACCOUNT_ID'
+      : 'esd.scoa_account_id',
+    distributionJoin: needsDistributionJoin
+      ? buildDistributionApply(schema, distributionSchema)
+      : '',
+    schema,
+    hasEntityAccountSupport,
+    hasScoaAccountSupport,
+  };
+};
 
 const normalizeText = (value?: string | null): string | null => {
   if (value === undefined || value === null) {
@@ -32,18 +201,42 @@ const normalizeText = (value?: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeMeaningfulText = (value?: string | null): string | null => {
+  const normalized = normalizeText(value);
+  return normalized && normalized.length > 1 ? normalized : null;
+};
+
 const normalizePresetGuid = (value?: string | null): string | null =>
   normalizeText(value);
 
 const findEntityDistributionPresetByAccount = async (
   entityId: string,
+  entityAccountId: string,
   scoaAccountId: string
 ): Promise<EntityDistributionPresetRow | null> => {
   const normalizedEntityId = normalizeText(entityId);
-  const normalizedScoaAccountId = normalizeText(scoaAccountId);
+  const normalizedEntityAccountId = normalizeMeaningfulText(entityAccountId);
+  const normalizedScoaAccountId = normalizeMeaningfulText(scoaAccountId);
 
-  if (!normalizedEntityId || !normalizedScoaAccountId) {
+  if (!normalizedEntityId || !normalizedEntityAccountId || !normalizedScoaAccountId) {
     return null;
+  }
+
+  const {
+    entityAccountSelect,
+    scoaAccountSelect,
+    distributionJoin,
+    hasEntityAccountSupport,
+    hasScoaAccountSupport,
+  } =
+    await resolvePresetAccountQuery();
+
+  const filters = ['edp.ENTITY_ID = @entityId'];
+  if (hasEntityAccountSupport) {
+    filters.push(`${entityAccountSelect} = @entityAccountId`);
+  }
+  if (hasScoaAccountSupport) {
+    filters.push(`${scoaAccountSelect} = @scoaAccountId`);
   }
 
   const result = await runQuery<{
@@ -51,27 +244,31 @@ const findEntityDistributionPresetByAccount = async (
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     metric?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
   }>(
     `SELECT TOP 1
-      PRESET_GUID as preset_guid,
-      ENTITY_ID as entity_id,
-      PRESET_TYPE as preset_type,
-      PRESET_DESCRIPTION as preset_description,
-      SCOA_ACCOUNT_ID as scoa_account_id,
-      METRIC as metric,
-      INSERTED_DTTM as inserted_dttm,
-      UPDATED_DTTM as updated_dttm,
-      UPDATED_BY as updated_by
-    FROM ${TABLE_NAME}
-    WHERE ENTITY_ID = @entityId AND SCOA_ACCOUNT_ID = @scoaAccountId
-    ORDER BY INSERTED_DTTM DESC`,
+      edp.PRESET_GUID as preset_guid,
+      edp.ENTITY_ID as entity_id,
+      edp.PRESET_TYPE as preset_type,
+      edp.PRESET_DESCRIPTION as preset_description,
+      ${entityAccountSelect} as entity_account_id,
+      ${scoaAccountSelect} as scoa_account_id,
+      edp.METRIC as metric,
+      edp.INSERTED_DTTM as inserted_dttm,
+      edp.UPDATED_DTTM as updated_dttm,
+      edp.UPDATED_BY as updated_by
+    FROM ${TABLE_NAME} edp
+    ${distributionJoin}
+    WHERE ${filters.join('\n      AND ')}
+    ORDER BY edp.INSERTED_DTTM DESC`,
     {
       entityId: normalizedEntityId,
+      entityAccountId: normalizedEntityAccountId,
       scoaAccountId: normalizedScoaAccountId,
     }
   );
@@ -99,11 +296,11 @@ const normalizePresetTypeValue = (value?: string | null): string => {
     case 'p':
       return 'percentage';
     case 'd':
-      return 'dynamic';
+      return 'direct';
     case 'x':
       return 'excluded';
     default:
-      return lower;
+      return lower.length > 1 ? lower : 'direct';
   }
 };
 
@@ -112,7 +309,8 @@ const mapBaseRow = (row: {
   entity_id: string;
   preset_type: string;
   preset_description?: string | null;
-  scoa_account_id: string;
+  entity_account_id?: string | null;
+  scoa_account_id?: string | null;
   metric?: string | null;
   inserted_dttm?: Date | string | null;
   updated_dttm?: Date | string | null;
@@ -122,7 +320,8 @@ const mapBaseRow = (row: {
   entityId: row.entity_id,
   presetType: normalizePresetTypeValue(row.preset_type),
   presetDescription: row.preset_description ?? null,
-  scoaAccountId: row.scoa_account_id,
+  entityAccountId: row.entity_account_id ?? '',
+  scoaAccountId: row.scoa_account_id ?? '',
   metric: row.metric ?? null,
   insertedDttm:
     row.inserted_dttm instanceof Date
@@ -172,12 +371,14 @@ const mapDetailRow = (row: {
 export const listEntityDistributionPresets = async (
   entityId?: string
 ): Promise<EntityDistributionPresetRow[]> => {
+  const { entityAccountSelect, scoaAccountSelect, distributionJoin } =
+    await resolvePresetAccountQuery();
   const params: Record<string, unknown> = {};
   const filters: string[] = [];
 
   if (entityId) {
     params.entityId = entityId;
-    filters.push('ENTITY_ID = @entityId');
+    filters.push('edp.ENTITY_ID = @entityId');
   }
 
   const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
@@ -187,25 +388,28 @@ export const listEntityDistributionPresets = async (
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     metric?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
   }>(
     `SELECT
-      PRESET_GUID as preset_guid,
-      ENTITY_ID as entity_id,
-      PRESET_TYPE as preset_type,
-      PRESET_DESCRIPTION as preset_description,
-      SCOA_ACCOUNT_ID as scoa_account_id,
-      METRIC as metric,
-      INSERTED_DTTM as inserted_dttm,
-      UPDATED_DTTM as updated_dttm,
-      UPDATED_BY as updated_by
-    FROM ${TABLE_NAME}
+      edp.PRESET_GUID as preset_guid,
+      edp.ENTITY_ID as entity_id,
+      edp.PRESET_TYPE as preset_type,
+      edp.PRESET_DESCRIPTION as preset_description,
+      ${entityAccountSelect} as entity_account_id,
+      ${scoaAccountSelect} as scoa_account_id,
+      edp.METRIC as metric,
+      edp.INSERTED_DTTM as inserted_dttm,
+      edp.UPDATED_DTTM as updated_dttm,
+      edp.UPDATED_BY as updated_by
+    FROM ${TABLE_NAME} edp
+    ${distributionJoin}
     ${whereClause}
-    ORDER BY INSERTED_DTTM DESC`,
+    ORDER BY edp.INSERTED_DTTM DESC`,
     params
   );
 
@@ -215,25 +419,33 @@ export const listEntityDistributionPresets = async (
 export const createEntityDistributionPreset = async (
   input: EntityDistributionPresetInput
 ): Promise<EntityDistributionPresetRow | null> => {
-  if (!input.entityId || !input.presetType || !input.scoaAccountId) {
+  if (!input.entityId || !input.entityAccountId || !input.presetType || !input.scoaAccountId) {
     return null;
   }
 
   const entityId = normalizeText(input.entityId);
-  const scoaAccountId = normalizeText(input.scoaAccountId);
-  if (!entityId || !scoaAccountId) {
+  const entityAccountId = normalizeMeaningfulText(input.entityAccountId);
+  const scoaAccountId = normalizeMeaningfulText(input.scoaAccountId);
+  if (!entityId || !entityAccountId || !scoaAccountId) {
     return null;
   }
 
   const presetGuid = normalizePresetGuid(input.presetGuid);
-  const presetDescription = normalizeText(input.presetDescription);
+  const presetDescription = normalizeMeaningfulText(input.presetDescription);
   const metric = normalizeText(input.metric);
+  const presetType = normalizePresetTypeValue(input.presetType);
+  const schema = await loadPresetTableSchema();
 
-  const existingPreset = await findEntityDistributionPresetByAccount(entityId, scoaAccountId);
+  const existingPreset = await findEntityDistributionPresetByAccount(
+    entityId,
+    entityAccountId,
+    scoaAccountId,
+  );
   if (existingPreset) {
     const updated = await updateEntityDistributionPreset(existingPreset.presetGuid, {
-      presetType: input.presetType,
+      presetType,
       presetDescription,
+      entityAccountId,
       scoaAccountId,
       metric,
       updatedBy: null,
@@ -246,7 +458,8 @@ export const createEntityDistributionPreset = async (
     'ENTITY_ID',
     'PRESET_TYPE',
     'PRESET_DESCRIPTION',
-    'SCOA_ACCOUNT_ID',
+    ...(schema.hasEntityAccountId ? ['ENTITY_ACCOUNT_ID'] : []),
+    ...(schema.hasScoaAccountId ? ['SCOA_ACCOUNT_ID'] : []),
     'METRIC',
     ...(presetGuid ? ['PRESET_GUID'] : []),
   ];
@@ -255,7 +468,8 @@ export const createEntityDistributionPreset = async (
     '@entityId',
     '@presetType',
     '@presetDescription',
-    '@scoaAccountId',
+    ...(schema.hasEntityAccountId ? ['@entityAccountId'] : []),
+    ...(schema.hasScoaAccountId ? ['@scoaAccountId'] : []),
     '@metric',
     ...(presetGuid ? ['@presetGuid'] : []),
   ];
@@ -265,7 +479,8 @@ export const createEntityDistributionPreset = async (
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     metric?: string | null;
     inserted_dttm?: Date | string | null;
   }>(
@@ -277,7 +492,8 @@ export const createEntityDistributionPreset = async (
       INSERTED.ENTITY_ID as entity_id,
       INSERTED.PRESET_TYPE as preset_type,
       INSERTED.PRESET_DESCRIPTION as preset_description,
-      INSERTED.SCOA_ACCOUNT_ID as scoa_account_id,
+      ${schema.hasEntityAccountId ? 'INSERTED.ENTITY_ACCOUNT_ID as entity_account_id,' : ''}
+      ${schema.hasScoaAccountId ? 'INSERTED.SCOA_ACCOUNT_ID as scoa_account_id,' : ''}
       INSERTED.METRIC as metric,
       INSERTED.INSERTED_DTTM as inserted_dttm
     VALUES (
@@ -285,8 +501,9 @@ export const createEntityDistributionPreset = async (
     )`,
     {
       entityId,
-      presetType: input.presetType,
+      presetType,
       presetDescription,
+      entityAccountId,
       scoaAccountId,
       metric,
       ...(presetGuid ? { presetGuid } : {}),
@@ -298,12 +515,16 @@ export const createEntityDistributionPreset = async (
     return null;
   }
 
+  const resolvedEntityAccountId = row.entity_account_id ?? entityAccountId;
+  const resolvedScoaAccountId = row.scoa_account_id ?? scoaAccountId;
+
   return {
     presetGuid: row.preset_guid,
     entityId: row.entity_id,
     presetType: normalizePresetTypeValue(row.preset_type),
     presetDescription: row.preset_description ?? null,
-    scoaAccountId: row.scoa_account_id,
+    entityAccountId: resolvedEntityAccountId ?? '',
+    scoaAccountId: resolvedScoaAccountId ?? '',
     metric: row.metric ?? null,
     insertedDttm:
       row.inserted_dttm instanceof Date ? row.inserted_dttm.toISOString() : row.inserted_dttm ?? null,
@@ -323,21 +544,34 @@ export const updateEntityDistributionPreset = async (
     return null;
   }
 
+  const normalizedPresetType = updates.presetType
+    ? normalizePresetTypeValue(updates.presetType)
+    : undefined;
+
+  const schema = await loadPresetTableSchema();
+  const setClauses = [
+    'PRESET_TYPE = ISNULL(@presetType, PRESET_TYPE)',
+    'PRESET_DESCRIPTION = ISNULL(@presetDescription, PRESET_DESCRIPTION)',
+    schema.hasEntityAccountId
+      ? 'ENTITY_ACCOUNT_ID = ISNULL(@entityAccountId, ENTITY_ACCOUNT_ID)'
+      : null,
+    schema.hasScoaAccountId ? 'SCOA_ACCOUNT_ID = ISNULL(@scoaAccountId, SCOA_ACCOUNT_ID)' : null,
+    'METRIC = ISNULL(@metric, METRIC)',
+    'UPDATED_BY = @updatedBy',
+    'UPDATED_DTTM = SYSUTCDATETIME()',
+  ].filter((clause): clause is string => Boolean(clause));
+
   await runQuery(
     `UPDATE ${TABLE_NAME}
     SET
-      PRESET_TYPE = ISNULL(@presetType, PRESET_TYPE),
-      PRESET_DESCRIPTION = ISNULL(@presetDescription, PRESET_DESCRIPTION),
-      SCOA_ACCOUNT_ID = ISNULL(@scoaAccountId, SCOA_ACCOUNT_ID),
-      METRIC = ISNULL(@metric, METRIC),
-      UPDATED_BY = @updatedBy,
-      UPDATED_DTTM = SYSUTCDATETIME()
+      ${setClauses.join(',\n      ')}
     WHERE PRESET_GUID = @presetGuid`,
     {
       presetGuid: normalizedGuid,
-      presetType: updates.presetType,
-      presetDescription: normalizeText(updates.presetDescription),
-      scoaAccountId: normalizeText(updates.scoaAccountId),
+      presetType: normalizedPresetType,
+      presetDescription: normalizeMeaningfulText(updates.presetDescription),
+      entityAccountId: normalizeMeaningfulText(updates.entityAccountId),
+      scoaAccountId: normalizeMeaningfulText(updates.scoaAccountId),
       metric: normalizeText(updates.metric),
       updatedBy: updates.updatedBy ?? null,
     }
@@ -350,6 +584,8 @@ export const updateEntityDistributionPreset = async (
 export const listEntityDistributionPresetsWithDetails = async (
   entityId?: string
 ): Promise<EntityDistributionPresetWithDetailsRow[]> => {
+  const { entityAccountSelect, scoaAccountSelect, distributionJoin } =
+    await resolvePresetAccountQuery();
   const params: Record<string, unknown> = {};
   const filters: string[] = [];
 
@@ -365,7 +601,8 @@ export const listEntityDistributionPresetsWithDetails = async (
     entity_id: string;
     preset_type: string;
     preset_description?: string | null;
-    scoa_account_id: string;
+    entity_account_id?: string | null;
+    scoa_account_id?: string | null;
     metric?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
@@ -380,7 +617,8 @@ export const listEntityDistributionPresetsWithDetails = async (
       edp.ENTITY_ID as entity_id,
       edp.PRESET_TYPE as preset_type,
       edp.PRESET_DESCRIPTION as preset_description,
-      edp.SCOA_ACCOUNT_ID as scoa_account_id,
+      ${entityAccountSelect} as entity_account_id,
+      ${scoaAccountSelect} as scoa_account_id,
       edp.METRIC as metric,
       edp.INSERTED_DTTM as inserted_dttm,
       edp.UPDATED_DTTM as updated_dttm,
@@ -390,6 +628,7 @@ export const listEntityDistributionPresetsWithDetails = async (
       edpd.IS_CALCULATED as is_calculated,
       edpd.SPECIFIED_PCT as specified_pct
     FROM ${TABLE_NAME} edp
+    ${distributionJoin}
     LEFT JOIN ml.ENTITY_DISTRIBUTION_PRESET_DETAIL edpd ON edpd.PRESET_GUID = edp.PRESET_GUID
     ${whereClause}
     ORDER BY edp.PRESET_GUID ASC`,
@@ -432,5 +671,8 @@ export const listEntityDistributionPresetsWithDetails = async (
     presetDetails: details,
   }));
 };
+
+export const getEntityDistributionPresetSchema = async (): Promise<PresetTableSchema> =>
+  loadPresetTableSchema();
 
 export default listEntityDistributionPresets;

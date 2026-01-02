@@ -155,6 +155,8 @@ export interface StandardScoaSummary {
 export interface DistributionSourceSummary {
   id: string;
   mappingRowId: string;
+  entityAccountId?: string;
+  entityAccountName?: string;
   accountId: string;
   description: string;
   mappedAmount: number;
@@ -569,6 +571,8 @@ export type DistributionStatus = 'Distributed' | 'Undistributed' | 'No balance';
 export interface DistributionRow {
   id: string;
   mappingRowId: string;
+  entityAccountId?: string;
+  entityAccountName?: string;
   accountId: string;
   description: string;
   activity: number;
@@ -590,6 +594,7 @@ export interface DistributionSaveOperation {
 }
 
 export interface DistributionSaveRowInput {
+  entityAccountId: string;
   scoaAccountId: string;
   distributionType: DistributionType;
   presetGuid?: string | null;
@@ -600,6 +605,7 @@ export interface DistributionSaveRowInput {
 }
 
 export interface DistributionSaveResponseItem {
+  entityAccountId: string;
   scoaAccountId: string;
   distributionType: DistributionType;
   distributionStatus: DistributionStatus;

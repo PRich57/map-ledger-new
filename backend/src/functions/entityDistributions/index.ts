@@ -22,9 +22,11 @@ import {
   insertEntityScoaDistributions,
   listEntityScoaDistributions,
   updateEntityScoaDistribution,
+  getEntityScoaDistributionSchema,
   type EntityScoaDistributionInput,
   type EntityScoaDistributionRow,
 } from '../../repositories/entityScoaDistributionRepository';
+import { getEntityDistributionPresetSchema } from '../../repositories/entityDistributionPresetRepository';
 
 type DistributionType = 'direct' | 'percentage' | 'dynamic';
 type DistributionStatus = 'Distributed' | 'Undistributed';
@@ -37,6 +39,7 @@ interface DistributionSaveOperationPayload {
 }
 
 interface DistributionSaveRowPayload {
+  entityAccountId?: string | null;
   scoaAccountId?: string | null;
   distributionType?: string | null;
   presetGuid?: string | null;
@@ -53,6 +56,7 @@ interface DistributionSaveRequest {
 }
 
 interface DistributionSaveResult {
+  entityAccountId: string;
   scoaAccountId: string;
   presetGuid: string;
   distributionType: DistributionType;
@@ -68,6 +72,11 @@ const normalizeText = (value: unknown): string | null => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normalizeIdentifier = (value: unknown): string | null => {
+  const normalized = normalizeText(value);
+  return normalized && normalized.length > 1 ? normalized : null;
 };
 
 const parseNumber = (value: unknown): number | null => {
@@ -150,6 +159,9 @@ const buildRequestPayload = (payload: unknown): DistributionSaveRequest => {
           : undefined;
 
       return {
+        entityAccountId: normalizeText(
+          entry.entityAccountId ?? entry.glAccountId ?? entry.sourceAccountId,
+        ),
         scoaAccountId: normalizeText(entry.scoaAccountId),
         distributionType: normalizeText(entry.distributionType),
         presetGuid:
@@ -163,8 +175,26 @@ const buildRequestPayload = (payload: unknown): DistributionSaveRequest => {
   };
 };
 
-const normalizePresetKey = (entityId: string, scoaAccountId: string): string =>
-  `${entityId}|${scoaAccountId}`;
+const buildPresetKey = (
+  entityId: string,
+  entityAccountId: string,
+  scoaAccountId: string,
+  includeEntityAccountId: boolean,
+): string =>
+  includeEntityAccountId
+    ? `${entityId}|${entityAccountId}|${scoaAccountId}`
+    : `${entityId}|${scoaAccountId}`;
+
+const buildDistributionKey = (
+  entityId: string,
+  entityAccountId: string,
+  scoaAccountId: string,
+  distributionType: string,
+  includeEntityAccountId: boolean,
+): string =>
+  includeEntityAccountId
+    ? `${entityId}|${entityAccountId}|${scoaAccountId}`
+    : `${entityId}|${scoaAccountId}|${distributionType}`;
 
 const isMeaningfulDescription = (value?: string | null): boolean =>
   typeof value === 'string' && value.trim().length > 1;
@@ -271,6 +301,7 @@ const areDetailInputsEqual = (
 
 const ensurePreset = async (
   entityId: string,
+  entityAccountId: string,
   scoaAccountId: string,
   distributionType: DistributionType,
   presetGuid: string,
@@ -278,8 +309,14 @@ const ensurePreset = async (
   presetLookup: Map<string, string>,
   presetMetadata: Map<string, EntityDistributionPresetWithDetailsRow>,
   updatedBy: string | null,
+  includeEntityAccountId: boolean,
 ): Promise<{ created: boolean; preset: EntityDistributionPresetWithDetailsRow }> => {
-  const cacheKey = normalizePresetKey(entityId, scoaAccountId);
+  const cacheKey = buildPresetKey(
+    entityId,
+    entityAccountId,
+    scoaAccountId,
+    includeEntityAccountId,
+  );
   const cachedPresetGuid = presetLookup.get(cacheKey);
   const targetPresetGuid = cachedPresetGuid ?? presetGuid;
 
@@ -293,12 +330,20 @@ const ensurePreset = async (
     const needsTypeUpdate = currentPresetType !== distributionType;
     const needsDescriptionRepair =
       presetDescription !== null && !isMeaningfulDescription(existingPreset.presetDescription);
+    const needsEntityAccountUpdate = existingPreset.entityAccountId !== entityAccountId;
     const needsScoaAccountUpdate = existingPreset.scoaAccountId !== scoaAccountId;
 
-    if (needsTypeRepair || needsTypeUpdate || needsDescriptionRepair || needsScoaAccountUpdate) {
+    if (
+      needsTypeRepair ||
+      needsTypeUpdate ||
+      needsDescriptionRepair ||
+      needsEntityAccountUpdate ||
+      needsScoaAccountUpdate
+    ) {
       const updatedPreset = await updateEntityDistributionPreset(existingPreset.presetGuid, {
         presetType: needsTypeRepair || needsTypeUpdate ? distributionType : undefined,
         presetDescription: needsDescriptionRepair ? presetDescription : undefined,
+        entityAccountId: needsEntityAccountUpdate ? entityAccountId : undefined,
         scoaAccountId: needsScoaAccountUpdate ? scoaAccountId : undefined,
         updatedBy: updatedBy ?? null,
       });
@@ -320,6 +365,7 @@ const ensurePreset = async (
 
   const presetInput = {
     entityId,
+    entityAccountId,
     presetType: distributionType,
     presetDescription,
     scoaAccountId,
@@ -425,12 +471,14 @@ const saveHandler = async (
     const rows = (payload.items ?? [])
       .map(row => ({
         ...row,
+        entityAccountId: row.entityAccountId,
         scoaAccountId: row.scoaAccountId,
         distributionType: row.distributionType,
       }))
       .filter(
         row =>
-          Boolean(normalizeText(row.scoaAccountId)) &&
+          Boolean(normalizeIdentifier(row.entityAccountId)) &&
+          Boolean(normalizeIdentifier(row.scoaAccountId)) &&
           Boolean(normalizeDistributionType(row.distributionType)),
       );
 
@@ -441,6 +489,12 @@ const saveHandler = async (
     const { result: saveResult, queryCount } = await withQueryTracking(async () => {
       const existingPresets = await listEntityDistributionPresetsWithDetails(entityId);
       const existingDistributions = await listEntityScoaDistributions(entityId);
+      const presetSchema = await getEntityDistributionPresetSchema();
+      const distributionSchema = await getEntityScoaDistributionSchema();
+      const presetUsesEntityAccountId = presetSchema.hasEntityAccountId;
+      const distributionUsesEntityAccountId = Boolean(
+        distributionSchema.entityAccountColumn,
+      );
 
       // Build presetMetadata map keyed by preset GUID (like mapping does)
       const presetMetadata = new Map<string, EntityDistributionPresetWithDetailsRow>();
@@ -449,32 +503,68 @@ const saveHandler = async (
       const distributionLookup = new Map<string, EntityScoaDistributionRow>();
 
       existingPresets.forEach(preset => {
+        if (!preset.entityAccountId && presetUsesEntityAccountId) {
+          return;
+        }
         // Store preset by GUID for lookup
         presetMetadata.set(preset.presetGuid, preset);
         // Also store mapping from account to GUID
-        const key = normalizePresetKey(entityId, preset.scoaAccountId);
+        const key = buildPresetKey(
+          entityId,
+          preset.entityAccountId,
+          preset.scoaAccountId,
+          presetUsesEntityAccountId,
+        );
         presetLookup.set(key, preset.presetGuid);
       });
 
       existingDistributions.forEach(distribution => {
-        const key = normalizePresetKey(entityId, distribution.scoaAccountId);
+        if (!distribution.entityAccountId) {
+          if (distributionUsesEntityAccountId) {
+            return;
+          }
+        }
+        const normalizedDistributionType =
+          normalizeDistributionType(distribution.distributionType) ??
+          distribution.distributionType ??
+          '';
+        const key = buildDistributionKey(
+          entityId,
+          distribution.entityAccountId,
+          distribution.scoaAccountId,
+          normalizedDistributionType,
+          distributionUsesEntityAccountId,
+        );
         distributionLookup.set(key, distribution);
       });
 
       const savedItems: DistributionSaveResult[] = [];
 
       for (const row of rows) {
-        const normalizedScoa = normalizeText(row.scoaAccountId) as string;
+        const normalizedEntityAccountId = normalizeIdentifier(row.entityAccountId) as string;
+        const normalizedScoa = normalizeIdentifier(row.scoaAccountId) as string;
         const normalizedType = normalizeDistributionType(row.distributionType);
         if (!normalizedType) {
           continue;
         }
-        const key = normalizePresetKey(entityId, normalizedScoa);
-        const existingDistribution = distributionLookup.get(key);
+        const presetKey = buildPresetKey(
+          entityId,
+          normalizedEntityAccountId,
+          normalizedScoa,
+          presetUsesEntityAccountId,
+        );
+        const distributionKey = buildDistributionKey(
+          entityId,
+          normalizedEntityAccountId,
+          normalizedScoa,
+          normalizedType,
+          distributionUsesEntityAccountId,
+        );
+        const existingDistribution = distributionLookup.get(distributionKey);
 
         // Resolve preset GUID: use provided GUID, fallback to existing account's GUID, or generate new
         const requestedPresetGuid = normalizeText(row.presetGuid);
-        const existingPresetGuidForAccount = presetLookup.get(key);
+        const existingPresetGuidForAccount = presetLookup.get(presetKey);
         const resolvedPresetGuid =
           existingPresetGuidForAccount ??
           requestedPresetGuid ??
@@ -483,7 +573,12 @@ const saveHandler = async (
         // Look up existing preset by GUID (not by account key)
         const existingPresetByGuid = presetMetadata.get(resolvedPresetGuid);
 
-        const presetDescription = row.presetDescription ?? normalizedScoa;
+        const normalizedPresetDescription = normalizeText(row.presetDescription);
+        const presetDescription = isMeaningfulDescription(normalizedPresetDescription)
+          ? normalizedPresetDescription
+          : normalizedEntityAccountId && normalizedScoa
+            ? `${normalizedEntityAccountId} - ${normalizedScoa}`
+            : normalizedScoa;
 
         let detailInputs = buildDetailInputs(
           row.operations,
@@ -504,6 +599,7 @@ const saveHandler = async (
         // Use ensurePreset to create or update the preset (like mapping does)
         const { preset: currentPreset } = await ensurePreset(
           entityId,
+          normalizedEntityAccountId,
           normalizedScoa,
           normalizedType,
           resolvedPresetGuid,
@@ -511,11 +607,12 @@ const saveHandler = async (
           presetLookup,
           presetMetadata,
           row.updatedBy ?? null,
+          presetUsesEntityAccountId,
         );
 
         const effectivePresetGuid = currentPreset.presetGuid;
         if (effectivePresetGuid !== resolvedPresetGuid) {
-          presetLookup.set(key, effectivePresetGuid);
+          presetLookup.set(presetKey, effectivePresetGuid);
           presetMetadata.set(effectivePresetGuid, currentPreset);
           detailInputs = detailInputs.map(detail => ({
             ...detail,
@@ -557,6 +654,7 @@ const saveHandler = async (
           ) {
             nextDistribution = await updateEntityScoaDistribution(
               entityId,
+              normalizedEntityAccountId,
               normalizedScoa,
               normalizedType,
               {
@@ -567,11 +665,17 @@ const saveHandler = async (
             );
           } else {
             if (existingDistribution) {
-              await deleteEntityScoaDistribution(entityId, normalizedScoa);
+              await deleteEntityScoaDistribution(
+                entityId,
+                normalizedEntityAccountId,
+                normalizedScoa,
+                existingDistribution.distributionType ?? null,
+              );
             }
 
             const distributionInput: EntityScoaDistributionInput = {
               entityId,
+              entityAccountId: normalizedEntityAccountId,
               scoaAccountId: normalizedScoa,
               distributionType: normalizedType,
               presetGuid: effectivePresetGuid,
@@ -593,10 +697,11 @@ const saveHandler = async (
         }
 
         if (nextDistribution) {
-          distributionLookup.set(key, nextDistribution);
+          distributionLookup.set(distributionKey, nextDistribution);
         }
 
         savedItems.push({
+          entityAccountId: normalizedEntityAccountId,
           scoaAccountId: normalizedScoa,
           presetGuid: effectivePresetGuid,
           distributionType: normalizedType,

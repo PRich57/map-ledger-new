@@ -25,6 +25,11 @@ const normalizeText = (value: unknown): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const normalizeIdentifier = (value: unknown): string | null => {
+  const normalized = normalizeText(value);
+  return normalized && normalized.length > 1 ? normalized : null;
+};
+
 const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
   if (!Array.isArray(payload)) {
     return [];
@@ -34,10 +39,17 @@ const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
 
   for (const entry of payload) {
     const entityId = getFirstStringValue((entry as Record<string, unknown>)?.entityId);
-    const scoaAccountId = getFirstStringValue((entry as Record<string, unknown>)?.scoaAccountId);
-    const distributionType = getFirstStringValue((entry as Record<string, unknown>)?.distributionType);
+    const entityAccountId = normalizeIdentifier(
+      (entry as Record<string, unknown>)?.entityAccountId,
+    );
+    const scoaAccountId = normalizeIdentifier(
+      (entry as Record<string, unknown>)?.scoaAccountId,
+    );
+    const distributionType = getFirstStringValue(
+      (entry as Record<string, unknown>)?.distributionType,
+    );
 
-    if (!entityId || !scoaAccountId || !distributionType) {
+    if (!entityId || !entityAccountId || !scoaAccountId || !distributionType) {
       continue;
     }
 
@@ -48,6 +60,7 @@ const buildInputs = (payload: unknown): EntityScoaDistributionInput[] => {
 
     inputs.push({
       entityId,
+      entityAccountId,
       scoaAccountId,
       distributionType,
       presetGuid,
@@ -104,20 +117,30 @@ const updateHandler = async (
   try {
     const body = await readJson(request);
     const entityId = getFirstStringValue(body?.entityId);
-    const scoaAccountId = getFirstStringValue(body?.scoaAccountId);
+    const entityAccountId = normalizeIdentifier(body?.entityAccountId);
+    const scoaAccountId = normalizeIdentifier(body?.scoaAccountId);
     const distributionType = getFirstStringValue(body?.distributionType);
     const presetGuid =
       parseGuid(body?.presetGuid) ?? parseGuid(body?.presetId);
 
-    if (!entityId || !scoaAccountId || !distributionType) {
-      return json({ message: 'entityId, scoaAccountId, and distributionType are required' }, 400);
+    if (!entityId || !entityAccountId || !scoaAccountId || !distributionType) {
+      return json(
+        { message: 'entityId, entityAccountId, scoaAccountId, and distributionType are required' },
+        400,
+      );
     }
 
-    const updated = await updateEntityScoaDistribution(entityId, scoaAccountId, distributionType, {
-      presetGuid: presetGuid ?? undefined,
-      distributionStatus: normalizeText(body?.distributionStatus),
-      updatedBy: normalizeText(body?.updatedBy),
-    });
+    const updated = await updateEntityScoaDistribution(
+      entityId,
+      entityAccountId,
+      scoaAccountId,
+      distributionType,
+      {
+        presetGuid: presetGuid ?? undefined,
+        distributionStatus: normalizeText(body?.distributionStatus),
+        updatedBy: normalizeText(body?.updatedBy),
+      },
+    );
 
     if (!updated) {
       return json({ message: 'Distribution record not found' }, 404);

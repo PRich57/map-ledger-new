@@ -18,6 +18,7 @@ interface DistributionOperationSuggestion {
 
 interface DistributionSuggestionRow {
   entityId: string;
+  entityAccountId: string;
   scoaAccountId: string;
   distributionType: DistributionType;
   distributionStatus: DistributionStatus;
@@ -81,6 +82,7 @@ const mapToSuggestion = (row: EntityScoaDistributionWithDetailsRow): Distributio
   const distributionType = normalizeDistributionType(row.distributionType);
   return {
     entityId: row.entityId,
+    entityAccountId: row.entityAccountId,
     scoaAccountId: row.scoaAccountId,
     distributionType,
     distributionStatus: normalizeDistributionStatus(row.distributionStatus),

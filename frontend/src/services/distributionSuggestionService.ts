@@ -17,6 +17,7 @@ type DistributionSuggestionApiOperation = {
 };
 
 type DistributionSuggestionApiRow = {
+  entityAccountId?: string | null;
   scoaAccountId: string;
   distributionType?: string | null;
   distributionStatus?: string | null;
@@ -26,6 +27,7 @@ type DistributionSuggestionApiRow = {
 };
 
 export interface DistributionHistorySuggestion {
+  entityAccountId?: string | null;
   accountId: string;
   type: DistributionType;
   status: DistributionStatus;
@@ -77,6 +79,7 @@ const mapApiRow = (row: DistributionSuggestionApiRow): DistributionHistorySugges
     .filter((operation): operation is DistributionOperationShare => Boolean(operation));
 
   return {
+    entityAccountId: row.entityAccountId ?? null,
     accountId: row.scoaAccountId,
     type,
     status: normalizeDistributionStatus(row.distributionStatus),

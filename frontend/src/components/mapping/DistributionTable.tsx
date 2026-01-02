@@ -447,7 +447,7 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
       const totalBasis = rowsWithBasis.reduce((sum, item) => sum + item.basisValue, 0);
 
       return rowsWithBasis
-        .map(({ presetRow, basisValue }) => {
+        .map<DistributionOperationShare | null>(({ presetRow, basisValue }) => {
           const targetId = normalizeOperationId(presetRow.targetAccountId);
           if (!targetId) {
             return null;
@@ -465,10 +465,10 @@ const DistributionTable = ({ focusMappingId }: DistributionTableProps) => {
             }),
             basisDatapoint: presetRow.dynamicAccountId?.trim() || undefined,
             allocation: allocationPct,
-          } satisfies DistributionOperationShare;
+          };
         })
-        .filter((operation): operation is DistributionOperationShare => Boolean(operation))
-        .sort((a, b) => a.code.localeCompare(b.code));
+        .filter((operation): operation is DistributionOperationShare => operation !== null)
+        .sort((a, b) => (a.code ?? a.id).localeCompare(b.code ?? b.id));
     },
     [
       basisAccounts,
@@ -1337,7 +1337,7 @@ const buildDistributionPresetLibraryEntries = (
                 role="dialog"
                 aria-label={`${column.label} filters`}
                 onClick={event => event.stopPropagation()}
-                className="absolute right-0 top-full z-20 mt-2 w-56 rounded-md border border-slate-200 bg-white py-2 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900"
+                className="absolute left-0 top-full z-20 mt-2 w-56 rounded-md border border-slate-200 bg-white py-2 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900"
               >
                 <div className="border-b border-slate-100 px-3 pb-2 text-xs font-semibold uppercase text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   Filter values
