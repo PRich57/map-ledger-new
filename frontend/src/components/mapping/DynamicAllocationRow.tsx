@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { AlertTriangle, Calculator, Layers, XCircle } from 'lucide-react';
-import type { GLAccountMappingRow, MappingPresetLibraryEntry } from '../../types';
+import type { GLAccountMappingRow } from '../../types';
 import {
   useRatioAllocationStore,
   DEFAULT_PRESET_CONTEXT,
@@ -18,7 +18,7 @@ interface DynamicAllocationRowProps {
   colSpan: number;
   panelId: string;
   onOpenBuilder: () => void;
-  presetOptions: MappingPresetLibraryEntry[];
+  batchAccountIds?: string[];
 }
 
 const pluralize = (value: number, noun: string) =>
@@ -52,7 +52,7 @@ const DynamicAllocationRow = ({
   colSpan,
   panelId,
   onOpenBuilder,
-  presetOptions,
+  batchAccountIds,
 }: DynamicAllocationRowProps) => {
   const headingId = `${panelId}-heading`;
 
@@ -90,6 +90,19 @@ const DynamicAllocationRow = ({
   const formattedSelectedPeriod =
     selectedPeriod ? formatPeriodDate(selectedPeriod) || selectedPeriod : null;
 
+  const applyPresetSelection = useCallback(
+    (presetId: string | null) => {
+      if (batchAccountIds && batchAccountIds.length > 0) {
+        batchAccountIds.forEach(accountId =>
+          setActivePresetForSource(accountId, presetId),
+        );
+        return;
+      }
+      setActivePresetForSource(account.id, presetId);
+    },
+    [account.id, batchAccountIds, setActivePresetForSource],
+  );
+
   useEffect(() => {
     if (!account.presetId) {
       return;
@@ -98,7 +111,9 @@ const DynamicAllocationRow = ({
     if (activePreset?.id === account.presetId) {
       return;
     }
-    setActivePresetForSource(account.id, account.presetId);
+    setActivePresetForSource(account.id, account.presetId, {
+      suppressMutation: true,
+    });
   }, [account.id, account.presetId, getActivePresetForSource, setActivePresetForSource]);
 
   const allocation = useMemo(
@@ -128,7 +143,10 @@ const DynamicAllocationRow = ({
       const preset = target.groupId
         ? mappingContextPresets.find(item => item.id === target.groupId)
         : null;
-      const matchingRow = preset?.rows.find(row => row.targetAccountId === target.datapointId) ?? null;
+      const metricId = target.ratioMetric.id?.trim();
+      const matchingRow = metricId
+        ? preset?.rows.find(row => row.dynamicAccountId === metricId) ?? null
+        : null;
 
       const fallbackBasisAccount =
         basisAccounts.find(account => account.id === target.ratioMetric.id) ?? null;
@@ -175,6 +193,17 @@ const DynamicAllocationRow = ({
     [targetDetails],
   );
 
+  const hasDuplicateTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return targetDetails.some(detail => {
+      if (seen.has(detail.id)) {
+        return true;
+      }
+      seen.add(detail.id);
+      return false;
+    });
+  }, [targetDetails]);
+
   const periodResult = useMemo(() => {
     if (!allocation || !selectedPeriod) {
       return null;
@@ -197,17 +226,52 @@ const DynamicAllocationRow = ({
     return relevant.filter(issue => issue.periodId === selectedPeriod);
   }, [account.id, selectedPeriod, validationErrors]);
 
-  const computedPreview = useMemo(() => {
-    if (periodResult) {
-      return {
-        allocations: periodResult.allocations.map(target => ({
-          targetId: target.targetId,
-          targetName: target.targetName,
-          value: target.value,
-          percentage: target.percentage,
-          isExclusion: Boolean(target.isExclusion),
-        })),
-        adjustment: periodResult.adjustment
+  const aggregatePreviewAllocations = useCallback(
+    (allocations: PreviewAllocation[]) => {
+      const grouped = new Map<string, PreviewAllocation>();
+      allocations.forEach(entry => {
+        const key = `${entry.targetId}::${entry.isExclusion ? 'excluded' : 'included'}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          grouped.set(key, {
+            ...existing,
+            value: existing.value + entry.value,
+            percentage: existing.percentage + entry.percentage,
+          });
+          return;
+        }
+        grouped.set(key, { ...entry });
+      });
+      return Array.from(grouped.values());
+    },
+    [],
+  );
+
+  const rowPreview = useMemo(() => {
+    if (!allocation || targetDetails.length === 0) {
+      return null;
+    }
+
+    try {
+      const shouldUseSavedResult =
+        periodResult &&
+        Math.abs(periodResult.sourceValue - sourceValue) < 0.01 &&
+        !hasDuplicateTargets;
+      if (shouldUseSavedResult) {
+        const allocationLookup = new Map(
+          periodResult.allocations.map(entry => [entry.targetId, entry]),
+        );
+        const allocations = targetDetails.map(detail => {
+          const match = allocationLookup.get(detail.id);
+          return {
+            targetId: detail.id,
+            targetName: detail.targetName,
+            value: match?.value ?? 0,
+            percentage: match?.percentage ?? 0,
+            isExclusion: match ? Boolean(match.isExclusion) : detail.isExclusion,
+          };
+        });
+        const adjustment = periodResult.adjustment
           ? {
               amount: periodResult.adjustment.amount,
               targetName:
@@ -215,15 +279,14 @@ const DynamicAllocationRow = ({
                   target => target.targetId === periodResult.adjustment?.targetId,
                 )?.targetName ?? null,
             }
-          : null,
-      } as const;
-    }
+          : null;
+        return { allocations, adjustment } as const;
+      }
 
-    if (!allocation || targetDetails.length === 0 || basisTotal <= 0) {
-      return null;
-    }
+      if (basisTotal <= 0) {
+        return null;
+      }
 
-    try {
       const computation = allocateDynamic(
         sourceValue,
         targetDetails.map(detail => detail.basisValue),
@@ -254,18 +317,43 @@ const DynamicAllocationRow = ({
       console.warn('Failed to derive preview for dynamic allocation row', error);
       return null;
     }
-  }, [allocation, basisTotal, periodResult, sourceValue, targetDetails]);
+  }, [allocation, basisTotal, hasDuplicateTargets, periodResult, sourceValue, targetDetails]);
 
-  const previewAllocationLookup = useMemo(() => {
-    const map = new Map<string, PreviewAllocation>();
-    if (!computedPreview) {
-      return map;
+  const summaryPreview = useMemo(() => {
+    if (rowPreview) {
+      return {
+        allocations: aggregatePreviewAllocations(rowPreview.allocations),
+        adjustment: rowPreview.adjustment,
+      } as const;
     }
-    computedPreview.allocations.forEach(entry => {
-      map.set(entry.targetId, entry);
-    });
-    return map;
-  }, [computedPreview]);
+
+    if (!periodResult || Math.abs(periodResult.sourceValue - sourceValue) >= 0.01) {
+      return null;
+    }
+
+    const allocations = periodResult.allocations.map(target => ({
+      targetId: target.targetId,
+      targetName: target.targetName,
+      value: target.value,
+      percentage: target.percentage,
+      isExclusion: Boolean(target.isExclusion),
+    }));
+
+    return {
+      allocations: aggregatePreviewAllocations(allocations),
+      adjustment: periodResult.adjustment
+        ? {
+            amount: periodResult.adjustment.amount,
+            targetName:
+              periodResult.allocations.find(
+                target => target.targetId === periodResult.adjustment?.targetId,
+              )?.targetName ?? null,
+          }
+        : null,
+    } as const;
+  }, [aggregatePreviewAllocations, periodResult, rowPreview, sourceValue]);
+
+  const rowPreviewAllocations = rowPreview?.allocations ?? null;
 
   const sourceAccountLabel = useMemo(() => {
     if (account.accountName) {
@@ -315,11 +403,11 @@ const DynamicAllocationRow = ({
                 <select
                   id={`preset-select-${account.id}`}
                   value={getActivePresetForSource(account.id)?.id ?? ''}
-                  onChange={event => setActivePresetForSource(account.id, event.target.value || null)}
+                  onChange={event => applyPresetSelection(event.target.value || null)}
                   className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   <option value="">No preset selected</option>
-                  {presetOptions.map(preset => (
+                  {mappingContextPresets.map(preset => (
                     <option key={preset.id} value={preset.id}>
                       {preset.name}
                     </option>
@@ -385,7 +473,7 @@ const DynamicAllocationRow = ({
                 </div>
               </div>
               <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm dark:border-slate-700">
-                <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                <table className="min-w-full table-compact divide-y divide-slate-200 dark:divide-slate-700">
                   <thead className="bg-slate-50 dark:bg-slate-900">
                     <tr>
                       <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
@@ -409,9 +497,11 @@ const DynamicAllocationRow = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white text-sm dark:divide-slate-700 dark:bg-slate-900">
-                    {targetDetails.map(detail => {
+                    {targetDetails.map((detail, index) => {
                       const ratio = basisTotal > 0 ? detail.basisValue / basisTotal : 0;
-                      const previewAllocation = previewAllocationLookup.get(detail.id);
+                      const previewAllocation = rowPreviewAllocations
+                        ? rowPreviewAllocations[index]
+                        : null;
                       const percent = previewAllocation?.percentage ?? ratio * 100;
                       const allocatedValue = previewAllocation?.value ?? sourceValue * ratio;
                       const isExclusion = detail.isExclusion;
@@ -424,7 +514,7 @@ const DynamicAllocationRow = ({
                         ? 'bg-rose-50/70 text-rose-900 dark:bg-rose-500/10 dark:text-rose-100'
                         : '';
                       return (
-                        <tr key={detail.id} className={rowClasses}>
+                        <tr key={`${detail.id}-${detail.basisAccountId ?? detail.metricName}-${index}`} className={rowClasses}>
                           <td className="px-4 py-3 align-top">
                             <div className="flex flex-col gap-1">
                               <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -487,7 +577,7 @@ const DynamicAllocationRow = ({
             </div>
           )}
           {selectedPeriod ? (
-            computedPreview ? (
+            summaryPreview ? (
               <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-blue-900 shadow-sm dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
                   <div className="text-sm font-semibold">
@@ -495,11 +585,11 @@ const DynamicAllocationRow = ({
                     {formattedSelectedPeriod ? ` · ${formattedSelectedPeriod}` : ''}
                   </div>
                   <div className="text-xs text-blue-700 dark:text-blue-200">
-                    Total distributes {formatCurrencyAmount(sourceValue)} across {computedPreview.allocations.length} targets.
+                    Total distributes {formatCurrencyAmount(sourceValue)} across {summaryPreview.allocations.length} targets.
                   </div>
                 </div>
                 <div className="space-y-2">
-                  {computedPreview.allocations.map(target => {
+                  {summaryPreview.allocations.map(target => {
                     const containerClasses = target.isExclusion
                       ? 'rounded-lg border border-rose-200 bg-rose-50/80 px-3 py-2 text-sm text-rose-900 shadow-sm transition dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100'
                       : 'rounded-lg bg-white/80 px-3 py-2 text-sm text-blue-900 shadow-sm transition dark:bg-slate-900/60 dark:text-blue-100';
@@ -545,10 +635,10 @@ const DynamicAllocationRow = ({
                     );
                   })}
                 </div>
-                {computedPreview.adjustment && computedPreview.adjustment.targetName &&
-                  Math.abs(computedPreview.adjustment.amount) > 0 && (
+                {summaryPreview.adjustment && summaryPreview.adjustment.targetName &&
+                  Math.abs(summaryPreview.adjustment.amount) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-200">
-                      Includes a {formatCurrencyAmount(computedPreview.adjustment.amount)} rounding adjustment applied to {computedPreview.adjustment.targetName}.
+                      Includes a {formatCurrencyAmount(summaryPreview.adjustment.amount)} rounding adjustment applied to {summaryPreview.adjustment.targetName}.
                     </p>
                   )}
               </div>

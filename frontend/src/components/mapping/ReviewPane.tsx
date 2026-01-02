@@ -4,14 +4,12 @@ import { Card, CardContent, CardHeader } from '../ui/Card';
 import {
   selectAccounts,
   selectSplitValidationIssues,
-  selectStandardScoaSummaries,
   useMappingStore,
 } from '../../store/mappingStore';
 import {
   type DistributionOperationCatalogItem,
   useDistributionStore,
 } from '../../store/distributionStore';
-import { findChartOfAccountOption } from '../../store/chartOfAccountsStore';
 import type {
   DistributionOperationShare,
   DistributionRow,
@@ -90,15 +88,6 @@ interface EntitySourceGroup {
   }[];
 }
 
-const normalizeScoaKey = (value?: string | null): string | null => {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const match = findChartOfAccountOption(trimmed);
-  return match?.id ?? trimmed;
-};
-
 const resolveEntityBreakdowns = (account: GLAccountMappingRow): GLAccountEntityBreakdown[] => {
   if (account.entities && account.entities.length > 0) {
     return account.entities;
@@ -115,140 +104,6 @@ const resolveEntityBreakdowns = (account: GLAccountMappingRow): GLAccountEntityB
   ];
 };
 
-const getSplitSignedAmount = (
-  account: GLAccountMappingRow,
-  split: { allocationType: string; allocationValue: number },
-): number => {
-  if (account.netChange === 0) {
-    return 0;
-  }
-
-  if (split.allocationType === 'amount') {
-    const absolute = Math.max(0, Math.abs(split.allocationValue ?? 0));
-    const capped = Math.min(absolute, Math.abs(account.netChange));
-    return account.netChange >= 0 ? capped : -capped;
-  }
-
-  const percentage = Math.max(0, split.allocationValue ?? 0);
-  const base = Math.abs(account.netChange);
-  const rawAmount = (base * percentage) / 100;
-  return account.netChange >= 0 ? rawAmount : -rawAmount;
-};
-
-const buildEntityContributionsByScoa = (accounts: GLAccountMappingRow[]): Map<string, EntitySourceGroup[]> => {
-  const accumulator = new Map<string, Map<string, EntitySourceGroup>>();
-
-  const addContribution = (
-    scoaKey: string,
-    entityId: string,
-    entityName: string,
-    accountId: string,
-    accountName: string,
-    amount: number,
-  ) => {
-    const existingEntities = accumulator.get(scoaKey) ?? new Map<string, EntitySourceGroup>();
-    const current = existingEntities.get(entityId) ?? {
-      entityId,
-      entityName,
-      total: 0,
-      sources: [],
-    };
-
-    const nextSources = [...current.sources, { accountId, accountName, amount }];
-    existingEntities.set(entityId, {
-      ...current,
-      total: current.total + amount,
-      sources: nextSources,
-    });
-    accumulator.set(scoaKey, existingEntities);
-  };
-
-  const distributeAmountToEntities = (scoaKey: string | null, account: GLAccountMappingRow, amount: number) => {
-    if (!scoaKey || !Number.isFinite(amount) || amount === 0) {
-      return;
-    }
-
-    const breakdowns = resolveEntityBreakdowns(account);
-    if (breakdowns.length === 0) {
-      return;
-    }
-
-    const magnitude = Math.abs(amount);
-    const sign = amount >= 0 ? 1 : -1;
-    const balanceTotal = breakdowns.reduce((sum, breakdown) => sum + Math.abs(breakdown.balance), 0);
-    const proportionalBasis = balanceTotal || Math.abs(account.netChange) || magnitude;
-    const fallbackProportion = breakdowns.length > 0 ? 1 / breakdowns.length : 1;
-
-    breakdowns.forEach(breakdown => {
-      const weight =
-        proportionalBasis > 0 ? Math.abs(breakdown.balance) / proportionalBasis : fallbackProportion;
-      const entityAmount = sign * magnitude * weight;
-      const entityId = breakdown.id?.toString().trim() || account.entityId?.trim() || 'unknown-entity';
-      const entityName =
-        breakdown.entity?.trim() ||
-        account.entityName?.trim() ||
-        account.entityId?.trim() ||
-        breakdown.id?.toString().trim() ||
-        'Unknown Entity';
-
-      addContribution(scoaKey, entityId, entityName, account.accountId, account.accountName, entityAmount);
-    });
-  };
-
-  accounts.forEach(account => {
-    if (account.mappingType === 'direct') {
-      if (account.status !== 'Mapped') {
-        return;
-      }
-      const targetKey = normalizeScoaKey(account.manualCOAId ?? account.suggestedCOAId);
-      if (!targetKey) {
-        return;
-      }
-      distributeAmountToEntities(targetKey, account, account.netChange);
-      return;
-    }
-
-    if (account.mappingType === 'percentage') {
-      account.splitDefinitions.forEach(split => {
-        if (split.isExclusion) {
-          return;
-        }
-        const targetKey = normalizeScoaKey(split.targetId);
-        if (!targetKey) {
-          return;
-        }
-        const amount = getSplitSignedAmount(account, split);
-        distributeAmountToEntities(targetKey, account, amount);
-      });
-      return;
-    }
-
-    if (account.mappingType === 'dynamic') {
-      const targetKey = normalizeScoaKey(account.manualCOAId ?? account.suggestedCOAId);
-      if (!targetKey) {
-        return;
-      }
-      const baseAmount = Math.abs(account.netChange);
-      const excluded = Math.abs(account.dynamicExclusionAmount ?? 0);
-      const allocatable = Math.max(0, baseAmount - excluded);
-      const signedAmount = account.netChange >= 0 ? allocatable : -allocatable;
-      distributeAmountToEntities(targetKey, account, signedAmount);
-    }
-  });
-
-  const normalized = new Map<string, EntitySourceGroup[]>();
-  accumulator.forEach((entityMap, scoaKey) => {
-    normalized.set(
-      scoaKey,
-      Array.from(entityMap.values()).map(entity => ({
-        ...entity,
-        sources: [...entity.sources],
-      })),
-    );
-  });
-  return normalized;
-};
-
 const ToggleIcon = ({ isOpen }: { isOpen: boolean }) =>
   isOpen ? (
     <ChevronDown aria-hidden className="h-4 w-4 text-slate-500 transition" />
@@ -259,7 +114,6 @@ const ToggleIcon = ({ isOpen }: { isOpen: boolean }) =>
 const ReviewPane = () => {
   const accounts = useMappingStore(selectAccounts);
   const splitIssues = useMappingStore(selectSplitValidationIssues);
-  const standardTargets = useMappingStore(selectStandardScoaSummaries);
   const finalizeMappings = useMappingStore(state => state.finalizeMappings);
   const { selectedPeriod, validationErrors, isProcessing, calculateAllocations } =
     useRatioAllocationStore(state => ({
@@ -270,15 +124,6 @@ const ReviewPane = () => {
     }));
   const selectedPeriodLabel =
     selectedPeriod ? formatPeriodDate(selectedPeriod) || selectedPeriod : null;
-  const mappedActivityByTarget = useMemo(() => {
-    const lookup = new Map<string, number>();
-    standardTargets.forEach(target => {
-      lookup.set(target.id, target.mappedAmount);
-      lookup.set(target.value, target.mappedAmount);
-    });
-    return lookup;
-  }, [standardTargets]);
-
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [publishLog, setPublishLog] = useState<PublishLogEntry[]>([
     {
@@ -340,24 +185,11 @@ const ReviewPane = () => {
     return lookup;
   }, [accounts]);
 
-  const entityContributionsByScoa = useMemo(
-    () => buildEntityContributionsByScoa(accounts),
-    [accounts],
-  );
-
   const getPeriodActivityForRow = useCallback(
     (row: DistributionRow): number => {
-      const mappingKey = row.mappingRowId?.trim();
-      const accountKey = row.accountId?.trim();
-      const resolved =
-        (mappingKey ? mappedActivityByTarget.get(mappingKey) : undefined) ??
-        (accountKey ? mappedActivityByTarget.get(accountKey) : undefined);
-      if (typeof resolved === 'number' && Number.isFinite(resolved)) {
-        return resolved;
-      }
       return Number.isFinite(row.activity) ? row.activity : 0;
     },
-    [mappedActivityByTarget],
+    [],
   );
 
   const getAllocatedActivityForShare = useCallback(
@@ -374,56 +206,8 @@ const ReviewPane = () => {
 
   // Build entity source groups for a given distribution row, scaled to the allocated activity
   const getEntitySourceGroups = (row: DistributionRow, allocatedAmount: number): EntitySourceGroup[] => {
-    const normalizedKeys = [normalizeScoaKey(row.mappingRowId), normalizeScoaKey(row.accountId)].filter(
-      (key): key is string => Boolean(key),
-    );
-
-    const contributionGroups =
-      normalizedKeys
-        .map(key => entityContributionsByScoa.get(key))
-        .find(groups => groups && groups.length > 0) ?? null;
-
-    if (contributionGroups && contributionGroups.length > 0) {
-      const totalMagnitude = contributionGroups.reduce(
-        (sum, group) => sum + Math.abs(group.total),
-        0,
-      );
-      const shareMagnitude = Math.abs(allocatedAmount);
-      const shareSign = allocatedAmount >= 0 ? 1 : -1;
-      const entityFallbackWeight = contributionGroups.length > 0 ? 1 / contributionGroups.length : 1;
-
-      return contributionGroups.map(group => {
-        const entityWeight =
-          totalMagnitude > 0 ? Math.abs(group.total) / totalMagnitude : entityFallbackWeight;
-        const entityAmount = shareSign * shareMagnitude * entityWeight;
-        const entityMagnitude = Math.abs(entityAmount);
-        const sourceTotalMagnitude = group.sources.reduce(
-          (sum, source) => sum + Math.abs(source.amount),
-          0,
-        );
-        const sourceFallbackWeight = group.sources.length > 0 ? 1 / group.sources.length : 1;
-        const entitySign = entityAmount >= 0 ? 1 : -1;
-
-        return {
-          entityId: group.entityId,
-          entityName: group.entityName,
-          total: entityAmount,
-          sources: group.sources.map(source => {
-            const weight =
-              sourceTotalMagnitude > 0
-                ? Math.abs(source.amount) / sourceTotalMagnitude
-                : sourceFallbackWeight;
-            return {
-              accountId: source.accountId,
-              accountName: source.accountName,
-              amount: entitySign * entityMagnitude * weight,
-            };
-          }),
-        };
-      });
-    }
-
     const mappingRow = mappingRowLookup.get(row.mappingRowId);
+    const normalizedAmount = Number.isFinite(allocatedAmount) ? allocatedAmount : 0;
 
     // If we cannot find the mapping row, show a single bucket with the allocated amount
     if (!mappingRow) {
@@ -431,12 +215,12 @@ const ReviewPane = () => {
         {
           entityId: row.id,
           entityName: 'Unassigned Entity',
-          total: allocatedAmount,
+          total: normalizedAmount,
           sources: [
             {
               accountId: row.accountId,
               accountName: row.description,
-              amount: allocatedAmount,
+              amount: normalizedAmount,
             },
           ],
         },
@@ -458,9 +242,9 @@ const ReviewPane = () => {
       (sum, breakdown) => sum + Math.abs(breakdown.balance),
       0,
     );
-    const proportionalBasis = totalBalance || Math.abs(mappingRow.netChange);
-    const allocatedMagnitude = Math.abs(allocatedAmount);
-    const sign = allocatedAmount >= 0 ? 1 : -1;
+    const allocatedMagnitude = Math.abs(normalizedAmount);
+    const proportionalBasis = totalBalance || Math.abs(mappingRow.netChange) || allocatedMagnitude;
+    const sign = normalizedAmount >= 0 ? 1 : -1;
     const fallbackProportion =
       entityBreakdowns.length > 0 ? 1 / entityBreakdowns.length : 1;
 
@@ -815,7 +599,7 @@ const ReviewPane = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+                    <table className="min-w-full table-compact divide-y divide-slate-200 text-sm dark:divide-slate-700">
                       <thead className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         <tr>
                           <th className="w-8 px-2 py-2" aria-label="Expand row" />

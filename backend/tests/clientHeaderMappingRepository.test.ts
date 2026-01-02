@@ -33,6 +33,7 @@ describe('clientHeaderMappingRepository', () => {
           template_header: 'GL ID',
           source_header: 'Account Number',
           mapping_method: 'manual',
+          file_upload_guid: '12345678-1234-1234-1234-1234567890ab',
           inserted_dttm: new Date('2023-12-31T00:00:00Z'),
           updated_dttm: new Date('2024-01-01T00:00:00Z'),
           updated_by: 'tester',
@@ -50,6 +51,7 @@ describe('clientHeaderMappingRepository', () => {
         templateHeader: 'GL ID',
         sourceHeader: 'Account Number',
         mappingMethod: 'manual',
+        fileUploadGuid: '12345678-1234-1234-1234-1234567890ab',
         insertedAt: '2023-12-31T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
         updatedBy: 'tester',
@@ -76,7 +78,11 @@ describe('clientHeaderMappingRepository', () => {
     });
 
     const result = await upsertClientHeaderMappings('C1', [
-      { templateHeader: 'GL ID', sourceHeader: 'Account Number' },
+      {
+        templateHeader: 'GL ID',
+        sourceHeader: 'Account Number',
+        fileUploadGuid: '12345678-1234-1234-1234-1234567890ab',
+      },
       { templateHeader: 'Account Description', sourceHeader: '' },
     ]);
 
@@ -88,6 +94,7 @@ describe('clientHeaderMappingRepository', () => {
       clientId: 'C1',
       templateHeader0: 'GL ID',
       sourceHeader0: 'Account Number',
+      fileUploadGuid0: '12345678-1234-1234-1234-1234567890ab',
     });
     expect(result).toHaveLength(1);
   });
@@ -170,6 +177,7 @@ describe('clientHeaderMappingRepository', () => {
         templateHeader: 'GL ID',
         sourceHeader: 'Account Number',
         mappingMethod: 'automated',
+        fileUploadGuid: null,
         insertedAt: '2024-05-01T00:00:00.000Z',
         updatedBy: null,
       },
@@ -214,6 +222,7 @@ describe('clientHeaderMappingRepository', () => {
         templateHeader: 'GL ID',
         sourceHeader: 'Account Number',
         mappingMethod: 'automated',
+        fileUploadGuid: null,
         insertedAt: '2024-03-01T00:00:00.000Z',
         updatedBy: null,
       },
@@ -277,6 +286,7 @@ describe('clientHeaderMappingRepository', () => {
         templateHeader: 'GL ID',
         sourceHeader: 'Updated Header',
         mappingMethod: 'manual',
+        fileUploadGuid: null,
         insertedAt: '2024-05-01T00:00:00.000Z',
         updatedAt: '2024-06-01T12:00:00.000Z',
         updatedBy: 'tester@example.com',

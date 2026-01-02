@@ -65,7 +65,7 @@ export default function DatapointList({
       <Droppable droppableId="datapoints">
         {(provided) => (
           <div ref={provided.innerRef} {...provided.droppableProps} className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full table-compact divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="w-8"></th>

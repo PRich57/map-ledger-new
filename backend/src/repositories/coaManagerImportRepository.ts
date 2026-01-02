@@ -42,6 +42,7 @@ export interface TableState {
 const COLUMN_NAME_PATTERN = /^[A-Z0-9_]+$/;
 const DEFAULT_COLUMN_TYPE = 'VARCHAR(255)';
 const COST_TYPE_COLUMN_TYPE = 'VARCHAR(50)';
+const IS_FINANCIAL_COLUMN_TYPE = 'BIT';
 
 const isSafeColumnName = (value: string): boolean => COLUMN_NAME_PATTERN.test(value);
 
@@ -58,22 +59,21 @@ const resolveIndustryTableName = async (industryName: string): Promise<string> =
   }
 
   const expectedTableName = buildCoaTableName(normalized);
-  if (!isSafeTableName(expectedTableName)) {
-    throw new InvalidIndustryTableError();
-  }
-
-  if (match.tableName && match.tableName.toUpperCase() !== expectedTableName.toUpperCase()) {
+  const resolvedTableName = match.tableName?.trim() || expectedTableName;
+  if (!isSafeTableName(resolvedTableName)) {
     throw new InvalidIndustryTableError();
   }
 
   const allowlist = new Set(
-    industries.map((industry) => buildCoaTableName(industry.normalizedName)),
+    industries.map((industry) =>
+      (industry.tableName?.trim() || buildCoaTableName(industry.normalizedName)).toUpperCase(),
+    ),
   );
-  if (!allowlist.has(expectedTableName)) {
+  if (!allowlist.has(resolvedTableName.toUpperCase())) {
     throw new InvalidIndustryTableError();
   }
 
-  return expectedTableName;
+  return resolvedTableName;
 };
 
 const splitTableName = (tableName: string): { schema: string; name: string } => {
@@ -150,6 +150,7 @@ export const createIndustryTable = async (
     '[RECORD_ID] INT IDENTITY(1,1) NOT NULL PRIMARY KEY',
     ...columnDefinitions,
     `[COST_TYPE] ${COST_TYPE_COLUMN_TYPE} NULL`,
+    `[IS_FINANCIAL] ${IS_FINANCIAL_COLUMN_TYPE} NULL`,
   ];
 
   const sql = `CREATE TABLE ${tableName} (
@@ -202,6 +203,24 @@ export const ensureCostTypeColumn = async (tableName: string): Promise<void> => 
     )
     BEGIN
       EXEC('ALTER TABLE ${tableName} ADD [COST_TYPE] ${COST_TYPE_COLUMN_TYPE} NULL')
+    END`,
+    {
+      tableName,
+    },
+  );
+};
+
+export const ensureIsFinancialColumn = async (tableName: string): Promise<void> => {
+  await runQuery(
+    `IF NOT EXISTS (
+      SELECT 1
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = PARSENAME(@tableName, 2)
+        AND TABLE_NAME = PARSENAME(@tableName, 1)
+        AND COLUMN_NAME = 'IS_FINANCIAL'
+    )
+    BEGIN
+      EXEC('ALTER TABLE ${tableName} ADD [IS_FINANCIAL] ${IS_FINANCIAL_COLUMN_TYPE} NULL')
     END`,
     {
       tableName,

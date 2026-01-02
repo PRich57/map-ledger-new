@@ -1,5 +1,6 @@
 import { normalizeGlMonth } from './extractDateFromText';
 import { findChartOfAccountOption } from '../store/chartOfAccountsStore';
+import { createDistributionRowId } from './distributionRowId';
 import type {
   GLAccountMappingRow,
   DistributionOperationShare,
@@ -65,7 +66,7 @@ const resolveScoaKey = (value?: string | null): string | null => {
   return (target?.id?.trim() || normalized) as string;
 };
 
-const buildScoaContributions = (
+const buildRowContributions = (
   accounts: GLAccountMappingRow[],
 ): Map<string, ScoaContribution[]> => {
   const contributions = new Map<string, ScoaContribution[]>();
@@ -74,6 +75,7 @@ const buildScoaContributions = (
     key: string,
     account: GLAccountMappingRow,
     glMonth: string,
+    scoaAccountId: string,
     amount: number,
   ) => {
     if (!Number.isFinite(amount) || amount === 0) {
@@ -81,7 +83,7 @@ const buildScoaContributions = (
     }
     const existing = contributions.get(key) ?? [];
     existing.push({
-      scoaAccountId: key,
+      scoaAccountId,
       glMonth,
       glAccountId: account.accountId,
       amount,
@@ -106,7 +108,8 @@ const buildScoaContributions = (
       if (!scoaKey) {
         return;
       }
-      addContribution(scoaKey, account, month, account.netChange);
+      const rowKey = createDistributionRowId(account.id, scoaKey);
+      addContribution(rowKey, account, month, scoaKey, account.netChange);
       return;
     }
 
@@ -122,12 +125,13 @@ const buildScoaContributions = (
       if (signedAmount === 0) {
         return;
       }
-      addContribution(scoaKey, account, month, signedAmount);
+      const rowKey = createDistributionRowId(account.id, scoaKey);
+      addContribution(rowKey, account, month, scoaKey, signedAmount);
       return;
     }
 
     if (account.mappingType === 'percentage') {
-      account.splitDefinitions.forEach(split => {
+      account.splitDefinitions.forEach((split, index) => {
         if (split.isExclusion) {
           return;
         }
@@ -139,7 +143,9 @@ const buildScoaContributions = (
         if (amount === 0) {
           return;
         }
-        addContribution(scoaKey, account, month, amount);
+        const splitSuffix = split.id?.trim() || `split-${index + 1}`;
+        const rowKey = createDistributionRowId(account.id, scoaKey, splitSuffix);
+        addContribution(rowKey, account, month, scoaKey, amount);
       });
     }
   });
@@ -227,7 +233,7 @@ export const buildDistributionActivityEntries = (
     return [];
   }
 
-  const contributionsByScoa = buildScoaContributions(accounts);
+  const contributionsByRowId = buildRowContributions(accounts);
   const aggregated = new Map<string, DistributionActivityEntry>();
 
   rows.forEach(row => {
@@ -235,16 +241,13 @@ export const buildDistributionActivityEntries = (
     if (!shares.length) {
       return;
     }
-    const candidateKeys = [row.mappingRowId, row.accountId]
-      .map(value => value?.trim())
-      .filter(Boolean) as string[];
-    if (!candidateKeys.length) {
-      return;
-    }
-
-    const contributions = candidateKeys
-      .map(key => contributionsByScoa.get(key))
-      .find(value => value && value.length > 0);
+    const fallbackKey =
+      row.mappingRowId && row.accountId
+        ? createDistributionRowId(row.mappingRowId, row.accountId)
+        : null;
+    const contributions =
+      contributionsByRowId.get(row.id) ??
+      (fallbackKey ? contributionsByRowId.get(fallbackKey) : undefined);
 
     if (!contributions) {
       return;

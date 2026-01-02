@@ -41,6 +41,20 @@ function toTrimmedString(value: unknown): string {
   return '';
 }
 
+const TRIAL_BALANCE_HEADER_SCAN_LIMIT = 25;
+const TRIAL_BALANCE_REQUIRED_HEADERS = ['ACCOUNT', 'DESCRIPTION'];
+const TRIAL_BALANCE_HEADERS = [
+  'ACCOUNT',
+  'DESCRIPTION',
+  'BEGINNING BALANCE',
+  'OPENING BALANCE',
+  'DEBIT',
+  'CREDIT',
+  'NET CHANGE',
+  'ENDING BALANCE',
+  'CLOSING BALANCE',
+];
+
 function isNumericLike(value: string): boolean {
   if (!value) return false;
   return /^[-+]?[$(]?\d[\d.,]*(?:\)?)?$/.test(value.replace(/\s+/g, ''));
@@ -165,6 +179,51 @@ const normalizeCellValue = (value: unknown): string | number | undefined => {
   return undefined;
 };
 
+const normalizeHeaderCandidate = (value: unknown): string => {
+  const normalized = normalizeCellValue(value);
+  if (normalized === undefined) {
+    return '';
+  }
+  return `${normalized}`.trim().toUpperCase().replace(/\s+/g, ' ');
+};
+
+const matchesHeaderCandidate = (candidate: string, header: string): boolean =>
+  candidate === header || candidate.includes(header);
+
+const isTrialBalanceHeaderRow = (values: unknown[]): boolean => {
+  const normalized = values
+    .map(normalizeHeaderCandidate)
+    .filter((candidate) => candidate.length > 0);
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  const hasRequiredHeaders = TRIAL_BALANCE_REQUIRED_HEADERS.every((header) =>
+    normalized.some((candidate) => matchesHeaderCandidate(candidate, header)),
+  );
+  if (!hasRequiredHeaders) {
+    return false;
+  }
+
+  const matchCount = TRIAL_BALANCE_HEADERS.filter((header) =>
+    normalized.some((candidate) => matchesHeaderCandidate(candidate, header)),
+  ).length;
+
+  return matchCount >= 4;
+};
+
+const findTrialBalanceHeaderRow = (sheet: Worksheet): number | undefined => {
+  const limit = Math.min(sheet.rowCount, TRIAL_BALANCE_HEADER_SCAN_LIMIT);
+  for (let rowNumber = 1; rowNumber <= limit; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    if (isTrialBalanceHeaderRow(values)) {
+      return rowNumber;
+    }
+  }
+  return undefined;
+};
+
 export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUpload[]> {
   const buffer = await file.arrayBuffer();
   const ExcelJS = await loadExcelJs();
@@ -179,6 +238,7 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
     const headerExtensionRows = new Set<number>();
     const rows: ParsedRow[] = [];
     let firstDataRowIndex: number | undefined;
+    const forcedHeaderRowNumber = findTrialBalanceHeaderRow(sheet);
 
     // Extract date from sheet name (e.g., "Trial balance report (Aug'24)" -> "2024-08")
     const sheetNameDate = extractDateFromText(sheet.name);
@@ -199,7 +259,17 @@ export async function parseTrialBalanceWorkbook(file: File): Promise<ParsedUploa
       if (!Array.isArray(rawValues)) return;
       const values = rawValues.slice(1);
 
-      if (!headerRowFound && values.filter(Boolean).length > 2) {
+      if (forcedHeaderRowNumber && rowNumber < forcedHeaderRowNumber) {
+        return;
+      }
+
+      const isHeaderCandidate =
+        !headerRowFound &&
+        (forcedHeaderRowNumber
+          ? rowNumber === forcedHeaderRowNumber
+          : values.filter(Boolean).length > 2);
+
+      if (isHeaderCandidate) {
         const primaryHeader = values.map((val, i) => {
           if (typeof val === 'string') return val.trim();
           if (typeof val === 'number') return val.toString();

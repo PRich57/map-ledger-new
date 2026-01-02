@@ -30,6 +30,16 @@ const normalizeEntityId = (value: string | null): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
+const isValidUploadGuid = (value: string | null | undefined): boolean => {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.replace(/[{}]/g, '').trim();
+  return /^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$/.test(
+    normalized,
+  );
+};
+
 const stepParam = (value: string | null): MappingStep => {
   if (value === 'reconcile' || value === 'distribution' || value === 'review') {
     return value;
@@ -45,7 +55,7 @@ const resolveHydrationMode = (value: string | null): HydrationMode => {
 };
 
 export default function Mapping() {
-  const { uploadId = 'demo' } = useParams();
+  const { uploadId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const userEmail = useAuthStore(state => state.user?.email ?? null);
   const hydrateClients = useClientStore(state => state.hydrateFromAccessList);
@@ -53,6 +63,7 @@ export default function Mapping() {
   const fetchOrganizations = useOrganizationStore(state => state.fetchForUser);
   const activeClientId = useClientStore(state => state.activeClientId);
   const activeUploadId = useMappingStore(state => state.activeUploadId);
+  const mappingActiveClientId = useMappingStore(state => state.activeClientId);
   const availableEntities = useMappingStore(selectAvailableEntities);
   const activeEntityId = useMappingStore(selectActiveEntityId);
   const entityMappingProgress = useMappingStore(selectEntityMappingProgress);
@@ -69,16 +80,38 @@ export default function Mapping() {
   }, [activeEntityId, entityStages, searchParams]);
   const setActiveEntityId = useMappingStore(state => state.setActiveEntityId);
   const fetchFileRecords = useMappingStore(state => state.fetchFileRecords);
+  const fetchClientRecords = useMappingStore(state => state.fetchClientRecords);
   const setMappingActiveClientId = useMappingStore(state => state.setActiveClientId);
   const hydrationMode = useMemo(
     () => resolveHydrationMode(searchParams.get('mode')),
     [searchParams],
+  );
+  const isUploadGuid = useMemo(() => isValidUploadGuid(uploadId), [uploadId]);
+  const aggregateUploadId = useMemo(
+    () => (activeClientId ? `client-${activeClientId}` : null),
+    [activeClientId],
   );
   const availableEntityIds = useMemo(
     () => new Set(availableEntities.map(entity => entity.id)),
     [availableEntities],
   );
   const lastActiveEntityId = useRef<string | null>(null);
+  const resolveSelectableEntityId = useCallback(
+    (preferredId?: string | null) => {
+      if (preferredId && availableEntityIds.has(preferredId)) {
+        return preferredId;
+      }
+
+      const lastKnown =
+        lastActiveEntityId.current && availableEntityIds.has(lastActiveEntityId.current)
+          ? lastActiveEntityId.current
+          : null;
+
+      return lastKnown ?? availableEntities[0]?.id ?? null;
+    },
+    [availableEntities, availableEntityIds],
+  );
+  const lastClientIdRef = useRef<string | null>(null);
   const entityCompletion = useMemo<Record<string, boolean>>(() => {
     const completion: Record<string, boolean> = {};
     availableEntities.forEach(entity => {
@@ -155,11 +188,42 @@ export default function Mapping() {
   }, [activeStep]);
 
   useEffect(() => {
-    if (!uploadId) {
+    if (!uploadId || !isUploadGuid) {
       return;
     }
 
-    const shouldReload = uploadId !== activeUploadId || hydrationMode === 'restart';
+    const currentClientId = activeClientId ?? null;
+    const previousClientId = lastClientIdRef.current;
+    const clientChanged =
+      currentClientId !== null &&
+      previousClientId !== null &&
+      currentClientId !== previousClientId;
+
+    if (clientChanged) {
+      fetchClientRecords(currentClientId, { hydrateMode: hydrationMode });
+
+      if (hydrationMode === 'restart') {
+        const next = new URLSearchParams(searchParams);
+        next.delete('mode');
+        setSearchParams(next, { replace: true });
+      }
+
+      return;
+    }
+
+    const isAggregateActive =
+      Boolean(aggregateUploadId) &&
+      activeUploadId === aggregateUploadId &&
+      Boolean(activeClientId);
+
+    if (isAggregateActive) {
+      return;
+    }
+
+    const shouldReload =
+      uploadId !== activeUploadId ||
+      hydrationMode === 'restart' ||
+      (activeClientId ?? null) !== (mappingActiveClientId ?? null);
     if (shouldReload) {
       fetchFileRecords(uploadId, { hydrateMode: hydrationMode, clientId: activeClientId });
 
@@ -172,11 +236,49 @@ export default function Mapping() {
   }, [
     activeClientId,
     activeUploadId,
+    aggregateUploadId,
     fetchFileRecords,
+    fetchClientRecords,
     hydrationMode,
+    isUploadGuid,
+    mappingActiveClientId,
     searchParams,
     setSearchParams,
     uploadId,
+  ]);
+
+  useEffect(() => {
+    lastClientIdRef.current = activeClientId ?? null;
+  }, [activeClientId]);
+
+  useEffect(() => {
+    if (isUploadGuid || !activeClientId) {
+      return;
+    }
+
+    const shouldReload =
+      aggregateUploadId !== activeUploadId ||
+      hydrationMode === 'restart' ||
+      mappingActiveClientId !== activeClientId;
+    if (shouldReload) {
+      fetchClientRecords(activeClientId, { hydrateMode: hydrationMode });
+
+      if (hydrationMode === 'restart') {
+        const next = new URLSearchParams(searchParams);
+        next.delete('mode');
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [
+    activeClientId,
+    activeUploadId,
+    aggregateUploadId,
+    fetchClientRecords,
+    hydrationMode,
+    isUploadGuid,
+    mappingActiveClientId,
+    searchParams,
+    setSearchParams,
   ]);
 
   useEffect(() => {
@@ -188,13 +290,7 @@ export default function Mapping() {
       return;
     }
 
-    const fallbackEntityId =
-      normalizedEntityParam ??
-      (activeEntityId && availableEntityIds.has(activeEntityId)
-        ? activeEntityId
-        : lastActiveEntityId.current) ??
-      availableEntities[0]?.id ??
-      null;
+    const fallbackEntityId = resolveSelectableEntityId(normalizedEntityParam ?? activeEntityId);
 
     if (fallbackEntityId !== activeEntityId) {
       setActiveEntityId(fallbackEntityId);
@@ -205,11 +301,16 @@ export default function Mapping() {
     availableEntities,
     availableEntityIds,
     normalizedEntityParam,
+    resolveSelectableEntityId,
     setActiveEntityId,
   ]);
 
   useEffect(() => {
     if (!activeEntityId) {
+      return;
+    }
+
+    if (!availableEntityIds.has(activeEntityId)) {
       return;
     }
 
@@ -222,7 +323,7 @@ export default function Mapping() {
       }
       return { ...prev, [activeEntityId]: stageFromParams };
     });
-  }, [activeEntityId, searchParams]);
+  }, [activeEntityId, availableEntityIds, searchParams]);
 
   useEffect(() => {
     if (!activeEntityId) {
@@ -276,7 +377,7 @@ export default function Mapping() {
   );
 
   const handleStepChange = (step: MappingStep) => {
-    const targetEntityId = activeEntityId ?? lastActiveEntityId.current ?? availableEntities[0]?.id;
+    const targetEntityId = resolveSelectableEntityId(activeEntityId);
     if (!targetEntityId) {
       return;
     }
@@ -318,7 +419,10 @@ export default function Mapping() {
 
   return (
     <div data-testid="mapping-page" className="space-y-6 px-4 py-6 sm:px-6 lg:px-8">
-      <MappingHeader clientId={activeClientId ?? undefined} glUploadId={uploadId} />
+      <MappingHeader
+        clientId={activeClientId ?? undefined}
+        glUploadId={isUploadGuid && activeUploadId === uploadId ? uploadId : undefined}
+      />
       <SummaryCards />
       {activeStep !== 'review' && (
         <EntityTabs

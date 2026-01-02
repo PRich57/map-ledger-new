@@ -128,7 +128,9 @@ describe('fileRecordRepository', () => {
     const results = await listFileRecords(guid);
 
     const [sql, params] = mockedRunQuery.mock.calls[0];
-    expect(sql).toContain('FILE_UPLOAD_GUID = @fileUploadGuid');
+    expect(sql).toContain('INNER JOIN ml.CLIENT_FILES cf');
+    expect(sql).toContain('fr.FILE_UPLOAD_GUID = @fileUploadGuid');
+    expect(sql).toContain('cf.IS_DELETED = 0');
     expect(params).toEqual({ fileUploadGuid: guid });
 
     expect(results[0]).toEqual({

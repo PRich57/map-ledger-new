@@ -184,6 +184,113 @@ describe('fileRecords.ingestFileRecordsHandler', () => {
     );
     expect(response.status).toBe(201);
   });
+
+  it('maps user defined headers into file records', async () => {
+    const payload = {
+      ...basePayload,
+      headerMap: {
+        ...basePayload.headerMap,
+        USER_DEFINED1: 'Department',
+        USER_DEFINED2: 'Class',
+        USER_DEFINED3: 'Region',
+      },
+      sheets: [
+        {
+          sheetName: 'Sheet1',
+          rows: [
+            {
+              'Account ID': '100',
+              'Account Name': 'Cash',
+              Amount: 25,
+              Department: 'Ops',
+              Class: 'A',
+              Region: 'North',
+            },
+          ],
+        },
+      ],
+    };
+
+    mockInsertFileRecords.mockResolvedValue([
+      {
+        recordId: 1,
+        fileUploadGuid: payload.fileUploadGuid,
+        accountId: '100',
+        accountName: 'Cash',
+        activityAmount: 25,
+        userDefined1: 'Ops',
+        userDefined2: 'A',
+        userDefined3: 'North',
+      },
+    ]);
+
+    const request = { json: jest.fn().mockResolvedValue(payload) } as any;
+    const context = { warn: jest.fn(), info: jest.fn(), error: jest.fn() } as any;
+
+    const response = await ingestFileRecordsHandler(request, context);
+
+    expect(mockInsertFileRecords).toHaveBeenCalledWith(
+      payload.fileUploadGuid,
+      expect.arrayContaining([
+        expect.objectContaining({
+          userDefined1: 'Ops',
+          userDefined2: 'A',
+          userDefined3: 'North',
+        }),
+      ]),
+    );
+    expect(response.status).toBe(201);
+  });
+
+  it('skips header-like rows in the account id column', async () => {
+    const payload = {
+      ...basePayload,
+      sheets: [
+        {
+          sheetName: 'Sheet1',
+          rows: [
+            {
+              'Account ID': 'TRIAL BALANCE SUMMARY FOR 2025',
+              'Account Name': 'TRIAL BALANCE SUMMARY FOR 2025',
+              Amount: '',
+            },
+            {
+              'Account ID': 'Account',
+              'Account Name': 'Account',
+              Amount: '',
+            },
+            {
+              'Account ID': '100',
+              'Account Name': 'Cash',
+              Amount: 25,
+            },
+          ],
+        },
+      ],
+    };
+
+    mockInsertFileRecords.mockResolvedValue([
+      {
+        recordId: 1,
+        fileUploadGuid: payload.fileUploadGuid,
+        accountId: '100',
+        accountName: 'Cash',
+        activityAmount: 25,
+      },
+    ]);
+
+    const request = { json: jest.fn().mockResolvedValue(payload) } as any;
+    const context = { warn: jest.fn(), info: jest.fn(), error: jest.fn() } as any;
+
+    const response = await ingestFileRecordsHandler(request, context);
+    const insertedPayload = mockInsertFileRecords.mock.calls[0]?.[1] ?? [];
+
+    expect(insertedPayload).toHaveLength(1);
+    expect(insertedPayload[0]).toEqual(
+      expect.objectContaining({ accountId: '100', accountName: 'Cash' }),
+    );
+    expect(response.status).toBe(201);
+  });
 });
 
 describe('fileRecords.listFileRecordsHandler', () => {

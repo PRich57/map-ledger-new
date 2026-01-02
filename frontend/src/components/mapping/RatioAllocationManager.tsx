@@ -7,6 +7,8 @@ import type { DynamicAllocationPresetContext } from '../../types';
 
 interface RatioAllocationManagerProps {
   initialSourceAccountId?: string | null;
+  applyToSourceAccountIds?: string[];
+  onPresetApplied?: (presetId: string, sourceAccountIds: string[]) => void;
   onDone?: () => void;
   targetCatalog?: RatioAllocationTargetCatalogOption[];
   resolveCanonicalTargetId?: (targetId?: string | null) => string | null;
@@ -18,6 +20,8 @@ interface RatioAllocationManagerProps {
 
 const RatioAllocationManager = ({
   initialSourceAccountId,
+  applyToSourceAccountIds,
+  onPresetApplied,
   onDone,
   targetCatalog,
   resolveCanonicalTargetId,
@@ -45,6 +49,8 @@ const RatioAllocationManager = ({
 
       <RatioAllocationBuilder
         initialSourceAccountId={initialSourceAccountId}
+        applyToSourceAccountIds={applyToSourceAccountIds}
+        onPresetApplied={onPresetApplied}
         targetCatalog={targetCatalog}
         resolveCanonicalTargetId={resolveCanonicalTargetId}
         targetLabel={targetLabel}

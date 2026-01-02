@@ -7,7 +7,7 @@ import type {
   DistributionSaveRowInput,
   DistributionStatus,
   DistributionType,
-  StandardScoaSummary,
+  DistributionSourceSummary,
 } from '../types';
 import { selectAccounts, useMappingStore } from './mappingStore';
 import { buildDistributionActivityEntries } from '../utils/distributionActivity';
@@ -41,13 +41,14 @@ interface DistributionState {
   historyEntityId: string | null;
   isAutoSaving: boolean;
   autoSaveMessage: string | null;
-  syncRowsFromStandardTargets: (summaries: StandardScoaSummary[]) => void;
+  syncRowsFromStandardTargets: (summaries: DistributionSourceSummary[]) => void;
   setSearchTerm: (term: string) => void;
   toggleStatusFilter: (status: DistributionStatus) => void;
   clearStatusFilters: () => void;
   updateRow: (id: string, updates: Partial<DistributionRow>) => void;
   updateRowType: (id: string, type: DistributionType) => void;
   updateRowOperations: (id: string, operations: DistributionRow['operations']) => void;
+  applyOperationsToRows: (ids: string[], operations: DistributionRow['operations']) => void;
   updateRowPreset: (id: string, presetId: string | null) => void;
   updateRowNotes: (id: string, notes: string) => void;
   setOperationsCatalog: (operations: DistributionOperationCatalogItem[]) => void;
@@ -505,28 +506,29 @@ const persistActivityForRows = async (
     lastSavedCount: 0,
     syncRowsFromStandardTargets: summaries =>
       set(state => {
-        const uniqueSummaries = summaries.reduce<StandardScoaSummary[]>((acc, summary) => {
-          if (acc.some(item => item.id === summary.id)) {
+        const uniqueSummaries = summaries.reduce<DistributionSourceSummary[]>(
+          (acc, summary) => {
+            if (acc.some(item => item.id === summary.id)) {
+              return acc;
+            }
+            acc.push(summary);
             return acc;
-          }
-          acc.push(summary);
-          return acc;
-        }, []);
-
-        const existingByTarget = new Map(
-          state.rows.map(row => [row.mappingRowId, row] as const),
+          },
+          [],
         );
+
+        const existingById = new Map(state.rows.map(row => [row.id, row] as const));
         const nextRows: DistributionRow[] = uniqueSummaries.map(summary => {
-          const existing = existingByTarget.get(summary.id);
+          const existing = existingById.get(summary.id);
           const nextOperations = existing
             ? existing.operations.map(operation => ({ ...operation }))
             : [];
           const resolvedType = existing?.type ?? 'direct';
           return applyDistributionStatus({
-            id: existing?.id ?? summary.id,
-            mappingRowId: summary.id,
-            accountId: summary.value,
-            description: summary.label,
+            id: summary.id,
+            mappingRowId: summary.mappingRowId,
+            accountId: summary.accountId,
+            description: summary.description,
             activity: summary.mappedAmount,
             type: resolvedType,
             operations: clampOperationsForType(resolvedType, nextOperations),
@@ -601,6 +603,26 @@ const persistActivityForRows = async (
         ),
       }));
       queueRowsForAutoSave([id]);
+    },
+    applyOperationsToRows: (ids, operations) => {
+      if (!ids.length) {
+        return;
+      }
+      const idSet = new Set(ids);
+      set(state => ({
+        rows: state.rows.map(row =>
+          idSet.has(row.id)
+            ? applyDistributionStatus({
+                ...row,
+                operations,
+                isDirty: true,
+                autoSaveState: 'queued',
+                autoSaveError: null,
+              })
+            : row,
+        ),
+      }));
+      queueRowsForAutoSave(ids);
     },
     updateRowPreset: (id, presetId) => {
       set(state => ({

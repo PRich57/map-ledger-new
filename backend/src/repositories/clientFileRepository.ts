@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { runQuery } from '../utils/sqlClient';
+import { listClientEntities } from './clientEntityRepository';
 
 export const ALLOWED_IMPORT_STATUSES = [
   'uploaded',
@@ -29,7 +30,10 @@ export interface ClientFileSheet {
 }
 
 export interface ClientFileEntity {
-  entityId?: number;
+  entityId?: string;
+  entityName?: string;
+  displayName?: string;
+  rowCount?: number;
   isSelected?: boolean;
   insertedDttm?: string;
   updatedAt?: string;
@@ -49,6 +53,7 @@ export interface ClientFileRecord {
   insertedDttm?: string;
   timestamp?: string;
   period: string;
+  rowCount?: number;
   glPeriodStart?: string;
   glPeriodEnd?: string;
   lastStepCompletedDttm?: string;
@@ -70,7 +75,7 @@ export interface NewClientFileRecord {
 
 interface RawClientFileRow {
   fileUploadGuid: string;
-  clientId: string;
+  clientId: string | number;
   clientName?: string;
   insertedBy?: string;
   insertedDttm?: string | Date;
@@ -182,11 +187,13 @@ const mapClientFileRow = (row: RawClientFileRow): ClientFileRecord => {
   const insertedDttm = parseDate(row.insertedDttm);
   const normalizedStart = normalizeMonth(row.glPeriodStart);
   const normalizedEnd = normalizeMonth(row.glPeriodEnd);
+  const normalizedClientId =
+    typeof row.clientId === 'string' ? row.clientId.trim() : `${row.clientId}`.trim();
 
   return {
     id: row.fileUploadGuid,
     fileUploadGuid: row.fileUploadGuid,
-    clientId: row.clientId,
+    clientId: normalizedClientId,
     clientName: row.clientName,
     insertedBy: row.insertedBy,
     importedBy: row.insertedBy,
@@ -227,6 +234,39 @@ export const getClientFileByGuid = async (
     WHERE cf.FILE_UPLOAD_GUID = @fileUploadGuid
       AND cf.IS_DELETED = 0`,
     { fileUploadGuid }
+  );
+
+  const row = result.recordset?.[0];
+  return row ? mapClientFileRow(row) : null;
+};
+
+export const getLatestClientFile = async (
+  clientId: string,
+): Promise<ClientFileRecord | null> => {
+  const normalizedClientId = clientId.trim();
+  if (!normalizedClientId) {
+    return null;
+  }
+
+  const result = await runQuery<RawClientFileRow>(
+    `SELECT TOP 1
+      cf.FILE_UPLOAD_GUID as fileUploadGuid,
+      cf.CLIENT_ID as clientId,
+      client.CLIENT_NAME as clientName,
+      cf.INSERTED_BY as insertedBy,
+      cf.INSERTED_DTTM as insertedDttm,
+      cf.SOURCE_FILE_NAME as sourceFileName,
+      cf.FILE_STORAGE_URI as fileStorageUri,
+      cf.FILE_STATUS as fileStatus,
+      cf.GL_PERIOD_START as glPeriodStart,
+      cf.GL_PERIOD_END as glPeriodEnd,
+      cf.LAST_STEP_COMPLETED_DTTM as lastStepCompletedDttm
+    FROM ml.CLIENT_FILES cf
+    ${CLIENT_OPERATIONS_JOIN}
+    WHERE cf.CLIENT_ID = @clientId
+      AND cf.IS_DELETED = 0
+    ORDER BY COALESCE(cf.LAST_STEP_COMPLETED_DTTM, cf.INSERTED_DTTM) DESC`,
+    { clientId: normalizedClientId },
   );
 
   const row = result.recordset?.[0];
@@ -322,6 +362,22 @@ const buildWhereClause = (
   return { clause, parameters };
 };
 
+const buildGuidParameters = (
+  fileGuids: string[],
+  prefix: string,
+): { placeholders: string; parameters: Record<string, unknown> } => {
+  const parameters: Record<string, unknown> = {};
+  const placeholders = fileGuids
+    .map((guid, index) => {
+      const key = `${prefix}${index}`;
+      parameters[key] = guid;
+      return `@${key}`;
+    })
+    .join(', ');
+
+  return { placeholders, parameters };
+};
+
 export interface ClientFileHistoryResult {
   items: ClientFileRecord[];
   total: number;
@@ -396,14 +452,10 @@ export const listClientFiles = async (
     return { items, total, page, pageSize };
   }
 
-  const sheetParameters: Record<string, unknown> = {};
-  const sheetPlaceholders = fileGuids
-    .map((guid, index) => {
-      const key = `sheetFileGuid${index}`;
-      sheetParameters[key] = guid;
-      return `@${key}`;
-    })
-    .join(', ');
+  const { placeholders: sheetPlaceholders, parameters: sheetParameters } = buildGuidParameters(
+    fileGuids,
+    'sheetFileGuid',
+  );
 
   const sheetsResult = await runQuery<{
     fileUploadGuid: string;
@@ -455,14 +507,10 @@ export const listClientFiles = async (
     sheetsByFile.set(sheet.fileUploadGuid, existing);
   });
 
-  const entityParameters: Record<string, unknown> = {};
-  const entityPlaceholders = fileGuids
-    .map((guid, index) => {
-      const key = `entityFileGuid${index}`;
-      entityParameters[key] = guid;
-      return `@${key}`;
-    })
-    .join(', ');
+  const { placeholders: entityPlaceholders, parameters: entityParameters } = buildGuidParameters(
+    fileGuids,
+    'entityFileGuid',
+  );
 
   const entitiesResult = await runQuery<{
     fileUploadGuid: string;
@@ -481,10 +529,10 @@ export const listClientFiles = async (
   const entitiesByFile = new Map<string, ClientFileEntity[]>();
   (entitiesResult.recordset ?? []).forEach((entity) => {
     const existing = entitiesByFile.get(entity.fileUploadGuid) ?? [];
+    const normalizedEntityId =
+      entity.entityId !== undefined && entity.entityId !== null ? `${entity.entityId}` : undefined;
     existing.push({
-      entityId: Number.isFinite(entity.entityId)
-        ? (entity.entityId as number)
-        : undefined,
+      entityId: normalizedEntityId,
       isSelected:
         entity.isSelected === undefined || entity.isSelected === null
           ? undefined
@@ -496,11 +544,155 @@ export const listClientFiles = async (
     entitiesByFile.set(entity.fileUploadGuid, existing);
   });
 
-  const enrichedItems = items.map((item) => ({
-    ...item,
-    sheets: sheetsByFile.get(item.fileUploadGuid) ?? [],
-    entities: entitiesByFile.get(item.fileUploadGuid) ?? [],
-  }));
+  const { placeholders: recordPlaceholders, parameters: recordParameters } = buildGuidParameters(
+    fileGuids,
+    'recordFileGuid',
+  );
+
+  const recordTotalsResult = await runQuery<{
+    fileUploadGuid: string;
+    rowCount?: number | null;
+    periodStart?: string | Date | null;
+    periodEnd?: string | Date | null;
+  }>(
+    `SELECT FILE_UPLOAD_GUID as fileUploadGuid,
+            COUNT(*) as [rowCount],
+            MIN(GL_MONTH) as periodStart,
+            MAX(GL_MONTH) as periodEnd
+      FROM ml.FILE_RECORDS
+      WHERE FILE_UPLOAD_GUID IN (${recordPlaceholders})
+      GROUP BY FILE_UPLOAD_GUID`,
+    recordParameters,
+  );
+
+  const recordTotalsByFile = new Map<
+    string,
+    { rowCount: number; periodStart?: string; periodEnd?: string }
+  >();
+
+  (recordTotalsResult.recordset ?? []).forEach((row) => {
+    const rowCount = Number(row.rowCount);
+    recordTotalsByFile.set(row.fileUploadGuid, {
+      rowCount: Number.isFinite(rowCount) ? rowCount : 0,
+      periodStart: normalizeMonth(row.periodStart),
+      periodEnd: normalizeMonth(row.periodEnd),
+    });
+  });
+
+  const recordEntityCountsResult = await runQuery<{
+    fileUploadGuid: string;
+    entityId?: string | number | null;
+    rowCount?: number | null;
+  }>(
+    `SELECT FILE_UPLOAD_GUID as fileUploadGuid,
+            ENTITY_ID as entityId,
+            COUNT(*) as [rowCount]
+      FROM ml.FILE_RECORDS
+      WHERE FILE_UPLOAD_GUID IN (${recordPlaceholders})
+        AND ENTITY_ID IS NOT NULL
+      GROUP BY FILE_UPLOAD_GUID, ENTITY_ID`,
+    recordParameters,
+  );
+
+  const entityCountsByFile = new Map<string, Map<string, number>>();
+  (recordEntityCountsResult.recordset ?? []).forEach((row) => {
+    if (row.entityId === undefined || row.entityId === null) {
+      return;
+    }
+
+    const entityId = `${row.entityId}`;
+    const rowCount = Number(row.rowCount);
+    const existing = entityCountsByFile.get(row.fileUploadGuid) ?? new Map<string, number>();
+    existing.set(entityId, Number.isFinite(rowCount) ? rowCount : 0);
+    entityCountsByFile.set(row.fileUploadGuid, existing);
+  });
+
+  const clientIds = Array.from(
+    new Set(items.map((item) => item.clientId).filter((clientId) => clientId.length > 0)),
+  );
+  const clientEntityMaps = new Map<string, Map<string, { entityName: string; displayName: string }>>();
+
+  const clientEntityResults = await Promise.allSettled(
+    clientIds.map((clientId) => listClientEntities(clientId)),
+  );
+
+  clientEntityResults.forEach((result, index) => {
+    if (result.status !== 'fulfilled') {
+      return;
+    }
+
+    const clientId = clientIds[index];
+    const lookup = new Map<string, { entityName: string; displayName: string }>();
+    result.value.forEach((entity) => {
+      lookup.set(entity.entityId, {
+        entityName: entity.entityName,
+        displayName: entity.entityDisplayName,
+      });
+    });
+    clientEntityMaps.set(clientId, lookup);
+  });
+
+  const enrichedItems = items.map((item) => {
+    const sheets = sheetsByFile.get(item.fileUploadGuid) ?? [];
+    const fileEntities = entitiesByFile.get(item.fileUploadGuid) ?? [];
+    const fileEntityLookup = new Map(
+      fileEntities
+        .map((entity) => [entity.entityId, entity])
+        .filter((entry): entry is [string, ClientFileEntity] => Boolean(entry[0])),
+    );
+    const entityCounts = entityCountsByFile.get(item.fileUploadGuid) ?? new Map<string, number>();
+    const entityIds = new Set<string>();
+
+    fileEntityLookup.forEach((_entity, entityId) => {
+      entityIds.add(entityId);
+    });
+    entityCounts.forEach((_count, entityId) => {
+      entityIds.add(entityId);
+    });
+
+    const clientEntityLookup = clientEntityMaps.get(item.clientId) ?? new Map();
+    const resolvedEntities = Array.from(entityIds).map((entityId) => {
+      const fileEntity = fileEntityLookup.get(entityId);
+      const clientEntity = clientEntityLookup.get(entityId);
+      const displayName = clientEntity?.displayName ?? clientEntity?.entityName ?? entityId;
+      const entityName = clientEntity?.entityName ?? displayName;
+
+      return {
+        entityId,
+        entityName,
+        displayName,
+        rowCount: entityCounts.get(entityId) ?? 0,
+        isSelected: fileEntity?.isSelected,
+        insertedDttm: fileEntity?.insertedDttm,
+        updatedAt: fileEntity?.updatedAt,
+        updatedBy: fileEntity?.updatedBy,
+      };
+    });
+
+    resolvedEntities.sort((a, b) => {
+      const countDelta = (b.rowCount ?? 0) - (a.rowCount ?? 0);
+      if (countDelta !== 0) {
+        return countDelta;
+      }
+      return a.entityName.localeCompare(b.entityName, undefined, { sensitivity: 'base' });
+    });
+
+    const recordTotals = recordTotalsByFile.get(item.fileUploadGuid);
+    const resolvedPeriodStart = recordTotals?.periodStart ?? item.glPeriodStart;
+    const resolvedPeriodEnd = recordTotals?.periodEnd ?? item.glPeriodEnd;
+    const resolvedPeriod = buildPeriodLabel(resolvedPeriodStart, resolvedPeriodEnd) || item.period;
+    const rowCount = recordTotals ? recordTotals.rowCount : undefined;
+
+    return {
+      ...item,
+      period: resolvedPeriod,
+      rowCount,
+      glPeriodStart: resolvedPeriodStart ?? item.glPeriodStart,
+      glPeriodEnd: resolvedPeriodEnd ?? item.glPeriodEnd,
+      sheets,
+      entities: resolvedEntities,
+    };
+  });
 
   return { items: enrichedItems, total, page, pageSize };
 };

@@ -47,6 +47,46 @@ export interface FileRecordRow extends FileRecordInput {
 
 const TABLE_NAME = 'ml.FILE_RECORDS';
 
+interface RawFileRecordRow {
+  file_upload_guid: string;
+  record_id: number;
+  source_sheet_name?: string | null;
+  entity_id?: string | null;
+  account_id: string;
+  account_name: string;
+  opening_balance?: number | null;
+  closing_balance?: number | null;
+  activity_amount: number;
+  gl_month?: string | null;
+  user_defined1?: string | null;
+  user_defined2?: string | number | null;
+  user_defined3?: string | null;
+  inserted_dttm?: Date | string | null;
+}
+
+const mapFileRecordRow = (row: RawFileRecordRow): FileRecordRow => ({
+  fileUploadGuid: row.file_upload_guid,
+  recordId: row.record_id,
+  sourceSheetName: row.source_sheet_name ?? undefined,
+  entityId: row.entity_id ?? undefined,
+  accountId: row.account_id,
+  accountName: row.account_name,
+  openingBalance: row.opening_balance ?? undefined,
+  closingBalance: row.closing_balance ?? undefined,
+  activityAmount: row.activity_amount,
+  glMonth: row.gl_month ?? undefined,
+  userDefined1: row.user_defined1 ?? undefined,
+  userDefined2:
+    row.user_defined2 !== undefined && row.user_defined2 !== null
+      ? String(row.user_defined2)
+      : undefined,
+  userDefined3: row.user_defined3 ?? undefined,
+  insertedDttm:
+    row.inserted_dttm instanceof Date
+      ? row.inserted_dttm.toISOString()
+      : row.inserted_dttm ?? undefined,
+});
+
 // SQL Server has a 2100 parameter limit. Each record uses 12 parameters,
 // so we use 150 records per batch (150 * 12 = 1800) to stay safely under the limit.
 const BATCH_SIZE = 150;
@@ -147,65 +187,91 @@ export const listFileRecords = async (fileUploadGuid?: string): Promise<FileReco
   }
 
   const params: Record<string, unknown> = { fileUploadGuid };
-  const whereClause = 'WHERE FILE_UPLOAD_GUID = @fileUploadGuid';
+  const whereClause = 'WHERE fr.FILE_UPLOAD_GUID = @fileUploadGuid AND cf.IS_DELETED = 0';
 
-  const result = await runQuery<{
-    file_upload_guid: string;
-    record_id: number;
-    source_sheet_name?: string | null;
-    entity_id?: string | null;
-    account_id: string;
-    account_name: string;
-    opening_balance?: number | null;
-    closing_balance?: number | null;
-    activity_amount: number;
-    gl_month?: string | null;
-    user_defined1?: string | null;
-    user_defined2?: string | number | null;
-    user_defined3?: string | null;
-    inserted_dttm?: Date | string | null;
-  }>(
+  const result = await runQuery<RawFileRecordRow>(
     `SELECT
-      FILE_UPLOAD_GUID as file_upload_guid,
-      RECORD_ID as record_id,
-      SOURCE_SHEET_NAME as source_sheet_name,
-      ENTITY_ID as entity_id,
-      ACCOUNT_ID as account_id,
-      ACCOUNT_NAME as account_name,
-      OPENING_BALANCE as opening_balance,
-      CLOSING_BALANCE as closing_balance,
-      ACTIVITY_AMOUNT as activity_amount,
-      GL_MONTH as gl_month,
-      USER_DEFINED1 as user_defined1,
-      USER_DEFINED2 as user_defined2,
-      USER_DEFINED3 as user_defined3,
-      INSERTED_DTTM as inserted_dttm
-    FROM ${TABLE_NAME}
+      fr.FILE_UPLOAD_GUID as file_upload_guid,
+      fr.RECORD_ID as record_id,
+      fr.SOURCE_SHEET_NAME as source_sheet_name,
+      fr.ENTITY_ID as entity_id,
+      fr.ACCOUNT_ID as account_id,
+      fr.ACCOUNT_NAME as account_name,
+      fr.OPENING_BALANCE as opening_balance,
+      fr.CLOSING_BALANCE as closing_balance,
+      fr.ACTIVITY_AMOUNT as activity_amount,
+      fr.GL_MONTH as gl_month,
+      fr.USER_DEFINED1 as user_defined1,
+      fr.USER_DEFINED2 as user_defined2,
+      fr.USER_DEFINED3 as user_defined3,
+      fr.INSERTED_DTTM as inserted_dttm
+    FROM ${TABLE_NAME} fr
+    INNER JOIN ml.CLIENT_FILES cf ON cf.FILE_UPLOAD_GUID = fr.FILE_UPLOAD_GUID
     ${whereClause}
     ORDER BY SOURCE_SHEET_NAME ASC, RECORD_ID ASC`,
     params,
   );
 
-  return (result.recordset ?? []).map((row) => ({
-    fileUploadGuid: row.file_upload_guid,
-    recordId: row.record_id,
-    sourceSheetName: row.source_sheet_name ?? undefined,
-    entityId: row.entity_id ?? undefined,
-    accountId: row.account_id,
-    accountName: row.account_name,
-    openingBalance: row.opening_balance ?? undefined,
-    closingBalance: row.closing_balance ?? undefined,
-    activityAmount: row.activity_amount,
-    glMonth: row.gl_month ?? undefined,
-    userDefined1: row.user_defined1 ?? undefined,
-    userDefined2:
-      row.user_defined2 !== undefined && row.user_defined2 !== null
-        ? String(row.user_defined2)
-        : undefined,
-    userDefined3: row.user_defined3 ?? undefined,
-    insertedDttm:
-      row.inserted_dttm instanceof Date
-        ? row.inserted_dttm.toISOString()
-        : row.inserted_dttm ?? undefined,
-  }));
+  return (result.recordset ?? []).map(mapFileRecordRow);
+};
+
+export const listLatestFileRecordsForClient = async (
+  clientId?: string,
+): Promise<FileRecordRow[]> => {
+  const normalizedClientId = clientId?.trim();
+  if (!normalizedClientId) {
+    return [];
+  }
+
+  const result = await runQuery<RawFileRecordRow>(
+    `WITH RankedRecords AS (
+      SELECT
+        fr.FILE_UPLOAD_GUID as file_upload_guid,
+        fr.RECORD_ID as record_id,
+        fr.SOURCE_SHEET_NAME as source_sheet_name,
+        fr.ENTITY_ID as entity_id,
+        fr.ACCOUNT_ID as account_id,
+        fr.ACCOUNT_NAME as account_name,
+        fr.OPENING_BALANCE as opening_balance,
+        fr.CLOSING_BALANCE as closing_balance,
+        fr.ACTIVITY_AMOUNT as activity_amount,
+        fr.GL_MONTH as gl_month,
+        fr.USER_DEFINED1 as user_defined1,
+        fr.USER_DEFINED2 as user_defined2,
+        fr.USER_DEFINED3 as user_defined3,
+        fr.INSERTED_DTTM as inserted_dttm,
+        ROW_NUMBER() OVER (
+          PARTITION BY fr.ENTITY_ID, fr.ACCOUNT_ID, fr.GL_MONTH
+          ORDER BY COALESCE(cf.LAST_STEP_COMPLETED_DTTM, cf.INSERTED_DTTM, fr.INSERTED_DTTM) DESC,
+                   fr.INSERTED_DTTM DESC,
+                   fr.FILE_UPLOAD_GUID DESC,
+                   fr.RECORD_ID DESC
+        ) as rn
+      FROM ${TABLE_NAME} fr
+      INNER JOIN ml.CLIENT_FILES cf ON cf.FILE_UPLOAD_GUID = fr.FILE_UPLOAD_GUID
+      WHERE cf.CLIENT_ID = @clientId
+        AND cf.IS_DELETED = 0
+    )
+    SELECT
+      file_upload_guid,
+      record_id,
+      source_sheet_name,
+      entity_id,
+      account_id,
+      account_name,
+      opening_balance,
+      closing_balance,
+      activity_amount,
+      gl_month,
+      user_defined1,
+      user_defined2,
+      user_defined3,
+      inserted_dttm
+    FROM RankedRecords
+    WHERE rn = 1
+    ORDER BY source_sheet_name ASC, record_id ASC`,
+    { clientId: normalizedClientId },
+  );
+
+  return (result.recordset ?? []).map(mapFileRecordRow);
 };

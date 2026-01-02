@@ -483,7 +483,7 @@ describe('mappingStore selectors', () => {
     expect(state.activeEntities).toEqual([
       { id: 'ent-1', name: 'Entity One' },
     ]);
-    expect(state.activePeriod).toBe('2024-01');
+    expect(state.activePeriod).toBeNull();
   });
 
   it('marks duplicate account-month entries for manual company assignment', () => {
@@ -591,6 +591,117 @@ describe('mappingStore selectors', () => {
     expect(filtered[1]).toEqual(
       expect.objectContaining({ accountId: '4000', glMonth: '2024-01-01', netChange: 150 }),
     );
+  });
+
+  it('aggregates mapping status across periods when viewing all periods', () => {
+    const mappedTarget =
+      findTargetByDescription('Revenue') ??
+      getChartOfAccountOptions()[0] ??
+      { id: '4100', value: '4100', label: '4100' };
+
+    const accounts: GLAccountMappingRow[] = [
+      buildMappingAccount({
+        id: 'acct-jan',
+        glMonth: '2024-01-01',
+        netChange: 150,
+        activity: 150,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+        status: 'Unmapped',
+      }),
+      buildMappingAccount({
+        id: 'acct-feb',
+        glMonth: '2024-02-01',
+        netChange: 200,
+        activity: 200,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+        status: 'Mapped',
+        manualCOAId: mappedTarget.id,
+      }),
+      buildMappingAccount({
+        id: 'acct-mar',
+        glMonth: '2024-03-01',
+        netChange: 300,
+        activity: 300,
+        accountName: 'COGS',
+        accountId: '5000',
+        status: 'Mapped',
+        manualCOAId: mappedTarget.id,
+      }),
+    ];
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts,
+        activePeriod: null,
+        activeEntityId: 'ent-1',
+        activeEntities: [{ id: 'ent-1', name: 'Entity One' }],
+        activeEntityIds: ['ent-1'],
+        activeStatuses: [],
+        searchTerm: '',
+      }));
+    });
+
+    const filtered = selectFilteredAccounts(useMappingStore.getState());
+    const revenue = filtered.find(account => account.accountId === '4000');
+    const cogs = filtered.find(account => account.accountId === '5000');
+
+    expect(revenue).toEqual(expect.objectContaining({ status: 'Unmapped' }));
+    expect(cogs).toEqual(expect.objectContaining({ status: 'Mapped' }));
+  });
+
+  it('overwrites mapped periods when applying a target across all periods', () => {
+    const targets = getChartOfAccountOptions();
+    const primaryTarget = targets[0] ?? { id: '4100', value: '4100', label: '4100' };
+    const secondaryTarget = targets[1] ?? primaryTarget;
+
+    const accounts: GLAccountMappingRow[] = [
+      buildMappingAccount({
+        id: 'acct-jan',
+        glMonth: '2024-01-01',
+        netChange: 150,
+        activity: 150,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+        status: 'Mapped',
+        manualCOAId: primaryTarget.id,
+      }),
+      buildMappingAccount({
+        id: 'acct-feb',
+        glMonth: '2024-02-01',
+        netChange: 200,
+        activity: 200,
+        accountName: 'Freight Revenue',
+        accountId: '4000',
+        status: 'Unmapped',
+      }),
+    ];
+
+    act(() => {
+      useMappingStore.setState(state => ({
+        ...state,
+        accounts,
+        activePeriod: null,
+        activeEntityId: 'ent-1',
+        activeEntities: [{ id: 'ent-1', name: 'Entity One' }],
+        activeEntityIds: ['ent-1'],
+      }));
+    });
+
+    act(() => {
+      useMappingStore.getState().updateTarget('acct-jan', secondaryTarget.id);
+    });
+
+    const updated = useMappingStore.getState().accounts;
+    const jan = updated.find(account => account.id === 'acct-jan');
+    const feb = updated.find(account => account.id === 'acct-feb');
+
+    expect(jan?.manualCOAId).toBe(secondaryTarget.id);
+    expect(feb?.manualCOAId).toBe(secondaryTarget.id);
+    expect(jan?.status).toBe('Mapped');
+    expect(feb?.status).toBe('Mapped');
   });
 
   it('scopes summary metrics to the active reporting period when selected', () => {

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Plus } from 'lucide-react';
+import IndustryImportModal from '../components/coa/IndustryImportModal';
+import {
+  createIndustry as createIndustryService,
+  importIndustryCoaFile,
+  IndustryAlreadyExistsError,
+} from '../services/coaManagerService';
 import { useCoaManagerStore } from '../store/coaManagerStore';
 
 const costTypeOptions = [
@@ -8,7 +14,34 @@ const costTypeOptions = [
   { label: 'Variable', value: 'Variable' },
 ] as const;
 
+const isFinancialOptions = [
+  { label: 'Any', value: '' },
+  { label: 'Yes', value: 'true' },
+  { label: 'No', value: 'false' },
+] as const;
+
 type CostType = (typeof costTypeOptions)[number]['value'];
+type IsFinancialValue = (typeof isFinancialOptions)[number]['value'];
+
+const formatIsFinancial = (value: boolean | null) => {
+  if (value === true) {
+    return 'true';
+  }
+  if (value === false) {
+    return 'false';
+  }
+  return '';
+};
+
+const parseIsFinancial = (value: IsFinancialValue): boolean | null => {
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  return null;
+};
 
 export default function CoaManager() {
   const industries = useCoaManagerStore(state => state.industries);
@@ -21,20 +54,17 @@ export default function CoaManager() {
   const columns = useCoaManagerStore(state => state.columns);
   const selectedRowIds = useCoaManagerStore(state => state.selectedRowIds);
   const rowStatus = useCoaManagerStore(state => state.rowUpdateStatus);
-  const createIndustryError = useCoaManagerStore(state => state.createIndustryError);
-  const createIndustryLoading = useCoaManagerStore(state => state.createIndustryLoading);
   const loadIndustries = useCoaManagerStore(state => state.loadIndustries);
   const selectIndustry = useCoaManagerStore(state => state.selectIndustry);
-  const createIndustry = useCoaManagerStore(state => state.createIndustry);
-  const clearCreateIndustryError = useCoaManagerStore(
-    state => state.clearCreateIndustryError,
-  );
   const toggleRowSelection = useCoaManagerStore(state => state.toggleRowSelection);
   const toggleSelectAll = useCoaManagerStore(state => state.toggleSelectAll);
   const updateRowCostType = useCoaManagerStore(state => state.updateRowCostType);
   const updateBatchCostType = useCoaManagerStore(state => state.updateBatchCostType);
-  const [newIndustryName, setNewIndustryName] = useState('');
+  const updateRowIsFinancial = useCoaManagerStore(state => state.updateRowIsFinancial);
+  const updateBatchIsFinancial = useCoaManagerStore(state => state.updateBatchIsFinancial);
   const [batchCostType, setBatchCostType] = useState<CostType>('');
+  const [batchIsFinancial, setBatchIsFinancial] = useState<IsFinancialValue>('');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const columnLabels = useMemo(() => {
     return new Map(columns.map(column => [column.key, column.label]));
   }, [columns]);
@@ -46,16 +76,24 @@ export default function CoaManager() {
     loadIndustries();
   }, [loadIndustries]);
 
-  const handleAddIndustry = async () => {
-    const trimmed = newIndustryName.trim();
+  const handleIndustryImport = async (payload: { name: string; file: File }) => {
+    const trimmed = payload.name.trim();
     if (!trimmed) {
-      return;
+      throw new Error('Industry name is required.');
     }
-    clearCreateIndustryError();
-    const created = await createIndustry(trimmed);
-    if (created) {
-      setNewIndustryName('');
+
+    let resolvedName = trimmed;
+    try {
+      resolvedName = await createIndustryService(trimmed);
+    } catch (error) {
+      if (!(error instanceof IndustryAlreadyExistsError)) {
+        throw error;
+      }
     }
+
+    await importIndustryCoaFile(resolvedName, payload.file);
+    await loadIndustries();
+    await selectIndustry(resolvedName);
   };
 
   const handleRowCostTypeChange = (rowId: string, costType: CostType) => {
@@ -68,11 +106,29 @@ export default function CoaManager() {
     updateRowCostType(rowId, costType);
   };
 
+  const handleRowIsFinancialChange = (rowId: string, value: IsFinancialValue) => {
+    const isFinancial = parseIsFinancial(value);
+    const hasBatchSelection =
+      selectedRowIds.has(rowId) && selectedRowIds.size > 1;
+    if (hasBatchSelection) {
+      updateBatchIsFinancial(Array.from(selectedRowIds), isFinancial);
+      return;
+    }
+    updateRowIsFinancial(rowId, isFinancial);
+  };
+
   const handleBatchApply = () => {
     if (selectedRowIds.size === 0) {
       return;
     }
     updateBatchCostType(Array.from(selectedRowIds), batchCostType);
+  };
+
+  const handleBatchIsFinancialApply = () => {
+    if (selectedRowIds.size === 0) {
+      return;
+    }
+    updateBatchIsFinancial(Array.from(selectedRowIds), parseIsFinancial(batchIsFinancial));
   };
 
   const selectedCount = selectedRowIds.size;
@@ -86,71 +142,51 @@ export default function CoaManager() {
         </p>
         <h1 className="text-2xl font-semibold text-gray-900">COA Manager</h1>
         <p className="text-sm text-gray-600">
-          Manage chart of accounts by industry and update cost type classifications.
+          Manage chart of accounts by industry and update financial flags and cost type classifications.
         </p>
       </header>
 
       <section aria-labelledby="industry-heading" className="space-y-4">
-        <div className="flex flex-col gap-4 rounded-lg bg-white p-4 shadow sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-2">
-            <label htmlFor="industry" className="text-sm font-medium text-gray-700">
-              Select industry
-            </label>
-            <select
-              id="industry"
-              value={selectedIndustry}
-              onChange={event => {
-                selectIndustry(event.target.value);
-              }}
-              disabled={industriesLoading}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
-            >
-              <option value="">Choose an industry</option>
-              {industries.map(industry => (
-                <option key={industry} value={industry}>
-                  {industry}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto">
-            <label htmlFor="new-industry" className="text-sm font-medium text-gray-700">
-              Add industry
-            </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                id="new-industry"
-                type="text"
-                value={newIndustryName}
+        <div className="rounded-lg bg-white p-4 shadow">
+          <h2 id="industry-heading" className="sr-only">
+            Industry selection
+          </h2>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-2">
+              <label htmlFor="industry" className="text-sm font-medium text-gray-700">
+                Select industry:
+              </label>
+              <select
+                id="industry"
+                value={selectedIndustry}
                 onChange={event => {
-                  setNewIndustryName(event.target.value);
-                  clearCreateIndustryError();
+                  selectIndustry(event.target.value);
                 }}
-                placeholder="New industry name"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
-              />
+                disabled={industriesLoading}
+                className="w-full rounded-md border border-gray-300 mx-4 px-3 py-1 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:w-72"
+              >
+                <option value="">Choose an industry</option>
+                {industries.map(industry => (
+                  <option key={industry} value={industry}>
+                    {industry}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500">
+                Select an industry to load its chart of accounts.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:items-end">
+              <p className="text-sm text-gray-600">Need a new industry?</p>
               <button
                 type="button"
-                onClick={handleAddIndustry}
-                disabled={createIndustryLoading}
-                className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                onClick={() => setIsImportModalOpen(true)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-indigo-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
               >
-                {createIndustryLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Adding…
-                  </>
-                ) : (
-                  <>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Industry
-                  </>
-                )}
+                <Plus className="h-4 w-4" />
+                <span className="whitespace-nowrap">Add Industry</span>
               </button>
             </div>
-            {createIndustryError ? (
-              <p className="text-sm text-red-600">{createIndustryError}</p>
-            ) : null}
           </div>
         </div>
         {industriesError ? (
@@ -169,30 +205,57 @@ export default function CoaManager() {
                 {selectedCount} row{selectedCount === 1 ? '' : 's'} selected
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <label htmlFor="batch-cost-type" className="text-sm font-medium text-gray-700">
-                Batch update {resolveLabel('costType', 'COST_TYPE')}
-              </label>
-              <select
-                id="batch-cost-type"
-                value={batchCostType}
-                onChange={event => setBatchCostType(event.target.value as CostType)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:w-48"
-              >
-                {costTypeOptions.map(option => (
-                  <option key={option.label} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleBatchApply}
-                disabled={selectedRowIds.size === 0}
-                className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300"
-              >
-                Apply to selected
-              </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label htmlFor="batch-is-financial" className="text-sm font-medium text-gray-700">
+                  Batch update {resolveLabel('isFinancial', 'IS_FINANCIAL')}
+                </label>
+                <select
+                  id="batch-is-financial"
+                  value={batchIsFinancial}
+                  onChange={event => setBatchIsFinancial(event.target.value as IsFinancialValue)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:w-48"
+                >
+                  {isFinancialOptions.map(option => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleBatchIsFinancialApply}
+                  disabled={selectedRowIds.size === 0}
+                  className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                >
+                  Apply to selected
+                </button>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label htmlFor="batch-cost-type" className="text-sm font-medium text-gray-700">
+                  Batch update {resolveLabel('costType', 'COST_TYPE')}
+                </label>
+                <select
+                  id="batch-cost-type"
+                  value={batchCostType}
+                  onChange={event => setBatchCostType(event.target.value as CostType)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:w-48"
+                >
+                  {costTypeOptions.map(option => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleBatchApply}
+                  disabled={selectedRowIds.size === 0}
+                  className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                >
+                  Apply to selected
+                </button>
+              </div>
             </div>
           </div>
 
@@ -207,7 +270,7 @@ export default function CoaManager() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow">
-              <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+              <table className="min-w-full table-compact divide-y divide-gray-200 text-left text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th scope="col" className="px-4 py-3">
@@ -234,7 +297,7 @@ export default function CoaManager() {
                       {resolveLabel('category', 'Category')}
                     </th>
                     <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      {resolveLabel('department', 'Department')}
+                      {resolveLabel('isFinancial', 'IS_FINANCIAL')}
                     </th>
                     <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                       {resolveLabel('costType', 'COST_TYPE')}
@@ -263,7 +326,29 @@ export default function CoaManager() {
                         </td>
                         <td className="px-4 py-3 text-gray-700">{row.accountName}</td>
                         <td className="px-4 py-3 text-gray-700">{row.category}</td>
-                        <td className="px-4 py-3 text-gray-700">{row.department}</td>
+                        <td className="px-4 py-3">
+                          <label className="sr-only" htmlFor={`is-financial-${row.id}`}>
+                            {resolveLabel('isFinancial', 'IS_FINANCIAL')} for account{' '}
+                            {row.accountNumber}
+                          </label>
+                          <select
+                            id={`is-financial-${row.id}`}
+                            value={formatIsFinancial(row.isFinancial)}
+                            onChange={event =>
+                              handleRowIsFinancialChange(
+                                row.id,
+                                event.target.value as IsFinancialValue,
+                              )
+                            }
+                            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500"
+                          >
+                            {isFinancialOptions.map(option => (
+                              <option key={option.label} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
                         <td className="px-4 py-3">
                           <label className="sr-only" htmlFor={`cost-type-${row.id}`}>
                             {resolveLabel('costType', 'COST_TYPE')} for account{' '}
@@ -321,6 +406,12 @@ export default function CoaManager() {
           Select or add an industry to load chart of accounts details.
         </div>
       )}
+
+      <IndustryImportModal
+        open={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onSubmit={handleIndustryImport}
+      />
     </div>
   );
 }

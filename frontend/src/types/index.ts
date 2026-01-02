@@ -152,6 +152,14 @@ export interface StandardScoaSummary {
   mappedAmount: number;
 }
 
+export interface DistributionSourceSummary {
+  id: string;
+  mappingRowId: string;
+  accountId: string;
+  description: string;
+  mappedAmount: number;
+}
+
 export interface ReconciliationSourceMapping {
   glAccountId: string;
   glAccountName: string;
@@ -197,6 +205,9 @@ export interface TrialBalanceRow {
   description: string;
   netChange: number;
   glMonth?: string;
+  userDefined1?: string | null;
+  userDefined2?: string | null;
+  userDefined3?: string | null;
   [key: string]: unknown;
 }
 
@@ -219,6 +230,14 @@ export interface ImportEntity {
   updatedBy?: string;
 }
 
+export type ImportStatus =
+  | 'uploaded'
+  | 'mapping'
+  | 'distribution'
+  | 'review'
+  | 'completed'
+  | 'failed';
+
 export interface Import {
   id: string;
   fileUploadGuid?: string;
@@ -232,8 +251,10 @@ export interface Import {
   blobUrl?: string;
   blobUri?: string;
   period: string;
+  glPeriodStart?: string;
+  glPeriodEnd?: string;
   timestamp: string;
-  status: 'completed' | 'failed';
+  status: ImportStatus;
   rowCount?: number;
   importedBy: string;
   insertedDttm?: string;
@@ -251,10 +272,20 @@ export interface FileRecord {
   accountId: string;
   accountName: string;
   activityAmount: number;
+  userDefined1?: string | null;
+  userDefined2?: string | null;
+  userDefined3?: string | null;
   entityName?: string;
   glMonth?: string;
   sourceSheet?: string;
   sourceRowNumber?: number;
+}
+
+export type UserDefinedHeaderKey = 'userDefined1' | 'userDefined2' | 'userDefined3';
+
+export interface UserDefinedHeader {
+  key: UserDefinedHeaderKey;
+  label: string;
 }
 
 export interface SyncedAccount {
@@ -599,6 +630,9 @@ export interface GLAccountMappingRow {
   dynamicExclusionAmount?: number;
   glMonth?: string; // GL month in YYYY-MM-01 format
   requiresEntityAssignment?: boolean;
+  userDefined1?: string | null;
+  userDefined2?: string | null;
+  userDefined3?: string | null;
 }
 
 export interface MappingSaveInput {

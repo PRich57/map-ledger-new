@@ -87,6 +87,14 @@ function ProtectedRoutes() {
           }
         />
         <Route
+          path="gl/mapping/client"
+          element={
+            <React.Suspense fallback={<div>Loading...</div>}>
+              <Mapping />
+            </React.Suspense>
+          }
+        />
+        <Route
           path="gl/mapping/:uploadId"
           element={
             <React.Suspense fallback={<div>Loading...</div>}>
@@ -96,7 +104,7 @@ function ProtectedRoutes() {
         />
         <Route
           path="allocations"
-          element={<Navigate to="/gl/mapping/demo?stage=allocation" replace />}
+          element={<Navigate to="/gl/mapping/client?stage=allocation" replace />}
         />
         <Route
           path="integrations"

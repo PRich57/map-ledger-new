@@ -153,6 +153,9 @@ export const buildMappingRowsFromImport = (
           : [],
       glMonth: normalizedGlMonth || undefined, // Normalize GL month to YYYY-MM-01
       requiresEntityAssignment: !normalized.id && !normalized.name,
+      userDefined1: row.userDefined1 ?? null,
+      userDefined2: row.userDefined2 ?? null,
+      userDefined3: row.userDefined3 ?? null,
     };
   });
 };

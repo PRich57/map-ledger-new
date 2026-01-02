@@ -58,6 +58,20 @@ export const normalizeGlMonth = (value: string): string => {
     return formatMonthStart(year, rawMonth);
   }
 
+  const monthDotYearMatch = trimmed.match(/^(\d{1,2})\.(\d{2})$/);
+  if (monthDotYearMatch) {
+    const [, rawMonth, yearPart] = monthDotYearMatch;
+    const month = rawMonth.padStart(2, '0');
+    const monthNum = parseInt(month, 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      const numericYear = parseInt(yearPart, 10);
+      if (!Number.isNaN(numericYear)) {
+        const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
+        return formatMonthStart(year, month);
+      }
+    }
+  }
+
   const usMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (usMatch) {
     const [, rawMonth, , year] = usMatch;
@@ -175,6 +189,20 @@ export const extractDateFromText = (text: string): string => {
     const monthNum = parseInt(month, 10);
     if (monthNum >= 1 && monthNum <= 12) {
       return formatMonthStart(year, month);
+    }
+  }
+
+  const mmYyDotMatch = normalized.match(/\b(\d{1,2})\.(\d{2})\b/);
+  if (mmYyDotMatch) {
+    const [, rawMonth, yearPart] = mmYyDotMatch;
+    const month = rawMonth.padStart(2, '0');
+    const monthNum = parseInt(month, 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      const numericYear = parseInt(yearPart, 10);
+      if (!Number.isNaN(numericYear)) {
+        const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
+        return formatMonthStart(year, month);
+      }
     }
   }
 

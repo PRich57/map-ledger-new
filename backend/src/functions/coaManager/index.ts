@@ -4,19 +4,13 @@ import {
   IndustryNotFoundError,
   InvalidIndustryNameError,
   InvalidIndustryTableError,
-  listIndustryCoaRows,
+  listIndustryCoaData,
+  updateIndustryIsFinancial,
+  updateIndustryIsFinancialBatch,
   updateIndustryCostType,
   updateIndustryCostTypeBatch,
 } from '../../repositories/coaManagerRepository';
 import { getFirstStringValue } from '../../utils/requestParsers';
-
-const COA_MANAGER_COLUMNS = [
-  { key: 'accountNumber', label: 'Account' },
-  { key: 'accountName', label: 'Name' },
-  { key: 'category', label: 'Category' },
-  { key: 'department', label: 'Department' },
-  { key: 'costType', label: 'Cost Type' },
-];
 
 const resolveIndustryParam = (request: HttpRequest): string | undefined => {
   const params = request.params as Partial<{ industry?: string }> | undefined;
@@ -30,8 +24,54 @@ const normalizeCostType = (value: unknown): string | null | undefined => {
   if (typeof value === 'string') {
     return value.trim();
   }
+  return undefined;
+};
+
+const normalizeIsFinancial = (value: unknown): boolean | null | undefined => {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const normalized = trimmed.toLowerCase();
+    if (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === 'y' ||
+      normalized.includes('financial') ||
+      normalized === 'fin' ||
+      normalized.startsWith('fin')
+    ) {
+      return true;
+    }
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no' ||
+      normalized === 'n' ||
+      normalized.includes('operational') ||
+      normalized === 'ops' ||
+      normalized.startsWith('oper')
+    ) {
+      return false;
+    }
+    return undefined;
+  }
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value);
+    if (value === 1) {
+      return true;
+    }
+    if (value === 0) {
+      return false;
+    }
+    return undefined;
   }
   return undefined;
 };
@@ -75,8 +115,8 @@ export async function getIndustryCoaHandler(
   }
 
   try {
-    const rows = await listIndustryCoaRows(industry);
-    return json({ columns: COA_MANAGER_COLUMNS, rows });
+    const data = await listIndustryCoaData(industry);
+    return json(data);
   } catch (error) {
     return handleIndustryError(error, context, 'fetch COA data');
   }
@@ -135,6 +175,59 @@ export async function updateIndustryCostTypeBatchHandler(
   }
 }
 
+export async function updateIndustryIsFinancialHandler(
+  request: HttpRequest,
+  context: InvocationContext,
+): Promise<HttpResponseInit> {
+  const industry = resolveIndustryParam(request);
+  if (!industry) {
+    return json({ message: 'industry is required' }, 400);
+  }
+
+  const payload = (await readJson<Record<string, unknown>>(request)) ?? {};
+  const rowId = getFirstStringValue(payload.rowId ?? payload.recordId ?? payload.id);
+  const isFinancial = normalizeIsFinancial(payload.isFinancial);
+
+  if (!rowId || isFinancial === undefined) {
+    return json({ message: 'rowId and isFinancial are required' }, 400);
+  }
+
+  try {
+    const updated = await updateIndustryIsFinancial(industry, rowId, isFinancial);
+    if (!updated) {
+      return json({ message: 'Record not found' }, 404);
+    }
+    return json({ ok: true });
+  } catch (error) {
+    return handleIndustryError(error, context, 'update financial flag');
+  }
+}
+
+export async function updateIndustryIsFinancialBatchHandler(
+  request: HttpRequest,
+  context: InvocationContext,
+): Promise<HttpResponseInit> {
+  const industry = resolveIndustryParam(request);
+  if (!industry) {
+    return json({ message: 'industry is required' }, 400);
+  }
+
+  const payload = (await readJson<Record<string, unknown>>(request)) ?? {};
+  const rowIds = parseRowIds(payload.rowIds ?? payload.recordIds);
+  const isFinancial = normalizeIsFinancial(payload.isFinancial);
+
+  if (rowIds.length === 0 || isFinancial === undefined) {
+    return json({ message: 'rowIds and isFinancial are required' }, 400);
+  }
+
+  try {
+    const updatedCount = await updateIndustryIsFinancialBatch(industry, rowIds, isFinancial);
+    return json({ updated: updatedCount });
+  } catch (error) {
+    return handleIndustryError(error, context, 'update financial flags');
+  }
+}
+
 app.http('coaManager-industry', {
   methods: ['GET'],
   authLevel: 'anonymous',
@@ -154,6 +247,20 @@ app.http('coaManager-costType-batch', {
   authLevel: 'anonymous',
   route: 'coa-manager/industry/{industry}/cost-type/batch',
   handler: updateIndustryCostTypeBatchHandler,
+});
+
+app.http('coaManager-isFinancial', {
+  methods: ['PATCH'],
+  authLevel: 'anonymous',
+  route: 'coa-manager/industry/{industry}/is-financial',
+  handler: updateIndustryIsFinancialHandler,
+});
+
+app.http('coaManager-isFinancial-batch', {
+  methods: ['PATCH'],
+  authLevel: 'anonymous',
+  route: 'coa-manager/industry/{industry}/is-financial/batch',
+  handler: updateIndustryIsFinancialBatchHandler,
 });
 
 export default getIndustryCoaHandler;

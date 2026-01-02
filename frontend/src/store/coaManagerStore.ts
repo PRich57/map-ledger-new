@@ -3,8 +3,11 @@ import {
   createIndustry,
   fetchIndustries,
   fetchIndustryCoaManager,
+  updateIndustryIsFinancial,
+  updateIndustryIsFinancialBatch,
   updateIndustryCostType,
   updateIndustryCostTypeBatch,
+  type CoaManagerIsFinancial,
   type CoaManagerColumn,
   type CoaManagerCostType,
   type CoaManagerRow,
@@ -39,6 +42,8 @@ interface CoaManagerState {
   clearRowSelection: () => void;
   updateRowCostType: (rowId: string, costType: CoaManagerCostType) => Promise<void>;
   updateBatchCostType: (rowIds: string[], costType: CoaManagerCostType) => Promise<void>;
+  updateRowIsFinancial: (rowId: string, isFinancial: CoaManagerIsFinancial) => Promise<void>;
+  updateBatchIsFinancial: (rowIds: string[], isFinancial: CoaManagerIsFinancial) => Promise<void>;
 }
 
 const STATUS_RESET_MS = 2500;
@@ -276,6 +281,105 @@ export const useCoaManagerStore = create<CoaManagerState>((set, get) => ({
           rows: state.rows.map(row =>
             previousCostTypes.has(row.id)
               ? { ...row, costType: previousCostTypes.get(row.id) ?? row.costType }
+              : row,
+          ),
+          rowUpdateStatus: nextStatus,
+        };
+      });
+    }
+  },
+  updateRowIsFinancial: async (rowId: string, isFinancial: CoaManagerIsFinancial) => {
+    const { selectedIndustry, rows } = get();
+    if (!selectedIndustry) {
+      return;
+    }
+
+    const previousIsFinancial = new Map<string, CoaManagerIsFinancial>();
+    const nextRows = rows.map(row => {
+      if (row.id !== rowId) {
+        return row;
+      }
+      previousIsFinancial.set(row.id, row.isFinancial);
+      return { ...row, isFinancial };
+    });
+
+    set(state => ({
+      rows: nextRows,
+      rowUpdateStatus: {
+        ...state.rowUpdateStatus,
+        [rowId]: { state: 'pending' },
+      },
+    }));
+
+    try {
+      await updateIndustryIsFinancial(selectedIndustry, rowId, isFinancial);
+      set(state => ({
+        rowUpdateStatus: {
+          ...state.rowUpdateStatus,
+          [rowId]: { state: 'success' },
+        },
+      }));
+      applyStatusReset(set, [rowId]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Update failed.';
+      set(state => ({
+        rows: state.rows.map(row =>
+          previousIsFinancial.has(row.id)
+            ? { ...row, isFinancial: previousIsFinancial.get(row.id) ?? row.isFinancial }
+            : row,
+        ),
+        rowUpdateStatus: {
+          ...state.rowUpdateStatus,
+          [rowId]: { state: 'error', message },
+        },
+      }));
+    }
+  },
+  updateBatchIsFinancial: async (rowIds: string[], isFinancial: CoaManagerIsFinancial) => {
+    const { selectedIndustry, rows } = get();
+    if (!selectedIndustry || rowIds.length === 0) {
+      return;
+    }
+
+    const rowIdSet = new Set(rowIds);
+    const previousIsFinancial = new Map<string, CoaManagerIsFinancial>();
+    const nextRows = rows.map(row => {
+      if (!rowIdSet.has(row.id)) {
+        return row;
+      }
+      previousIsFinancial.set(row.id, row.isFinancial);
+      return { ...row, isFinancial };
+    });
+
+    set(state => {
+      const nextStatus = { ...state.rowUpdateStatus };
+      rowIds.forEach(id => {
+        nextStatus[id] = { state: 'pending' };
+      });
+      return { rows: nextRows, rowUpdateStatus: nextStatus };
+    });
+
+    try {
+      await updateIndustryIsFinancialBatch(selectedIndustry, rowIds, isFinancial);
+      set(state => {
+        const nextStatus = { ...state.rowUpdateStatus };
+        rowIds.forEach(id => {
+          nextStatus[id] = { state: 'success' };
+        });
+        return { rowUpdateStatus: nextStatus };
+      });
+      applyStatusReset(set, rowIds);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Batch update failed.';
+      set(state => {
+        const nextStatus = { ...state.rowUpdateStatus };
+        rowIds.forEach(id => {
+          nextStatus[id] = { state: 'error', message };
+        });
+        return {
+          rows: state.rows.map(row =>
+            previousIsFinancial.has(row.id)
+              ? { ...row, isFinancial: previousIsFinancial.get(row.id) ?? row.isFinancial }
               : row,
           ),
           rowUpdateStatus: nextStatus,

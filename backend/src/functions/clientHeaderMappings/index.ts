@@ -99,6 +99,13 @@ const normalizePayload = (
           ? mapping.mappingMethod
           : undefined;
 
+      const fileUploadGuid =
+        typeof mapping.fileUploadGuid === 'string'
+          ? mapping.fileUploadGuid
+          : mapping.fileUploadGuid === null
+            ? null
+            : undefined;
+
       const updatedBy =
         typeof mapping.updatedBy === 'string'
           ? mapping.updatedBy
@@ -110,6 +117,7 @@ const normalizePayload = (
         templateHeader: mapping.templateHeader,
         ...(sourceHeader !== undefined ? { sourceHeader } : {}),
         ...(mappingMethod !== undefined ? { mappingMethod } : {}),
+        ...(fileUploadGuid !== undefined ? { fileUploadGuid } : {}),
         ...(updatedBy !== undefined ? { updatedBy } : {}),
       };
     })

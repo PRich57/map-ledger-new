@@ -36,7 +36,12 @@ const createId = (): string => {
 
 type DynamicAllocationMutation = {
   accountId: string;
+  accountIds?: string[];
   timestamp: number;
+};
+
+type MutationOptions = {
+  suppressMutation?: boolean;
 };
 
 const getTargetNameById = (targetId: string): string => {
@@ -117,6 +122,32 @@ const normalizeSourceAccountId = (value?: string | null): string | null => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 };
+
+const buildDynamicMutation = (
+  accountIds: string[],
+  previous?: DynamicAllocationMutation | null,
+): DynamicAllocationMutation | null => {
+  const normalized = Array.from(
+    new Set(accountIds.map(id => normalizeAccountId(id)).filter(Boolean)),
+  );
+  if (!normalized.length) {
+    return null;
+  }
+  const now = Date.now();
+  const timestamp =
+    previous && previous.timestamp >= now ? previous.timestamp + 1 : now;
+  return { accountId: normalized[0], accountIds: normalized, timestamp };
+};
+
+const getPresetAllocationSourceIds = (
+  allocations: RatioAllocation[],
+  presetId: string,
+): string[] =>
+  allocations
+    .filter(allocation =>
+      allocation.targetDatapoints.some(target => target.groupId === presetId),
+    )
+    .map(allocation => allocation.sourceAccount.id);
 
 const coerceFiniteNumber = (value?: number | null): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -242,7 +273,8 @@ const synchronizeAllocationTargets = (
 const sanitizePresetRows = (
   rows: DynamicAllocationPresetRow[],
 ): DynamicAllocationPresetRow[] => {
-  const usedIds = new Set<string>();
+  const basisIds = new Set<string>();
+  const targetIds = new Set<string>();
   const sanitized: DynamicAllocationPresetRow[] = [];
 
   rows.forEach(row => {
@@ -251,11 +283,17 @@ const sanitizePresetRows = (
     if (!dynamicAccountId || !targetAccountId) {
       return;
     }
-    if (usedIds.has(dynamicAccountId) || usedIds.has(targetAccountId)) {
+    if (basisIds.has(dynamicAccountId)) {
       return;
     }
-    usedIds.add(dynamicAccountId);
-    usedIds.add(targetAccountId);
+    if (targetIds.has(dynamicAccountId)) {
+      return;
+    }
+    if (basisIds.has(targetAccountId)) {
+      return;
+    }
+    basisIds.add(dynamicAccountId);
+    targetIds.add(targetAccountId);
     sanitized.push({ dynamicAccountId, targetAccountId });
   });
 
@@ -318,7 +356,11 @@ export type RatioAllocationState = {
   setBasisAccounts: (basisAccounts: DynamicBasisAccount[]) => void;
   getOrCreateAllocation: (sourceAccountId: string) => RatioAllocation;
   addAllocation: (allocation: Omit<RatioAllocation, 'id'>) => void;
-  updateAllocation: (id: string, allocation: Partial<RatioAllocation>) => void;
+  updateAllocation: (
+    id: string,
+    allocation: Partial<RatioAllocation>,
+    options?: MutationOptions,
+  ) => void;
   deleteAllocation: (id: string) => void;
   setAvailablePeriods: (periods: string[]) => void;
   setSelectedPeriod: (period: string) => void;
@@ -354,7 +396,11 @@ export type RatioAllocationState = {
     presetId: string,
     excludeRowIndex?: number,
   ) => { id: string; label: string }[];
-  toggleAllocationPresetTargets: (allocationId: string, presetId: string) => void;
+  toggleAllocationPresetTargets: (
+    allocationId: string,
+    presetId: string,
+    options?: MutationOptions,
+  ) => void;
   toggleTargetExclusion: (
     allocationId: string,
     datapointId: string,
@@ -366,7 +412,11 @@ export type RatioAllocationState = {
     targetId?: string | null;
   }) => void;
   getActivePresetForSource: (sourceAccountId: string) => DynamicAllocationPreset | null;
-  setActivePresetForSource: (sourceAccountId: string, presetId: string | null) => void;
+  setActivePresetForSource: (
+    sourceAccountId: string,
+    presetId: string | null,
+    options?: MutationOptions,
+  ) => void;
 };
 
 export const selectPresetSummaries = (
@@ -553,12 +603,14 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     }));
   },
 
-  updateAllocation: (id, allocation) => {
-    set(state => ({
-      allocations: state.allocations.map(item => {
+  updateAllocation: (id, allocation, options) => {
+    set(state => {
+      let mutatedAccountId: string | null = null;
+      const allocations = state.allocations.map(item => {
         if (item.id !== id) {
           return item;
         }
+        mutatedAccountId = item.sourceAccount.id;
         const merged: RatioAllocation = {
           ...item,
           ...allocation,
@@ -579,7 +631,13 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
                 normalizeAccountId(rowItem.targetAccountId) === normalizeAccountId(target.datapointId),
             );
             return row
-              ? buildPresetTargetDatapoint(preset, row, state.basisAccounts, state.selectedPeriod, target)
+              ? buildPresetTargetDatapoint(
+                  preset,
+                  row,
+                  state.basisAccounts,
+                  state.selectedPeriod,
+                  target,
+                )
               : target;
           });
         }
@@ -589,14 +647,33 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
           state.basisAccounts,
           state.selectedPeriod,
         );
-      }),
-    }));
+      });
+      const mutation = options?.suppressMutation
+        ? null
+        : buildDynamicMutation(
+            mutatedAccountId ? [mutatedAccountId] : [],
+            state.lastDynamicMutation,
+          );
+      return {
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
+    });
   },
 
   deleteAllocation: id => {
-    set(state => ({
-      allocations: state.allocations.filter(allocation => allocation.id !== id),
-    }));
+    set(state => {
+      const removed = state.allocations.find(allocation => allocation.id === id);
+      const allocations = state.allocations.filter(allocation => allocation.id !== id);
+      const mutation = buildDynamicMutation(
+        removed ? [removed.sourceAccount.id] : [],
+        state.lastDynamicMutation,
+      );
+      return {
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
+    });
   },
 
   setAvailablePeriods: periods => {
@@ -1109,6 +1186,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
 
   updatePreset: (presetId, updates) => {
     set(state => {
+      const affectedAccountIds = getPresetAllocationSourceIds(state.allocations, presetId);
       const presets = state.presets.map(preset => {
         if (preset.id !== presetId) {
           return preset;
@@ -1124,12 +1202,22 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
       const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
-      return { presets, groups, allocations };
+      const mutation = buildDynamicMutation(
+        affectedAccountIds,
+        state.lastDynamicMutation,
+      );
+      return {
+        presets,
+        groups,
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
     });
   },
 
   addPresetRow: (presetId, row, index) => {
     set(state => {
+      const affectedAccountIds = getPresetAllocationSourceIds(state.allocations, presetId);
       const presets = state.presets.map(preset => {
         if (preset.id !== presetId) {
           return preset;
@@ -1138,13 +1226,15 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         if (!sanitizedRow) {
           return preset;
         }
-        const usedIds = new Set(
-          preset.rows.flatMap(item => [item.dynamicAccountId, item.targetAccountId]),
-        );
-        if (
-          usedIds.has(sanitizedRow.dynamicAccountId) ||
-          usedIds.has(sanitizedRow.targetAccountId)
-        ) {
+        const basisIds = new Set(preset.rows.map(item => item.dynamicAccountId));
+        const targetIds = new Set(preset.rows.map(item => item.targetAccountId));
+        if (basisIds.has(sanitizedRow.dynamicAccountId)) {
+          return preset;
+        }
+        if (targetIds.has(sanitizedRow.dynamicAccountId)) {
+          return preset;
+        }
+        if (basisIds.has(sanitizedRow.targetAccountId)) {
           return preset;
         }
         const nextRows = [...preset.rows];
@@ -1159,12 +1249,22 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
       const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
-      return { presets, groups, allocations };
+      const mutation = buildDynamicMutation(
+        affectedAccountIds,
+        state.lastDynamicMutation,
+      );
+      return {
+        presets,
+        groups,
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
     });
   },
 
   updatePresetRow: (presetId, rowIndex, updates) => {
     set(state => {
+      const affectedAccountIds = getPresetAllocationSourceIds(state.allocations, presetId);
       const presets = state.presets.map(preset => {
         if (preset.id !== presetId) {
           return preset;
@@ -1186,15 +1286,22 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         if (!nextRow.dynamicAccountId || !nextRow.targetAccountId) {
           return preset;
         }
-        const usedIds = new Set<string>();
+        const basisIds = new Set<string>();
+        const targetIds = new Set<string>();
         preset.rows.forEach((rowItem, index) => {
           if (index === rowIndex) {
             return;
           }
-          usedIds.add(rowItem.dynamicAccountId);
-          usedIds.add(rowItem.targetAccountId);
+          basisIds.add(rowItem.dynamicAccountId);
+          targetIds.add(rowItem.targetAccountId);
         });
-        if (usedIds.has(nextRow.dynamicAccountId) || usedIds.has(nextRow.targetAccountId)) {
+        if (basisIds.has(nextRow.dynamicAccountId)) {
+          return preset;
+        }
+        if (targetIds.has(nextRow.dynamicAccountId)) {
+          return preset;
+        }
+        if (basisIds.has(nextRow.targetAccountId)) {
           return preset;
         }
         const nextRows = [...preset.rows];
@@ -1205,12 +1312,22 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
       const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
-      return { presets, groups, allocations };
+      const mutation = buildDynamicMutation(
+        affectedAccountIds,
+        state.lastDynamicMutation,
+      );
+      return {
+        presets,
+        groups,
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
     });
   },
 
   removePresetRow: (presetId, rowIndex) => {
     set(state => {
+      const affectedAccountIds = getPresetAllocationSourceIds(state.allocations, presetId);
       const presets = state.presets.map(preset => {
         if (preset.id !== presetId) {
           return preset;
@@ -1225,7 +1342,16 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         synchronizeAllocationTargets(allocation, presets, state.basisAccounts, state.selectedPeriod),
       );
       const groups = deriveGroups(presets, state.basisAccounts, state.selectedPeriod);
-      return { presets, groups, allocations };
+      const mutation = buildDynamicMutation(
+        affectedAccountIds,
+        state.lastDynamicMutation,
+      );
+      return {
+        presets,
+        groups,
+        allocations,
+        ...(mutation ? { lastDynamicMutation: mutation } : {}),
+      };
     });
   },
 
@@ -1237,7 +1363,7 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     }
 
     const dynamicUsage = new Map<string, Set<string>>();
-    const canonicalUsage = new Map<string, Set<string>>();
+    const targetCanonicalUsage = new Map<string, Set<string>>();
 
     const addUsage = (map: Map<string, Set<string>>, id: string | null, key: string) => {
       if (!id) {
@@ -1254,12 +1380,9 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       const targetKey = `target-${index}`;
       if (row.dynamicAccountId) {
         addUsage(dynamicUsage, row.dynamicAccountId, basisKey);
-        const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
-        const canonicalId = resolveCanonicalTargetId(basisAccount?.mappedTargetId);
-        addUsage(canonicalUsage, canonicalId, basisKey);
       }
       const targetCanonicalId = resolveCanonicalTargetId(row.targetAccountId);
-      addUsage(canonicalUsage, targetCanonicalId, targetKey);
+      addUsage(targetCanonicalUsage, targetCanonicalId, targetKey);
     });
 
     const dropdownKey = typeof rowIndex === 'number' ? `basis-${rowIndex}` : null;
@@ -1275,22 +1398,19 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       if (!canonicalTargetId) {
         return true;
       }
-      const canonicalUsers = canonicalUsage.get(canonicalTargetId);
-        if (!canonicalUsers || canonicalUsers.size === 0) {
-          return true;
-        }
-        return (
-          dropdownKey !== null &&
-          canonicalUsers.size === 1 &&
-          canonicalUsers.has(dropdownKey)
-        );
-      });
-    },
+      const targetUsers = targetCanonicalUsage.get(canonicalTargetId);
+      if (!targetUsers || targetUsers.size === 0) {
+        return true;
+      }
+      return false;
+    });
+  },
 
-  getPresetAvailableTargetAccounts: (presetId, rowIndex) => {
+  getPresetAvailableTargetAccounts: (presetId, _rowIndex) => {
+    void _rowIndex;
     const { basisAccounts, presets } = get();
     const preset = presets.find(item => item.id === presetId);
-    const canonicalUsage = new Map<string, Set<string>>();
+    const basisCanonicalUsage = new Map<string, Set<string>>();
 
     const addUsage = (map: Map<string, Set<string>>, id: string | null, key: string) => {
       if (!id) {
@@ -1304,29 +1424,20 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
 
     (preset?.rows ?? []).forEach((row, index) => {
       const basisKey = `basis-${index}`;
-      const targetKey = `target-${index}`;
       if (row.dynamicAccountId) {
         const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
         const canonicalId = resolveCanonicalTargetId(basisAccount?.mappedTargetId);
-        addUsage(canonicalUsage, canonicalId, basisKey);
+        addUsage(basisCanonicalUsage, canonicalId, basisKey);
       }
-      const targetCanonicalId = resolveCanonicalTargetId(row.targetAccountId);
-      addUsage(canonicalUsage, targetCanonicalId, targetKey);
     });
-
-    const dropdownKey = typeof rowIndex === 'number' ? `target-${rowIndex}` : null;
 
     return getChartOfAccountOptions()
       .filter(option => {
-        const canonicalUsers = canonicalUsage.get(option.id);
-        if (!canonicalUsers || canonicalUsers.size === 0) {
+        const basisUsers = basisCanonicalUsage.get(option.id);
+        if (!basisUsers || basisUsers.size === 0) {
           return true;
         }
-        return (
-          dropdownKey !== null &&
-          canonicalUsers.size === 1 &&
-          canonicalUsers.has(dropdownKey)
-        );
+        return false;
       })
       .map(option => ({
         id: option.id,
@@ -1335,18 +1446,20 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
       .sort((a, b) => a.label.localeCompare(b.label));
   },
 
-  toggleAllocationPresetTargets: (allocationId, presetId) => {
+  toggleAllocationPresetTargets: (allocationId, presetId, options) => {
     set(state => {
       const preset = state.presets.find(item => item.id === presetId);
       if (!preset) {
         return state;
       }
 
+      let mutatedAccountId: string | null = null;
       const allocations = state.allocations.map(allocation => {
         if (allocation.id !== allocationId) {
           return allocation;
         }
 
+        mutatedAccountId = allocation.sourceAccount.id;
         const exists = allocation.targetDatapoints.some(target => target.groupId === presetId);
         const nextTargets = exists
           ? allocation.targetDatapoints.filter(target => target.groupId !== presetId)
@@ -1368,7 +1481,15 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         );
       });
 
-      return { allocations };
+      if (!mutatedAccountId) {
+        return state;
+      }
+      const mutation = options?.suppressMutation
+        ? null
+        : buildDynamicMutation([mutatedAccountId], state.lastDynamicMutation);
+      return mutation
+        ? { allocations, lastDynamicMutation: mutation }
+        : { allocations };
     });
   },
   toggleTargetExclusion: (allocationId, datapointId, presetId) => {
@@ -1408,16 +1529,17 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
         );
       });
 
-      if (!mutatedAccountId) {
+      const mutation = buildDynamicMutation(
+        mutatedAccountId ? [mutatedAccountId] : [],
+        state.lastDynamicMutation,
+      );
+      if (!mutation) {
         return state;
       }
 
       return {
         allocations,
-        lastDynamicMutation: {
-          accountId: mutatedAccountId,
-          timestamp: Date.now(),
-        },
+        lastDynamicMutation: mutation,
       };
     });
   },
@@ -1506,27 +1628,31 @@ export const useRatioAllocationStore = create<RatioAllocationState>((set, get) =
     }
     return presets.find(p => p.id === presetId) ?? null;
   },
-  setActivePresetForSource: (sourceAccountId: string, presetId: string | null) => {
+  setActivePresetForSource: (sourceAccountId: string, presetId: string | null, options) => {
     const allocation = get().getOrCreateAllocation(sourceAccountId);
 
     if (!presetId) {
       // Clear all preset targets
-      get().updateAllocation(allocation.id, {
-        targetDatapoints: allocation.targetDatapoints.filter(t => !t.groupId),
-      });
+      get().updateAllocation(
+        allocation.id,
+        {
+          targetDatapoints: allocation.targetDatapoints.filter(t => !t.groupId),
+        },
+        options,
+      );
       return;
     }
 
     // Toggle to remove old preset if any, then toggle to add new preset
     const existingPresetId = allocation.targetDatapoints.find(t => t.groupId)?.groupId;
     if (existingPresetId && existingPresetId !== presetId) {
-      get().toggleAllocationPresetTargets(allocation.id, existingPresetId);
+      get().toggleAllocationPresetTargets(allocation.id, existingPresetId, options);
     }
 
     // Add the new preset if not already added
     const hasNewPreset = allocation.targetDatapoints.some(t => t.groupId === presetId);
     if (!hasNewPreset) {
-      get().toggleAllocationPresetTargets(allocation.id, presetId);
+      get().toggleAllocationPresetTargets(allocation.id, presetId, options);
     }
   },
 }));

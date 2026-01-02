@@ -141,6 +141,26 @@ describe('clientFileRepository.listClientFiles', () => {
         ],
       } as any)
       .mockResolvedValueOnce({ recordset: [] } as any)
+      .mockResolvedValueOnce({ recordset: [] } as any)
+      .mockResolvedValueOnce({
+        recordset: [
+          {
+            fileUploadGuid: 'guid-1',
+            rowCount: 12,
+            periodStart: '2023-01-01',
+            periodEnd: '2023-02-01',
+          },
+        ],
+      } as any)
+      .mockResolvedValueOnce({
+        recordset: [
+          {
+            fileUploadGuid: 'guid-1',
+            entityId: 101,
+            rowCount: 8,
+          },
+        ],
+      } as any)
       .mockResolvedValueOnce({ recordset: [] } as any);
 
     const result = await listClientFiles(undefined, 1, 10);
@@ -149,6 +169,9 @@ describe('clientFileRepository.listClientFiles', () => {
     expect(mockedRunQuery.mock.calls[1][0]).toContain('cf.IS_DELETED = 0');
     expect(mockedRunQuery.mock.calls[2][1]).toMatchObject({ sheetFileGuid0: 'guid-1' });
     expect(mockedRunQuery.mock.calls[3][1]).toMatchObject({ entityFileGuid0: 'guid-1' });
+    expect(mockedRunQuery.mock.calls[4][1]).toMatchObject({ recordFileGuid0: 'guid-1' });
+    expect(mockedRunQuery.mock.calls[5][1]).toMatchObject({ recordFileGuid0: 'guid-1' });
+    expect(mockedRunQuery.mock.calls[6][1]).toMatchObject({ clientId: 'client-1' });
     expect(result.items[0].fileUploadGuid).toBe('guid-1');
   });
 });

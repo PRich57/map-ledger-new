@@ -164,9 +164,9 @@ describe('Mapping page layout', () => {
 
   it('renders full-width workspace while preserving responsive padding', () => {
     const { container } = render(
-      <MemoryRouter initialEntries={['/gl/mapping/demo']}>
+      <MemoryRouter initialEntries={['/gl/mapping/client']}>
         <Routes>
-          <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+          <Route path="/gl/mapping/client" element={<Mapping />} />
         </Routes>
       </MemoryRouter>
     );
@@ -186,9 +186,9 @@ describe('Mapping page layout', () => {
     const user = userEvent.setup();
 
     render(
-      <MemoryRouter initialEntries={['/gl/mapping/demo']}>
+      <MemoryRouter initialEntries={['/gl/mapping/client']}>
         <Routes>
-          <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+          <Route path="/gl/mapping/client" element={<Mapping />} />
         </Routes>
       </MemoryRouter>
     );
@@ -212,9 +212,9 @@ describe('Mapping page layout', () => {
     const user = userEvent.setup();
 
     render(
-      <MemoryRouter initialEntries={['/gl/mapping/demo']}>
+      <MemoryRouter initialEntries={['/gl/mapping/client']}>
         <Routes>
-          <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+          <Route path="/gl/mapping/client" element={<Mapping />} />
         </Routes>
       </MemoryRouter>
     );
@@ -296,9 +296,9 @@ describe('Mapping page layout', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/gl/mapping/demo']}>
+      <MemoryRouter initialEntries={['/gl/mapping/client']}>
         <Routes>
-          <Route path="/gl/mapping/:uploadId" element={<Mapping />} />
+          <Route path="/gl/mapping/client" element={<Mapping />} />
         </Routes>
       </MemoryRouter>,
     );

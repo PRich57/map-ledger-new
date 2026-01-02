@@ -20,6 +20,41 @@ const resetStore = () => {
 
 const getTargetOptions = () => getChartOfAccountOptions();
 
+const openSearchableSelect = async (input: HTMLElement) => {
+  fireEvent.focus(input);
+  await waitFor(() => {
+    expect(screen.queryAllByRole('option').length).toBeGreaterThan(0);
+  });
+};
+
+const getSearchableSelectOptionValues = async (input: HTMLElement) => {
+  const inputId = input.getAttribute('id') ?? '';
+  await openSearchableSelect(input);
+  const values = screen
+    .queryAllByRole('option')
+    .map(option => option.getAttribute('id') ?? '')
+    .filter(id => inputId && id.startsWith(`${inputId}-option-`))
+    .map(id => id.replace(`${inputId}-option-`, ''));
+  fireEvent.mouseDown(document.body);
+  return values;
+};
+
+const selectSearchableSelectOption = async (input: HTMLElement, value: string) => {
+  const inputId = input.getAttribute('id') ?? '';
+  await openSearchableSelect(input);
+  const option = screen
+    .queryAllByRole('option')
+    .find(node => node.getAttribute('id') === `${inputId}-option-${value}`);
+  if (!option) {
+    throw new Error(`Option ${value} not found`);
+  }
+  const button = option.querySelector('button');
+  if (!button) {
+    throw new Error(`Option ${value} missing button`);
+  }
+  fireEvent.click(button);
+};
+
 describe('ratioAllocationStore', () => {
   beforeEach(() => {
     resetStore();
@@ -246,7 +281,7 @@ describe('ratioAllocationStore', () => {
     expect(refreshedSecond?.isExclusion).toBe(true);
   });
 
-  it('rejects duplicate account selections across preset rows', () => {
+  it('rejects duplicate basis selections and basis-target overlaps across preset rows', () => {
     const [first, second, third, fourth, fifth, sixth, seventh] = getTargetOptions();
 
     act(() => {
@@ -267,6 +302,7 @@ describe('ratioAllocationStore', () => {
     expect(createdPreset.rows).toEqual([
       { dynamicAccountId: first.id, targetAccountId: second.id },
       { dynamicAccountId: third.id, targetAccountId: fourth.id },
+      { dynamicAccountId: sixth.id, targetAccountId: second.id },
     ]);
   });
 
@@ -307,9 +343,9 @@ describe('ratioAllocationStore', () => {
       .getPresetAvailableTargetAccounts('preset-availability')
       .map(option => option.id);
     expect(availableTargets).not.toContain(first.id);
-    expect(availableTargets).not.toContain(second.id);
     expect(availableTargets).not.toContain(third.id);
-    expect(availableTargets).not.toContain(fourth.id);
+    expect(availableTargets).toContain(second.id);
+    expect(availableTargets).toContain(fourth.id);
 
     const editableDynamics = store
       .getPresetAvailableDynamicAccounts('preset-availability', 0)
@@ -363,14 +399,19 @@ describe('ratioAllocationStore', () => {
 
     render(<RatioAllocationBuilder initialSourceAccountId={sourceAccount.id} />);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /create preset/i }));
-    });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /create preset/i }));
+      });
 
-    const initialTargetSelects = await screen.findAllByLabelText(/target account/i);
-    await act(async () => {
-      fireEvent.change(initialTargetSelects[0], { target: { value: second.id } });
-    });
+      const initialBasisSelect = await screen.findByLabelText(/basis datapoint/i);
+      await act(async () => {
+        fireEvent.change(initialBasisSelect, { target: { value: first.id } });
+      });
+
+      const initialTargetSelects = await screen.findAllByLabelText(/target account/i);
+      await act(async () => {
+        await selectSearchableSelectOption(initialTargetSelects[0], second.id);
+      });
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /add row/i }));
@@ -378,21 +419,20 @@ describe('ratioAllocationStore', () => {
 
     await waitFor(() => expect(screen.getAllByLabelText(/basis datapoint/i)).toHaveLength(2));
 
-    const basisSelects = screen.getAllByLabelText(/basis datapoint/i);
-    const secondBasisSelect = basisSelects[1];
-    const basisOptions = Array.from(secondBasisSelect.querySelectorAll('option')).map(
-      option => option.value,
-    );
-    expect(basisOptions).toEqual([third.id]);
+      const basisSelects = screen.getAllByLabelText(/basis datapoint/i);
+      const secondBasisSelect = basisSelects[1];
+      const basisOptions = Array.from(secondBasisSelect.querySelectorAll('option')).map(
+        option => option.value,
+      );
+      const availableBasisOptions = basisOptions.filter(Boolean);
+      expect(availableBasisOptions).toEqual([second.id, third.id]);
 
-    const targetSelects = screen.getAllByLabelText(/target account/i);
-    const secondTargetSelect = targetSelects[1];
-    const targetOptions = Array.from(secondTargetSelect.querySelectorAll('option')).map(
-      option => option.value,
-    );
-    expect(targetOptions).not.toContain(first.id);
-    expect(targetOptions).not.toContain(second.id);
-  });
+      const targetSelects = screen.getAllByLabelText(/target account/i);
+      const secondTargetSelect = targetSelects[1];
+      const targetOptions = await getSearchableSelectOptionValues(secondTargetSelect);
+      expect(targetOptions).not.toContain(first.id);
+      expect(targetOptions).toContain(second.id);
+    });
 
   it('prevents reusing a canonical target when creating a preset', async () => {
     const [targetAlpha, targetBeta, targetGamma] = getTargetOptions();
@@ -469,7 +509,7 @@ describe('ratioAllocationStore', () => {
 
     const initialTargetSelect = screen.getByLabelText(/target account/i);
     await act(async () => {
-      fireEvent.change(initialTargetSelect, { target: { value: targetAlpha.id } });
+      await selectSearchableSelectOption(initialTargetSelect, targetAlpha.id);
     });
 
     await act(async () => {
@@ -487,11 +527,9 @@ describe('ratioAllocationStore', () => {
     expect(secondBasisOptions).not.toContain('basis-beta');
 
     const targetSelects = screen.getAllByLabelText(/target account/i);
-    const secondTargetOptions = Array.from(targetSelects[1].querySelectorAll('option')).map(
-      option => option.value,
-    );
+    const secondTargetOptions = await getSearchableSelectOptionValues(targetSelects[1]);
     expect(secondTargetOptions).toContain(targetGamma.id);
-    expect(secondTargetOptions).not.toContain(targetAlpha.id);
+    expect(secondTargetOptions).toContain(targetAlpha.id);
     expect(secondTargetOptions).not.toContain(targetBeta.id);
   });
 
@@ -568,16 +606,15 @@ describe('ratioAllocationStore', () => {
       fireEvent.click(screen.getByTitle('Add row'));
     });
 
-    await waitFor(() =>
-      expect(screen.getAllByLabelText(/preset target account/i)).toHaveLength(2),
-    );
+    await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(2));
 
-    const presetTargetSelects = screen.getAllByLabelText(/preset target account/i);
-    const newRowTargetOptions = Array.from(
-      presetTargetSelects[presetTargetSelects.length - 1].querySelectorAll('option'),
-    ).map(option => option.value);
+    const presetTargetSelects = screen.getAllByRole('combobox');
+    const newRowTargetOptions = await getSearchableSelectOptionValues(
+      presetTargetSelects[presetTargetSelects.length - 1],
+    );
     expect(newRowTargetOptions).toContain(targetBeta.id);
     expect(newRowTargetOptions).not.toContain(targetAlpha.id);
+    expect(newRowTargetOptions).toContain(targetGamma.id);
   });
 
   it('normalizes allocation result percentages that would otherwise total 99.99%', async () => {

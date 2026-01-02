@@ -25,6 +25,7 @@ import {
   selectSearchTerm,
   selectSplitValidationIssues,
   selectAvailablePeriods,
+  selectUnmappedPeriodsByAccount,
   useMappingStore,
 } from '../../store/mappingStore';
 import { useTemplateStore } from '../../store/templateStore';
@@ -132,6 +133,8 @@ const HEADER_BUTTON_ALIGNMENT: Partial<Record<SortKey, string>> = {
 };
 
 const POLARITY_OPTIONS: MappingPolarity[] = ['Debit', 'Credit', 'Absolute'];
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 export default function MappingTable() {
   const {
@@ -159,8 +162,10 @@ export default function MappingTable() {
   const accounts = useMappingStore(selectFilteredAccounts);
   const availablePeriods = useMappingStore(selectAvailablePeriods);
   const activePeriod = useMappingStore((state) => state.activePeriod);
+  const unmappedPeriodsByAccount = useMappingStore(selectUnmappedPeriodsByAccount);
   const searchTerm = useMappingStore(selectSearchTerm);
   const activeStatuses = useMappingStore(selectActiveStatuses);
+  const activeStatusKey = activeStatuses.join('|');
   const dirtyMappingIds = useMappingStore((state) => state.dirtyMappingIds);
   const rowSaveStatuses = useMappingStore((state) => state.rowSaveStatuses);
   const updateTarget = useMappingStore((state) => state.updateTarget);
@@ -175,18 +180,23 @@ export default function MappingTable() {
     () => presetLibrary.filter(entry => entry.type === 'percentage'),
     [presetLibrary],
   );
-  const dynamicPresetOptions = useMemo(
-    () => presetLibrary.filter(entry => entry.type === 'dynamic'),
-    [presetLibrary],
-  );
   const addSplitDefinition = useMappingStore(
     (state) => state.addSplitDefinition
+  );
+  const addSplitDefinitionForSelection = useMappingStore(
+    (state) => state.addSplitDefinitionForSelection
   );
   const updateSplitDefinition = useMappingStore(
     (state) => state.updateSplitDefinition
   );
+  const updateSplitDefinitionForSelection = useMappingStore(
+    (state) => state.updateSplitDefinitionForSelection
+  );
   const removeSplitDefinition = useMappingStore(
     (state) => state.removeSplitDefinition
+  );
+  const removeSplitDefinitionForSelection = useMappingStore(
+    (state) => state.removeSplitDefinitionForSelection
   );
   const { selectedIds, toggleSelection, setSelection, clearSelection } =
     useMappingSelectionStore();
@@ -203,6 +213,8 @@ export default function MappingTable() {
   const [activeDynamicAccountId, setActiveDynamicAccountId] = useState<string | null>(
     null
   );
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageIndex, setPageIndex] = useState(0);
 
   const latestPeriod = useMemo(() => {
     if (availablePeriods.length === 0) {
@@ -293,6 +305,10 @@ export default function MappingTable() {
     );
   }, [accounts]);
 
+  useEffect(() => {
+    setPageIndex(0);
+  }, [activeStatusKey, pageSize, searchTerm, sortConfig?.direction, sortConfig?.key]);
+
   const dynamicStatusByAccount = useMemo(() => {
     if (allocations.length === 0) {
       return new Map<string, MappingStatus>();
@@ -323,12 +339,15 @@ export default function MappingTable() {
 
   const getDisplayStatus = useMemo(() => {
     return (account: GLAccountMappingRow): MappingStatus => {
+      if (!activePeriod) {
+        return account.status;
+      }
       if (account.mappingType === 'dynamic') {
         return dynamicStatusByAccount.get(account.id) ?? 'Unmapped';
       }
       return account.status;
     };
-  }, [dynamicStatusByAccount]);
+  }, [activePeriod, dynamicStatusByAccount]);
 
   const filteredAccounts = useMemo(() => {
     const normalizedQuery = searchTerm.trim().toLowerCase();
@@ -375,6 +394,26 @@ export default function MappingTable() {
     return [...filteredAccounts].sort(safeCompare);
   }, [filteredAccounts, sortConfig, getDisplayStatus]);
 
+  const totalAccounts = sortedAccounts.length;
+  const totalPages = totalAccounts > 0 ? Math.ceil(totalAccounts / pageSize) : 0;
+  const safePageIndex = totalPages > 0 ? Math.min(pageIndex, totalPages - 1) : 0;
+  const pageStart = totalPages > 0 ? safePageIndex * pageSize : 0;
+  const pageEnd = totalPages > 0 ? Math.min(pageStart + pageSize, totalAccounts) : 0;
+  const pagedAccounts = useMemo(
+    () => sortedAccounts.slice(pageStart, pageEnd),
+    [sortedAccounts, pageStart, pageEnd]
+  );
+  const pageLabelStart = totalAccounts === 0 ? 0 : pageStart + 1;
+  const pageLabelEnd = totalAccounts === 0 ? 0 : pageEnd;
+  const currentPage = totalPages === 0 ? 0 : safePageIndex + 1;
+  const lastPageIndex = Math.max(totalPages - 1, 0);
+
+  useEffect(() => {
+    if (pageIndex !== safePageIndex) {
+      setPageIndex(safePageIndex);
+    }
+  }, [pageIndex, safePageIndex]);
+
   const shouldAutoMapNextAccount = (account: GLAccountMappingRow) =>
     account.mappingType === 'direct' &&
     !account.manualCOAId?.trim() &&
@@ -383,12 +422,15 @@ export default function MappingTable() {
 
   const handleTargetChange = (
     account: GLAccountMappingRow,
-    index: number,
+    sortedIndex: number,
     nextValue: string
   ) => {
     const hasBatchSelection = selectedIds.has(account.id) && selectedIds.size > 1;
     if (hasBatchSelection) {
-      applyBatchMapping(Array.from(selectedIds), { target: nextValue || null });
+      applyBatchMapping(selectedIdList, { target: nextValue || null });
+      if (nextValue) {
+        clearSelection();
+      }
       return;
     }
 
@@ -398,7 +440,7 @@ export default function MappingTable() {
       return;
     }
 
-    const nextAccount = sortedAccounts[index + 1];
+    const nextAccount = sortedAccounts[sortedIndex + 1];
     if (nextAccount && shouldAutoMapNextAccount(nextAccount)) {
       updateTarget(nextAccount.id, nextValue);
     }
@@ -407,13 +449,23 @@ export default function MappingTable() {
   const handleMappingTypeChange = (accountId: string, nextType: MappingType) => {
     const hasBatchSelection = selectedIds.has(accountId) && selectedIds.size > 1;
     if (hasBatchSelection) {
-      applyBatchMapping(Array.from(selectedIds), { mappingType: nextType });
+      applyBatchMapping(selectedIdList, { mappingType: nextType });
       return;
     }
     updateMappingType(accountId, nextType);
   };
 
   const derivedSelectedPeriod = activePeriod ?? selectedPeriod ?? null;
+  const selectedIdList = useMemo(() => Array.from(selectedIds), [selectedIds]);
+  const dynamicPresetSelectionIds = useMemo(() => {
+    if (!activeDynamicAccountId) {
+      return [];
+    }
+    if (selectedIds.has(activeDynamicAccountId) && selectedIds.size > 1) {
+      return selectedIdList;
+    }
+    return [activeDynamicAccountId];
+  }, [activeDynamicAccountId, selectedIdList, selectedIds]);
 
   const dynamicExclusionSummaries = useMemo(
     () =>
@@ -492,12 +544,12 @@ export default function MappingTable() {
       <MappingToolbar />
       <div className="overflow-x-auto">
         <table
-          className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700"
+          className="min-w-full table-compact divide-y divide-slate-200 text-sm dark:divide-slate-700"
           role="table"
         >
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             <tr>
-              <th scope="col" className="w-12 px-3 py-3">
+              <th scope="col" className="w-8 table-cell-tight text-left">
                 <span className="sr-only">Select all rows</span>
                 <input
                   ref={selectAllRef}
@@ -507,7 +559,7 @@ export default function MappingTable() {
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
               </th>
-              <th scope="col" className="w-10 px-3 py-3">
+              <th scope="col" className="w-8 table-cell-tight text-left">
                 <span className="sr-only">Toggle split details</span>
               </th>
               {COLUMN_DEFINITIONS.map((column) => (
@@ -530,7 +582,8 @@ export default function MappingTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white dark:divide-slate-700 dark:bg-slate-900">
-            {sortedAccounts.map((account, index) => {
+            {pagedAccounts.map((account, index) => {
+              const absoluteIndex = pageStart + index;
               const normalizedAccountPeriod = account.glMonth?.trim() ?? null;
               const periodKey = normalizedAccountPeriod ?? 'unspecified';
               const isCurrentPeriod =
@@ -547,6 +600,7 @@ export default function MappingTable() {
               }
 
               const isSelected = selectedIds.has(account.id);
+              const hasBatchSelection = isSelected && selectedIds.size > 1;
               const isDirty = dirtyMappingIds.has(account.id);
               const targetScoa =
                 account.manualCOAId ?? account.suggestedCOAId ?? '';
@@ -562,6 +616,16 @@ export default function MappingTable() {
                     )
                   : account.splitDefinitions.length > 0 && !hasSplitIssue;
               const displayStatus = getDisplayStatus(account);
+              const accountKey = `${account.entityId ?? ''}__${account.accountId ?? ''}`;
+              const unmappedPeriods =
+                !activePeriod && displayStatus === 'Unmapped'
+                  ? (unmappedPeriodsByAccount.get(accountKey) ?? [])
+                  : [];
+              const hasUnmappedPeriods = !activePeriod && unmappedPeriods.length > 0;
+              const statusTooltip = hasUnmappedPeriods
+                ? `Unmapped periods: ${unmappedPeriods.join(', ')}`
+                : undefined;
+              const displayTargetScoa = hasUnmappedPeriods ? '' : targetScoa;
               const statusLabel = STATUS_LABELS[displayStatus];
               const StatusIcon = STATUS_ICONS[displayStatus];
               const isExpanded = expandedRows.has(account.id);
@@ -588,7 +652,7 @@ export default function MappingTable() {
               const rowSaveError =
                 rowSaveStatus?.status === 'error' ? rowSaveStatus.message : undefined;
 
-              const rowKey = `${account.id}-${account.entityId}-${account.glMonth ?? 'no-period'}-${index}`;
+              const rowKey = `${account.id}-${account.entityId}-${account.glMonth ?? 'no-period'}-${absoluteIndex}`;
 
               return (
                 <Fragment key={rowKey}>
@@ -610,7 +674,7 @@ export default function MappingTable() {
                     }
                     data-dirty={isDirty ? 'true' : undefined}
                   >
-                    <td className="px-3 py-4">
+                    <td className="table-cell-tight">
                       <input
                         type="checkbox"
                         aria-label={`Select account ${account.accountId}`}
@@ -619,7 +683,7 @@ export default function MappingTable() {
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="table-cell-tight">
                       {requiresSplit ? (
                         <button
                           type="button"
@@ -718,11 +782,11 @@ export default function MappingTable() {
                           </label>
                           <SearchableSelect
                             id={`scoa-${account.id}`}
-                            value={targetScoa}
+                            value={displayTargetScoa}
                             options={coaOptions}
                             placeholder="Search target"
                             onChange={(nextValue) =>
-                              handleTargetChange(account, index, nextValue)
+                              handleTargetChange(account, absoluteIndex, nextValue)
                             }
                             noOptionsMessage="No matching accounts"
                             className="w-full"
@@ -781,7 +845,8 @@ export default function MappingTable() {
                           <span
                             className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${STATUS_STYLES[displayStatus]}`}
                             role="status"
-                            aria-label={`Status ${statusLabel}`}
+                            aria-label={`Status ${statusLabel}${statusTooltip ? `. ${statusTooltip}` : ''}`}
+                            title={statusTooltip}
                           >
                             <StatusIcon className="h-3 w-3" aria-hidden="true" />
                             {statusLabel}
@@ -839,7 +904,7 @@ export default function MappingTable() {
                             colSpan={COLUMN_DEFINITIONS.length + 2}
                             panelId={`split-panel-${account.id}`}
                             onOpenBuilder={() => setActiveDynamicAccountId(account.id)}
-                            presetOptions={dynamicPresetOptions}
+                            batchAccountIds={hasBatchSelection ? selectedIdList : undefined}
                           />
                         ) : (
                         <MappingSplitRow
@@ -847,17 +912,38 @@ export default function MappingTable() {
                           targetOptions={coaOptions}
                           presetOptions={percentagePresetOptions}
                           selectedPresetId={account.presetId ?? null}
-                          onApplyPreset={(presetId) =>
-                            applyPresetToAccounts([account.id], presetId)
-                          }
+                          onApplyPreset={(presetId) => {
+                            if (hasBatchSelection) {
+                              applyPresetToAccounts(selectedIdList, presetId);
+                              return;
+                            }
+                            applyPresetToAccounts([account.id], presetId);
+                          }}
                           colSpan={COLUMN_DEFINITIONS.length + 2}
                           panelId={`split-panel-${account.id}`}
-                          onAddSplit={() => addSplitDefinition(account.id)}
+                          onAddSplit={() =>
+                            hasBatchSelection
+                              ? addSplitDefinitionForSelection(selectedIdList, account.id)
+                              : addSplitDefinition(account.id)
+                          }
                           onUpdateSplit={(splitId, updates) =>
-                            updateSplitDefinition(account.id, splitId, updates)
+                            hasBatchSelection
+                              ? updateSplitDefinitionForSelection(
+                                  selectedIdList,
+                                  account.id,
+                                  splitId,
+                                  updates
+                                )
+                              : updateSplitDefinition(account.id, splitId, updates)
                           }
                           onRemoveSplit={(splitId) =>
-                            removeSplitDefinition(account.id, splitId)
+                            hasBatchSelection
+                              ? removeSplitDefinitionForSelection(
+                                  selectedIdList,
+                                  account.id,
+                                  splitId
+                                )
+                              : removeSplitDefinition(account.id, splitId)
                           }
                         />
                       )
@@ -878,6 +964,73 @@ export default function MappingTable() {
           </tbody>
         </table>
       </div>
+      {totalAccounts > 0 && (
+        <div className="flex flex-col gap-3 border-t border-slate-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+          <div className="text-sm text-slate-600 dark:text-slate-300">
+            Showing {pageLabelStart.toLocaleString()}-{pageLabelEnd.toLocaleString()} of{' '}
+            {totalAccounts.toLocaleString()} accounts
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="mapping-page-size"
+                className="text-sm text-slate-600 dark:text-slate-300"
+              >
+                Rows per page
+              </label>
+              <select
+                id="mapping-page-size"
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value))}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPageIndex(0)}
+                disabled={safePageIndex === 0}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                First
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageIndex((prev) => Math.max(prev - 1, 0))}
+                disabled={safePageIndex === 0}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-slate-600 dark:text-slate-300">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPageIndex((prev) => Math.min(prev + 1, lastPageIndex))}
+                disabled={safePageIndex >= lastPageIndex}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageIndex(lastPageIndex)}
+                disabled={safePageIndex >= lastPageIndex}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Last
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {activeDynamicAccountId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm p-4">
           <div
@@ -906,6 +1059,7 @@ export default function MappingTable() {
             <div className="max-h-[92vh] overflow-y-auto px-6 py-8">
               <RatioAllocationManager
                 initialSourceAccountId={activeDynamicAccountId}
+                applyToSourceAccountIds={dynamicPresetSelectionIds}
                 onDone={() => setActiveDynamicAccountId(null)}
               />
             </div>

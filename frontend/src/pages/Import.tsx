@@ -7,13 +7,7 @@ import { useImportStore } from '../store/importStore';
 import ImportHistory from '../components/import/ImportHistory';
 import ImportForm from '../components/import/ImportForm';
 import TemplateGuide from '../components/import/TemplateGuide';
-import type {
-  ClientEntity,
-  EntitySummary,
-  Import,
-  ImportSheet,
-  TrialBalanceRow,
-} from '../types';
+import type { ClientEntity, ImportSheet, TrialBalanceRow } from '../types';
 import type { ParsedUpload } from '../utils/parseTrialBalanceWorkbook';
 import { useMappingStore } from '../store/mappingStore';
 import { useOrganizationStore } from '../store/organizationStore';
@@ -44,7 +38,7 @@ export default function Import() {
   const fetchOrganizations = useOrganizationStore((state) => state.fetchForUser);
   const orgLoading = useOrganizationStore((state) => state.isLoading);
   const orgError = useOrganizationStore((state) => state.error);
-  const fetchFileRecords = useMappingStore((state) => state.fetchFileRecords);
+  const fetchClientRecords = useMappingStore((state) => state.fetchClientRecords);
   const activeClientId = useClientStore((state) => state.activeClientId);
   const setActiveClientId = useClientStore((state) => state.setActiveClientId);
 
@@ -107,46 +101,6 @@ export default function Import() {
     }
   };
 
-  const handleStartMapping = (
-    importItem: Import,
-    mode: 'resume' | 'restart',
-  ) => {
-    const uploadGuid = importItem.fileUploadGuid ?? importItem.id;
-
-    if (!uploadGuid) {
-      setError('Unable to open mapping. Missing file identifier.');
-      return;
-    }
-
-    setActiveClientId(importItem.clientId ?? null);
-
-    const entitiesFromImport: EntitySummary[] = (importItem.entities ?? [])
-      .map((entity) => {
-        const normalizedId = entity.entityId ?? slugify(entity.entityName);
-        const name = entity.displayName ?? entity.entityName ?? normalizedId ?? 'Entity';
-        return {
-          id: normalizedId ?? name,
-          name,
-        } satisfies EntitySummary;
-      })
-      .filter((entity) => Boolean(entity.id));
-
-    const search = new URLSearchParams({ stage: 'mapping' });
-    if (mode === 'restart') {
-      search.set('mode', 'restart');
-    }
-
-    fetchFileRecords(uploadGuid, {
-      clientId: importItem.clientId,
-      entities: entitiesFromImport,
-      entityIds: entitiesFromImport.map((entity) => entity.id),
-      period: importItem.period,
-      hydrateMode: mode,
-    });
-
-    navigate(`/gl/mapping/${uploadGuid}?${search.toString()}`);
-  };
-
   const handleFileImport = async (
     rows: TrialBalanceRow[],
     clientId: string,
@@ -170,6 +124,8 @@ export default function Import() {
       if (selectedEntities.length === 0) {
         throw new Error('Please select at least one entity to import.');
       }
+
+      setActiveClientId(clientId);
 
       const normalizeEntityValue = (value?: string | null) => {
         const normalized = slugify(value ?? '');
@@ -240,13 +196,6 @@ export default function Import() {
         isSelected: true,
       }));
 
-      const mappingEntities: EntitySummary[] = selectedEntities.map((entity) => ({
-        id: entity.id,
-        name: entity.displayName ?? entity.name,
-      }));
-
-      const entityIds = mappingEntities.map((entity) => entity.id);
-
       const ingestEntities = selectedEntities.map((entity) => ({
         id: entity.id,
         name: entity.displayName ?? entity.name,
@@ -258,10 +207,11 @@ export default function Import() {
       const fileType = file.type || 'application/octet-stream';
 
       // Use the first GL month for the import record, or a placeholder if none detected
+      const glPeriodStart = glMonths.length > 0 ? glMonths[0] : undefined;
+      const glPeriodEnd =
+        glMonths.length > 0 ? glMonths[glMonths.length - 1] : glPeriodStart;
       const primaryPeriod =
-        glMonths.length > 0
-          ? glMonths[0]
-          : `${new Date().toISOString().slice(0, 7)}-01`;
+        glPeriodStart ?? `${new Date().toISOString().slice(0, 7)}-01`;
 
       const sheets =
         sheetSelections.length > 0
@@ -298,6 +248,8 @@ export default function Import() {
         fileSize: file.size,
         fileType,
         period: primaryPeriod,
+        glPeriodStart,
+        glPeriodEnd,
         timestamp: new Date().toISOString(),
         status: 'completed',
         rowCount: resolvedRows.length,
@@ -333,16 +285,11 @@ export default function Import() {
         throw new Error(`Failed to ingest file records (${ingestResponse.status})`);
       }
 
-      await fetchFileRecords(importId, {
-        clientId,
-        entities: mappingEntities,
-        entityIds,
-        period: primaryPeriod,
-      });
+      await fetchClientRecords(clientId);
 
       setSuccess('File imported successfully');
       scrollPageToTop({ behavior: 'auto' });
-      navigate(`/gl/mapping/${importId}?stage=mapping`);
+      navigate('/gl/mapping/client?stage=mapping');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import file');
     } finally {
@@ -474,7 +421,6 @@ export default function Import() {
               });
             }
           }}
-          onStartMapping={handleStartMapping}
         />
       </Card>
     </div>

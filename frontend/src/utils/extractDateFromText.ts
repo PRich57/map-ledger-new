@@ -55,6 +55,21 @@ export function normalizeGlMonth(value: string): string {
     return formatMonthStart(year, rawMonth);
   }
 
+  // Month.Year: 11.25
+  const monthDotYearMatch = trimmed.match(/^(\d{1,2})\.(\d{2})$/);
+  if (monthDotYearMatch) {
+    const [, rawMonth, yearPart] = monthDotYearMatch;
+    const month = rawMonth.padStart(2, '0');
+    const monthNum = parseInt(month, 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      const numericYear = parseInt(yearPart, 10);
+      if (!Number.isNaN(numericYear)) {
+        const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
+        return formatMonthStart(year, month);
+      }
+    }
+  }
+
   // US format: 01/15/2024 or 01-15-2024
   const usMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
   if (usMatch) {
@@ -200,7 +215,23 @@ export function extractDateFromText(text: string): string {
     }
   }
 
-  // Pattern 6: Compact numeric format: 202408
+  // Pattern 6: MM.YY
+  // Examples: "11.25"
+  const mmYyDotMatch = normalized.match(/\b(\d{1,2})\.(\d{2})\b/);
+  if (mmYyDotMatch) {
+    const [, rawMonth, yearPart] = mmYyDotMatch;
+    const month = rawMonth.padStart(2, '0');
+    const monthNum = parseInt(month, 10);
+    if (monthNum >= 1 && monthNum <= 12) {
+      const numericYear = parseInt(yearPart, 10);
+      if (!Number.isNaN(numericYear)) {
+        const year = numericYear < 50 ? 2000 + numericYear : 1900 + numericYear;
+        return formatMonthStart(year, month);
+      }
+    }
+  }
+
+  // Pattern 7: Compact numeric format: 202408
   const compactMatch = normalized.match(/\b(\d{4})(\d{2})\b/);
   if (compactMatch) {
     const [, year, rawMonth] = compactMatch;
@@ -210,7 +241,7 @@ export function extractDateFromText(text: string): string {
     }
   }
 
-  // Pattern 7: Month_Year or Month-Year with underscores/dashes
+  // Pattern 8: Month_Year or Month-Year with underscores/dashes
   // Examples: "Aug_24", "Jan-2024", "August_2025"
   const monthUnderscoreMatch = normalized.match(/\b([A-Za-z]{3,9})[_-](\d{2,4})\b/i);
   if (monthUnderscoreMatch) {

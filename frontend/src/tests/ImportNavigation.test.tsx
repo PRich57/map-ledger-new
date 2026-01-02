@@ -45,11 +45,30 @@ jest.mock('../components/import/ImportForm', () => ({
       glMonth?: string;
     }>,
     clientId: string,
-    entityIds: string[],
+    entitySelections: Array<{
+      id: string;
+      name: string;
+      displayName?: string | null;
+      aliases: string[];
+    }>,
     headerMap: Record<string, string | null>,
-    glMonth: string,
+    glMonths: string[],
     fileName: string,
-    file: File
+    file: File,
+    sheetSelections: Array<{
+      sheetName: string;
+      glMonth?: string | null;
+      rowCount?: number | null;
+      isSelected?: boolean;
+      firstDataRowIndex?: number | null;
+    }>,
+    selectedSheetUploads: Array<{
+      sheetName: string;
+      rows: Array<Record<string, unknown>>;
+      headers: string[];
+      metadata: { glMonth?: string | null; sheetNameDate?: string | null };
+      firstDataRowIndex?: number | null;
+    }>
   ) => void | Promise<void>;
   isImporting: boolean;
 }) => {
@@ -78,11 +97,36 @@ jest.mock('../components/import/ImportForm', () => ({
     onImport(
       rows,
       'client-123',
-      ['company-1'],
+      [
+        {
+          id: 'company-1',
+          name: 'Main Division',
+          displayName: 'Main Division',
+          aliases: [],
+        },
+      ],
       headerMap,
-      '2024-01-01',
+      ['2024-01-01'],
       'trial_balance.csv',
       mockFile,
+      [
+        {
+          sheetName: 'Sheet1',
+          glMonth: '2024-01-01',
+          rowCount: rows.length,
+          isSelected: true,
+          firstDataRowIndex: 1,
+        },
+      ],
+      [
+        {
+          sheetName: 'Sheet1',
+          rows: rows.map((row) => ({ ...row })),
+          headers: ['GL ID', 'Account Description', 'Net Change', 'Entity'],
+          metadata: { glMonth: '2024-01-01', sheetNameDate: null },
+          firstDataRowIndex: 1,
+        },
+      ],
     );
   };
 
@@ -97,18 +141,11 @@ jest.mock('../components/import/ImportHistory', () => ({
   __esModule: true,
   default: ({
     imports,
-    onStartMapping,
   }: {
     imports: ImportRecord[];
-    onStartMapping?: (importItem: ImportRecord, mode: 'resume' | 'restart') => void;
   }) => (
     <div>
       <div data-testid="import-history-count">{imports.length}</div>
-      {onStartMapping && imports.length > 0 && (
-        <button type="button" onClick={() => onStartMapping(imports[0], 'resume')}>
-          Open history import
-        </button>
-      )}
     </div>
   ),
 }));
@@ -280,26 +317,7 @@ describe('Import page navigation', () => {
     await user.click(screen.getByRole('button', { name: /trigger import/i }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/gl/mapping/import-123?stage=mapping');
-    });
-  });
-
-  it('resets the global client when opening history from another client', async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <Import />
-      </MemoryRouter>,
-    );
-
-    await screen.findByTestId('import-history-count');
-    await user.click(screen.getByRole('button', { name: /open history import/i }));
-
-    await waitFor(() => {
-      expect(useClientStore.getState().activeClientId).toBe(mockHistoryImport.clientId);
-      expect(mockNavigate).toHaveBeenCalledWith(
-        `/gl/mapping/${mockHistoryImport.fileUploadGuid}?stage=mapping`,
-      );
+      expect(mockNavigate).toHaveBeenCalledWith('/gl/mapping/client?stage=mapping');
     });
   });
 });

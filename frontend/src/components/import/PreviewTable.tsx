@@ -95,7 +95,7 @@ export default function PreviewTable({
     <div className={containerClassName}>
       {header}
       <div className="max-h-96 overflow-auto rounded-lg border border-gray-200 dark:border-slate-700">
-        <table className="min-w-full text-sm text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-900">
+        <table className="min-w-full table-compact text-sm text-gray-800 dark:text-gray-100 bg-white dark:bg-slate-900">
           <thead className="bg-gray-50 text-left dark:bg-slate-800">
             <tr>
               {columnKeys.map((key, columnIndex) => (

@@ -88,3 +88,28 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-gray-300 rounded-full hover:bg-gray-400 transition-colors duration-200;
 }
+
+@layer utilities {
+  .table-compact {
+    @apply text-xs leading-tight;
+  }
+
+  .table-compact * {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  .table-compact th,
+  .table-compact td {
+    @apply px-2 py-1.5 align-middle;
+  }
+
+  .table-compact thead th {
+    @apply py-2;
+  }
+
+  .table-compact .table-cell-tight {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
+}

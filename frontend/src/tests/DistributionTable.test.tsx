@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from './testUtils';
 import DistributionTable from '../components/mapping/DistributionTable';
 import { selectDistributionProgress, useDistributionStore } from '../store/distributionStore';
+import { createInitialMappingAccounts, useMappingStore } from '../store/mappingStore';
 import { useOrganizationStore } from '../store/organizationStore';
 import type { DistributionRow, DistributionStatus } from '../types';
 
@@ -65,6 +66,24 @@ const seedOrganizationStore = () => {
         ],
       },
     ],
+  });
+};
+
+const SEGMENTED_ACCOUNT_IDS = ['1111-11', '1111-0-0', '1111-0-0-11', '2222.22.22'];
+
+const seedMappingStore = (accountIds: string[] = SEGMENTED_ACCOUNT_IDS) => {
+  const baseAccounts = createInitialMappingAccounts();
+  const accounts = baseAccounts.map((account, index) => ({
+    ...account,
+    accountId: accountIds[index % accountIds.length],
+  }));
+  useMappingStore.setState({
+    accounts,
+    activeEntityId: null,
+    activePeriod: null,
+    searchTerm: '',
+    activeStatuses: [],
+    userDefinedHeaders: [],
   });
 };
 
@@ -201,19 +220,27 @@ describe('DistributionTable', () => {
   beforeEach(() => {
     resetDistributionStore();
     seedOrganizationStore();
+    seedMappingStore();
   });
 
   test('renders distribution rows with required columns', async () => {
     render(<DistributionTable />);
 
-    expect(screen.getByText('Account ID')).toBeInTheDocument();
-    expect(screen.getByText('Standard COA Description')).toBeInTheDocument();
+    expect(screen.getByText('GL Account')).toBeInTheDocument();
+    expect(screen.getByText('GL Description')).toBeInTheDocument();
+    expect(screen.getByText('SCoA ID')).toBeInTheDocument();
+    expect(screen.getByText('SCoA Description')).toBeInTheDocument();
     expect(
       await screen.findByText('FREIGHT REVENUE LINEHAUL - COMPANY FLEET'),
     ).toBeInTheDocument();
     expect(
       await screen.findByText('DRIVER BENEFITS, PAYROLL TAXES AND BONUS COMPENSATION - COMPANY FLEET'),
     ).toBeInTheDocument();
+    const splitToggle = screen.getByRole('button', { name: /Split GL Account/i });
+    fireEvent.click(splitToggle);
+    expect(screen.getAllByRole('button', { name: /Filter GL Segment/i })).toHaveLength(4);
+    expect(screen.getByRole('button', { name: /Sort GL Segment 1/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sort GL Segment 4/i })).toBeInTheDocument();
   });
 
   test('allows editing operations for percentage rows', async () => {
@@ -309,9 +336,14 @@ describe('DistributionTable', () => {
     applyCustomDistributionRows();
     await screen.findByText('Distributed account description');
 
+    const columnIndex = Array.from(container.querySelectorAll('thead th')).findIndex(header =>
+      header.textContent?.includes('SCoA ID'),
+    ) + 1;
+    expect(columnIndex).toBeGreaterThan(0);
+
     const getVisibleAccountOrder = (): string[] =>
       Array.from(container.querySelectorAll('tbody tr'))
-        .map(row => row.querySelector('td:nth-child(3)'))
+        .map(row => row.querySelector(`td:nth-child(${columnIndex})`))
         .filter((cell): cell is HTMLElement => cell !== null)
         .map(cell => cell.textContent?.trim() ?? '')
         .filter(Boolean);

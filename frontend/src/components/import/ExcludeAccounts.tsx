@@ -42,7 +42,7 @@ export default function ExcludeAccounts({ rows, onConfirm }: ExcludeAccountsProp
         </p>
       </div>
 
-      <table className="min-w-full text-sm border border-gray-200 dark:border-slate-700">
+      <table className="min-w-full table-compact text-sm border border-gray-200 dark:border-slate-700">
         <thead>
           <tr className="bg-gray-50 text-left dark:bg-slate-800">
             <th className="p-2 text-gray-700 dark:text-gray-300">Exclude</th>

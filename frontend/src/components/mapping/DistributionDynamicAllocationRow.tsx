@@ -22,6 +22,8 @@ interface DistributionDynamicAllocationRowProps {
   panelId: string;
   onOpenBuilder: () => void;
   operationsCatalog: DistributionOperationCatalogItem[];
+  batchRowIds?: string[];
+  batchAccountIds?: string[];
 }
 
 const pluralize = (value: number, noun: string) =>
@@ -56,10 +58,19 @@ const DistributionDynamicAllocationRow = ({
   panelId,
   onOpenBuilder,
   operationsCatalog,
+  batchRowIds,
+  batchAccountIds,
 }: DistributionDynamicAllocationRowProps) => {
-  const { updateRowPreset, updateRowOperations } = useDistributionStore(state => ({
+  const {
+    updateRowPreset,
+    updateRowOperations,
+    applyPresetToRows,
+    applyOperationsToRows,
+  } = useDistributionStore(state => ({
     updateRowPreset: state.updateRowPreset,
     updateRowOperations: state.updateRowOperations,
+    applyPresetToRows: state.applyPresetToRows,
+    applyOperationsToRows: state.applyOperationsToRows,
   }));
   const {
     allocations,
@@ -200,7 +211,10 @@ const DistributionDynamicAllocationRow = ({
       const preset = target.groupId
         ? distributionContextPresets.find(item => item.id === target.groupId)
         : null;
-      const matchingRow = preset?.rows.find(presetRow => presetRow.targetAccountId === target.datapointId) ?? null;
+      const metricId = target.ratioMetric.id?.trim();
+      const matchingRow = metricId
+        ? preset?.rows.find(presetRow => presetRow.dynamicAccountId === metricId) ?? null
+        : null;
       const fallbackBasisAccount =
         basisAccounts.find(account => account.id === target.ratioMetric.id) ?? null;
 
@@ -244,6 +258,17 @@ const DistributionDynamicAllocationRow = ({
     [targetDetails],
   );
 
+  const hasDuplicateTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return targetDetails.some(detail => {
+      if (seen.has(detail.id)) {
+        return true;
+      }
+      seen.add(detail.id);
+      return false;
+    });
+  }, [targetDetails]);
+
   const periodResult = useMemo(() => {
     if (!allocation || !selectedPeriod) {
       return null;
@@ -263,20 +288,52 @@ const DistributionDynamicAllocationRow = ({
     return relevant.filter(issue => issue.periodId === selectedPeriod);
   }, [row.accountId, selectedPeriod, validationErrors]);
 
-  const computedPreview = useMemo(() => {
-    const mapResultToPreview = () => {
-      if (!periodResult) {
-        return null;
-      }
-      return {
-        allocations: periodResult.allocations.map(target => ({
-          targetId: target.targetId,
-          targetName: resolveOperationLabel(target.targetId, target.targetName),
-          value: target.value,
-          percentage: target.percentage,
-          isExclusion: Boolean(target.isExclusion),
-        })),
-        adjustment: periodResult.adjustment
+  const aggregatePreviewAllocations = useCallback(
+    (allocations: PreviewAllocation[]) => {
+      const grouped = new Map<string, PreviewAllocation>();
+      allocations.forEach(entry => {
+        const key = `${entry.targetId}::${entry.isExclusion ? 'excluded' : 'included'}`;
+        const existing = grouped.get(key);
+        if (existing) {
+          grouped.set(key, {
+            ...existing,
+            value: existing.value + entry.value,
+            percentage: existing.percentage + entry.percentage,
+          });
+          return;
+        }
+        grouped.set(key, { ...entry });
+      });
+      return Array.from(grouped.values());
+    },
+    [],
+  );
+
+  const rowPreview = useMemo(() => {
+    if (!allocation || targetDetails.length === 0) {
+      return null;
+    }
+
+    try {
+      const shouldUseSavedResult =
+        periodResult &&
+        Math.abs(periodResult.sourceValue - sourceValue) < 0.01 &&
+        !hasDuplicateTargets;
+      if (shouldUseSavedResult) {
+        const allocationLookup = new Map(
+          periodResult.allocations.map(entry => [entry.targetId, entry]),
+        );
+        const allocations = targetDetails.map(detail => {
+          const match = allocationLookup.get(detail.id);
+          return {
+            targetId: detail.id,
+            targetName: detail.targetName,
+            value: match?.value ?? 0,
+            percentage: match?.percentage ?? 0,
+            isExclusion: match ? Boolean(match.isExclusion) : detail.isExclusion,
+          } satisfies PreviewAllocation;
+        });
+        const adjustment = periodResult.adjustment
           ? {
               amount: periodResult.adjustment.amount,
               targetName:
@@ -284,21 +341,14 @@ const DistributionDynamicAllocationRow = ({
                   target => target.targetId === periodResult.adjustment?.targetId,
                 )?.targetName ?? null,
             }
-          : null,
-      } as const;
-    };
+          : null;
+        return { allocations, adjustment } as const;
+      }
 
-    const shouldUseSavedResult =
-      periodResult && Math.abs(periodResult.sourceValue - sourceValue) < 0.01;
-    if (shouldUseSavedResult) {
-      return mapResultToPreview();
-    }
+      if (basisTotal <= 0) {
+        return null;
+      }
 
-    if (!allocation || targetDetails.length === 0 || basisTotal <= 0) {
-      return mapResultToPreview();
-    }
-
-    try {
       const computation = allocateDynamic(sourceValue, targetDetails.map(detail => detail.basisValue));
 
       const allocations = targetDetails.map((detail, index) => {
@@ -325,18 +375,43 @@ const DistributionDynamicAllocationRow = ({
       console.warn('Failed to derive preview for distribution dynamic row', error);
       return null;
     }
-  }, [allocation, basisTotal, periodResult, resolveOperationLabel, sourceValue, targetDetails]);
+  }, [allocation, basisTotal, hasDuplicateTargets, periodResult, sourceValue, targetDetails]);
 
-  const previewAllocationLookup = useMemo(() => {
-    const map = new Map<string, PreviewAllocation>();
-    if (!computedPreview) {
-      return map;
+  const summaryPreview = useMemo(() => {
+    if (rowPreview) {
+      return {
+        allocations: aggregatePreviewAllocations(rowPreview.allocations),
+        adjustment: rowPreview.adjustment,
+      } as const;
     }
-    computedPreview.allocations.forEach(entry => {
-      map.set(entry.targetId, entry);
-    });
-    return map;
-  }, [computedPreview]);
+
+    if (!periodResult || Math.abs(periodResult.sourceValue - sourceValue) >= 0.01) {
+      return null;
+    }
+
+    const allocations = periodResult.allocations.map(target => ({
+      targetId: target.targetId,
+      targetName: resolveOperationLabel(target.targetId, target.targetName),
+      value: target.value,
+      percentage: target.percentage,
+      isExclusion: Boolean(target.isExclusion),
+    }));
+
+    return {
+      allocations: aggregatePreviewAllocations(allocations),
+      adjustment: periodResult.adjustment
+        ? {
+            amount: periodResult.adjustment.amount,
+            targetName:
+              periodResult.allocations.find(
+                target => target.targetId === periodResult.adjustment?.targetId,
+              )?.targetName ?? null,
+          }
+        : null,
+    } as const;
+  }, [aggregatePreviewAllocations, periodResult, resolveOperationLabel, rowPreview, sourceValue]);
+
+  const rowPreviewAllocations = rowPreview?.allocations ?? null;
 
   const sourceAccountLabel = useMemo(() => {
     if (sourceAccount?.name) {
@@ -349,6 +424,20 @@ const DistributionDynamicAllocationRow = ({
   }, [row.accountId, row.description, sourceAccount?.id, sourceAccount?.name, sourceAccount?.number]);
 
   const activePreset = getActivePresetForSource(row.accountId);
+
+  const buildPresetSyncKey = useCallback((presetId: string | null): string | null => {
+    if (!presetId) {
+      return null;
+    }
+    const preset = distributionContextPresets.find(item => item.id === presetId);
+    if (!preset) {
+      return presetId;
+    }
+    const rowsKey = preset.rows
+      .map(row => `${row.dynamicAccountId.trim()}|${row.targetAccountId.trim()}`)
+      .join('||');
+    return `${preset.id}::${rowsKey}`;
+  }, [distributionContextPresets]);
 
   // Track last synced preset to avoid redundant syncs
   const lastSyncedPresetRef = useRef<string | null>(null);
@@ -447,6 +536,7 @@ const operationsMatch = useCallback(
 
     const resolvedPresetId = activePreset?.id ?? null;
     const currentPresetId = row.presetId ?? null;
+    const resolvedPresetKey = buildPresetSyncKey(resolvedPresetId);
 
     // Skip syncing when no active preset is attached in the ratio store; this avoids
     // repeatedly clearing a server-assigned preset while presets are still hydrating.
@@ -456,11 +546,11 @@ const operationsMatch = useCallback(
     }
 
     // Skip if we already synced this preset
-    if (lastSyncedPresetRef.current === resolvedPresetId) {
+    if (lastSyncedPresetRef.current === resolvedPresetKey) {
       return;
     }
 
-    lastSyncedPresetRef.current = resolvedPresetId;
+    lastSyncedPresetRef.current = resolvedPresetKey;
 
     // Sync presetId if it changed
     if (currentPresetId !== resolvedPresetId) {
@@ -470,25 +560,54 @@ const operationsMatch = useCallback(
     // Also sync operations from the preset - this ensures basisDatapoint values
     // are included when the row is saved to the backend
     const derivedOperations = buildPresetOperations(resolvedPresetId);
-    updateRowOperations(row.id, derivedOperations);
-  }, [activePreset?.id, row.id, row.presetId, updateRowPreset, buildPresetOperations, updateRowOperations]);
+    if (!operationsMatch(derivedOperations)) {
+      updateRowOperations(row.id, derivedOperations);
+    }
+  }, [
+    activePreset?.id,
+    buildPresetOperations,
+    buildPresetSyncKey,
+    operationsMatch,
+    row.id,
+    row.operations,
+    row.presetId,
+    updateRowOperations,
+    updateRowPreset,
+  ]);
 
   const handlePresetChange = (presetId: string | null) => {
     // Mark that a preset change is in progress to prevent the useEffect from
     // duplicating updates and causing an infinite loop
     presetChangeInProgressRef.current = true;
-    lastSyncedPresetRef.current = presetId;
+    lastSyncedPresetRef.current = buildPresetSyncKey(presetId);
 
     try {
       syncSourceAccountBalance(row.accountId, sourceValue, selectedPeriod ?? null);
-      setActivePresetForSource(row.accountId, presetId);
-      updateRowPreset(row.id, presetId);
-      if (!presetId) {
-        updateRowOperations(row.id, []);
+      const targetRowIds =
+        batchRowIds && batchRowIds.length > 0 ? batchRowIds : [row.id];
+      const targetAccountIds =
+        batchAccountIds && batchAccountIds.length > 0
+          ? batchAccountIds
+          : [row.accountId];
+
+      targetAccountIds.forEach(accountId => {
+        setActivePresetForSource(accountId, presetId);
+      });
+
+      if (batchRowIds && batchRowIds.length > 0) {
+        applyPresetToRows(targetRowIds, presetId);
+      } else {
+        updateRowPreset(row.id, presetId);
+      }
+
+      const derivedOperations = presetId ? buildPresetOperations(presetId) : [];
+      if (batchRowIds && batchRowIds.length > 0) {
+        applyOperationsToRows(targetRowIds, derivedOperations);
         return;
       }
-      const derivedOperations = buildPresetOperations(presetId);
-      updateRowOperations(row.id, derivedOperations);
+      if (!operationsMatch(derivedOperations)) {
+        updateRowOperations(row.id, derivedOperations);
+      }
     } finally {
       // Reset the flag after a microtask to ensure all synchronous updates complete
       queueMicrotask(() => {
@@ -591,7 +710,7 @@ const operationsMatch = useCallback(
                 </div>
               </div>
               <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm dark:border-slate-700">
-                <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                <table className="min-w-full table-compact divide-y divide-slate-200 dark:divide-slate-700">
                   <thead className="bg-slate-50 dark:bg-slate-900">
                     <tr>
                       <th scope="col" className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
@@ -612,9 +731,11 @@ const operationsMatch = useCallback(
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white text-sm dark:divide-slate-700 dark:bg-slate-900">
-                    {targetDetails.map(detail => {
+                    {targetDetails.map((detail, index) => {
                       const ratio = basisTotal > 0 ? detail.basisValue / basisTotal : 0;
-                      const previewAllocation = previewAllocationLookup.get(detail.id);
+                      const previewAllocation = rowPreviewAllocations
+                        ? rowPreviewAllocations[index]
+                        : null;
                       const percent = previewAllocation?.percentage ?? ratio * 100;
                       const allocatedValue = previewAllocation?.value ?? sourceValue * ratio;
                       const isExclusion = detail.isExclusion;
@@ -624,7 +745,7 @@ const operationsMatch = useCallback(
                         ? 'bg-rose-50/70 text-rose-900 dark:bg-rose-500/10 dark:text-rose-100'
                         : '';
                       return (
-                        <tr key={detail.id} className={rowClasses}>
+                        <tr key={`${detail.id}-${detail.basisAccountId ?? detail.metricName}-${index}`} className={rowClasses}>
                           <td className="px-4 py-3 align-top">
                             <div className="flex flex-col gap-1">
                               <span className="font-semibold text-slate-900 dark:text-slate-100">
@@ -675,7 +796,7 @@ const operationsMatch = useCallback(
           )}
 
           {selectedPeriod ? (
-            computedPreview ? (
+            summaryPreview ? (
               <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-blue-900 shadow-sm dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-100">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
                   <div className="text-sm font-semibold">
@@ -683,11 +804,11 @@ const operationsMatch = useCallback(
                     {formattedSelectedPeriod ? ` · ${formattedSelectedPeriod}` : ''}
                   </div>
                   <div className="text-xs text-blue-700 dark:text-blue-200">
-                    Total distributes {formatCurrencyAmount(sourceValue)} across {computedPreview.allocations.length} targets.
+                    Total distributes {formatCurrencyAmount(sourceValue)} across {summaryPreview.allocations.length} targets.
                   </div>
                 </div>
                 <div className="space-y-2">
-                  {computedPreview.allocations.map(target => {
+                  {summaryPreview.allocations.map(target => {
                     const containerClasses = target.isExclusion
                       ? 'rounded-lg border border-rose-200 bg-rose-50/80 px-3 py-2 text-sm text-rose-900 shadow-sm transition dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100'
                       : 'rounded-lg bg-white/80 px-3 py-2 text-sm text-blue-900 shadow-sm transition dark:bg-slate-900/60 dark:text-blue-100';
@@ -726,10 +847,10 @@ const operationsMatch = useCallback(
                     );
                   })}
                 </div>
-                {computedPreview.adjustment && computedPreview.adjustment.targetName &&
-                  Math.abs(computedPreview.adjustment.amount) > 0 && (
+                {summaryPreview.adjustment && summaryPreview.adjustment.targetName &&
+                  Math.abs(summaryPreview.adjustment.amount) > 0 && (
                     <p className="text-xs text-blue-700 dark:text-blue-200">
-                      Includes a {formatCurrencyAmount(computedPreview.adjustment.amount)} rounding adjustment applied to {computedPreview.adjustment.targetName}.
+                      Includes a {formatCurrencyAmount(summaryPreview.adjustment.amount)} rounding adjustment applied to {summaryPreview.adjustment.targetName}.
                     </p>
                   )}
               </div>

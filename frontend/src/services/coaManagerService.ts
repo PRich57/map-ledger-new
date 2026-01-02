@@ -1,4 +1,5 @@
 export type CoaManagerCostType = string;
+export type CoaManagerIsFinancial = boolean | null;
 
 export interface CoaManagerColumn {
   key: string;
@@ -13,6 +14,7 @@ export interface CoaManagerRow {
   category: string;
   department: string;
   costType: CoaManagerCostType;
+  isFinancial: CoaManagerIsFinancial;
 }
 
 export interface CoaManagerIndustryResponse {
@@ -43,6 +45,49 @@ const coerceString = (value: unknown): string => {
   return '';
 };
 
+const coerceBoolean = (value: unknown): boolean | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value === 1) {
+      return true;
+    }
+    if (value === 0) {
+      return false;
+    }
+    return null;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    if (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === 'y' ||
+      normalized.includes('financial')
+    ) {
+      return true;
+    }
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no' ||
+      normalized === 'n' ||
+      normalized.includes('operational')
+    ) {
+      return false;
+    }
+  }
+  return null;
+};
+
 const normalizeIndustry = (value: unknown): string | null => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -69,16 +114,59 @@ const normalizeColumn = (column: Record<string, unknown>): CoaManagerColumn | nu
   };
 };
 
+const getValue = (row: Record<string, unknown>, keys: string[]): string => {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) {
+      continue;
+    }
+    const value = row[key];
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (value !== undefined && value !== null) {
+      return String(value);
+    }
+  }
+  return '';
+};
+
+const getRawValue = (row: Record<string, unknown>, keys: string[]): unknown => {
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(row, key)) {
+      continue;
+    }
+    return row[key];
+  }
+  return undefined;
+};
+
 const normalizeRow = (
   row: Record<string, unknown>,
   index: number,
 ): CoaManagerRow => {
-  const accountNumber = coerceString(
-    row.accountNumber ?? row.account_number ?? row.account ?? row.accountNo,
-  );
-  const accountName = coerceString(row.accountName ?? row.account_name ?? row.name);
+  const accountNumber = getValue(row, [
+    'accountNumber',
+    'account_number',
+    'ACCOUNT_NUMBER',
+    'account',
+    'ACCOUNT',
+    'accountNo',
+    'ACCOUNT_NO',
+  ]);
+  const accountName = getValue(row, [
+    'accountName',
+    'account_name',
+    'ACCOUNT_NAME',
+    'name',
+    'NAME',
+    'description',
+    'DESCRIPTION',
+  ]);
   const id =
-    coerceString(row.id ?? row.rowId ?? row.row_id) ||
+    getValue(row, ['id', 'rowId', 'row_id', 'recordId', 'record_id', 'RECORD_ID']) ||
     accountNumber ||
     accountName ||
     `row-${index}`;
@@ -87,9 +175,12 @@ const normalizeRow = (
     id,
     accountNumber,
     accountName,
-    category: coerceString(row.category),
-    department: coerceString(row.department),
-    costType: coerceString(row.costType ?? row.cost_type ?? row.costType),
+    category: getValue(row, ['category', 'CATEGORY']),
+    department: getValue(row, ['department', 'DEPARTMENT', 'dept', 'DEPT']),
+    costType: getValue(row, ['costType', 'cost_type', 'COST_TYPE']),
+    isFinancial: coerceBoolean(
+      getRawValue(row, ['isFinancial', 'is_financial', 'IS_FINANCIAL', 'financialFlag']),
+    ),
   };
 };
 
@@ -172,6 +263,23 @@ export const updateIndustryCostType = async (
   }
 };
 
+export const updateIndustryIsFinancial = async (
+  industry: string,
+  rowId: string,
+  isFinancial: CoaManagerIsFinancial,
+): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/coa-manager/industry/${industry}/is-financial`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rowId, isFinancial }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unable to update financial flag.');
+    throw new Error(errorText || 'Unable to update financial flag.');
+  }
+};
+
 export const updateIndustryCostTypeBatch = async (
   industry: string,
   rowIds: string[],
@@ -189,5 +297,62 @@ export const updateIndustryCostTypeBatch = async (
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unable to update cost types.');
     throw new Error(errorText || 'Unable to update cost types.');
+  }
+};
+
+export const updateIndustryIsFinancialBatch = async (
+  industry: string,
+  rowIds: string[],
+  isFinancial: CoaManagerIsFinancial,
+): Promise<void> => {
+  const response = await fetch(
+    `${API_BASE_URL}/coa-manager/industry/${industry}/is-financial/batch`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowIds, isFinancial }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unable to update financial flags.');
+    throw new Error(errorText || 'Unable to update financial flags.');
+  }
+};
+
+const extractErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  const text = await response.text().catch(() => '');
+  if (!text) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { message?: string; detail?: string };
+    return parsed.message ?? parsed.detail ?? text;
+  } catch {
+    return text;
+  }
+};
+
+export const importIndustryCoaFile = async (
+  industry: string,
+  file: File,
+): Promise<void> => {
+  const formData = new FormData();
+  formData.append('industry', industry);
+  formData.append('action', 'import');
+  formData.append('file', file);
+
+  const response = await fetch(`${API_BASE_URL}/coa-manager/import`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const message = await extractErrorMessage(response, 'Unable to import COA file.');
+    throw new Error(message || 'Unable to import COA file.');
   }
 };

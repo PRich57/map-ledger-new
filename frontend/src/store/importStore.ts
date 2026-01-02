@@ -102,18 +102,65 @@ type RawImport = Import & {
   glPeriodEnd?: string;
 };
 
+const normalizeImportStatus = (value?: string | null): Import['status'] => {
+  if (!value) {
+    return 'uploaded';
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  switch (normalized) {
+    case 'uploaded':
+    case 'mapping':
+    case 'distribution':
+    case 'review':
+    case 'completed':
+    case 'failed':
+      return normalized;
+    default:
+      return 'uploaded';
+  }
+};
+
+const parsePeriodRange = (
+  value?: string | null,
+): { start?: string; end?: string } => {
+  if (!value) {
+    return {};
+  }
+
+  const parts = value
+    .split(/\s+-\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+  if (parts.length === 0) {
+    return {};
+  }
+
+  if (parts.length === 1) {
+    return { start: parts[0], end: parts[0] };
+  }
+
+  return { start: parts[0], end: parts[parts.length - 1] };
+};
+
 const normalizeImport = (item: RawImport): Import => {
   const parsedTimestamp = item.timestamp ?? item.insertedDttm ?? item.lastStepCompletedDttm;
   const timestamp = parsedTimestamp && !Number.isNaN(new Date(parsedTimestamp).getTime())
     ? new Date(parsedTimestamp).toISOString()
     : new Date().toISOString();
 
-  const period = item.period
-    || [item.glPeriodStart, item.glPeriodEnd].filter(Boolean).join(' - ')
+  const rangeFromPeriod = parsePeriodRange(item.period);
+  const glPeriodStart = item.glPeriodStart ?? rangeFromPeriod.start;
+  const glPeriodEnd = item.glPeriodEnd ?? rangeFromPeriod.end ?? rangeFromPeriod.start;
+  const period =
+    [glPeriodStart, glPeriodEnd].filter(Boolean).join(' - ')
+    || item.period
     || '';
 
   const fileSize = Number(item.fileSize);
-  const status: Import['status'] = item.status === 'failed' ? 'failed' : 'completed';
+  const status = normalizeImportStatus(item.status ?? item.fileStatus);
 
   const resolvedId = item.fileUploadGuid ?? item.id ?? crypto.randomUUID();
 
@@ -127,6 +174,8 @@ const normalizeImport = (item: RawImport): Import => {
     fileSize: Number.isFinite(fileSize) && fileSize >= 0 ? fileSize : 0,
     fileType: item.fileType ?? 'Unknown type',
     period,
+    glPeriodStart,
+    glPeriodEnd,
     timestamp,
     insertedDttm: item.insertedDttm ?? timestamp,
     status,
@@ -192,12 +241,10 @@ export const useImportStore = create<ImportState>((set, get) => ({
       }
 
       const body = (await response.json()) as { item?: Import };
-      const saved = normalizeImport(
-        (body.item ?? {
-          ...payload,
-          timestamp: payload.timestamp ?? new Date().toISOString(),
-        }) as RawImport
-      );
+      const mergedPayload = body.item
+        ? { ...payload, ...body.item }
+        : { ...payload, timestamp: payload.timestamp ?? new Date().toISOString() };
+      const saved = normalizeImport(mergedPayload as RawImport);
 
       const { page, pageSize, imports } = get();
       const nextImports = page === 1 ? [saved, ...imports].slice(0, pageSize) : imports;

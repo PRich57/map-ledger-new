@@ -12,13 +12,6 @@ interface ClientState {
   reset: () => void;
 }
 
-const initialState: Pick<ClientState, 'clients' | 'activeClientId' | 'isLoading' | 'error'> = {
-  clients: [],
-  activeClientId: null,
-  isLoading: false,
-  error: null,
-};
-
 const normalizeClientId = (clientId?: string | null): string | null => {
   if (clientId == null) {
     return null;
@@ -27,6 +20,44 @@ const normalizeClientId = (clientId?: string | null): string | null => {
   const normalizedInput = typeof clientId === 'string' ? clientId : String(clientId);
   const trimmed = normalizedInput.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const storageKey = 'map-ledger-active-client';
+
+const getStoredActiveClientId = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return normalizeClientId(window.localStorage.getItem(storageKey));
+  } catch (error) {
+    console.warn('Unable to read stored active client:', error);
+    return null;
+  }
+};
+
+const persistActiveClientId = (clientId: string | null): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (clientId) {
+      window.localStorage.setItem(storageKey, clientId);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch (error) {
+    console.warn('Unable to persist active client:', error);
+  }
+};
+
+const initialState: Pick<ClientState, 'clients' | 'activeClientId' | 'isLoading' | 'error'> = {
+  clients: [],
+  activeClientId: getStoredActiveClientId(),
+  isLoading: false,
+  error: null,
 };
 
 const normalizeOperation = (operation: UserClientOperation): UserClientOperation => {
@@ -87,6 +118,7 @@ export const useClientStore = create<ClientState>((set, get) => ({
         isLoading: false,
         error: null,
       });
+      persistActiveClientId(resolvedActiveClientId);
     } catch (error) {
       set({
         isLoading: false,
@@ -94,16 +126,19 @@ export const useClientStore = create<ClientState>((set, get) => ({
       });
     }
   },
-  setActiveClientId: clientId =>
-    set(state => {
-      const normalized = normalizeClientId(clientId);
-      if (normalized === null) {
-        return { activeClientId: state.clients[0]?.clientId ?? null };
-      }
+  setActiveClientId: (clientId) => {
+    const normalized = normalizeClientId(clientId);
+    const { clients, activeClientId } = get();
+    const nextActiveClientId =
+      normalized === null
+        ? clients[0]?.clientId ?? null
+        : clients.some(client => client.clientId === normalized)
+        ? normalized
+        : activeClientId;
 
-      const exists = state.clients.some(client => client.clientId === normalized);
-      return { activeClientId: exists ? normalized : state.activeClientId };
-    }),
+    set({ activeClientId: nextActiveClientId });
+    persistActiveClientId(nextActiveClientId ?? null);
+  },
   upsertClient: (client) =>
     set((state) => {
       const existingIndex = state.clients.findIndex(({ clientId }) => clientId === client.clientId);
@@ -115,5 +150,8 @@ export const useClientStore = create<ClientState>((set, get) => ({
       nextClients[existingIndex] = client;
       return { clients: nextClients };
     }),
-  reset: () => set(initialState),
+  reset: () => {
+    persistActiveClientId(null);
+    set({ ...initialState, activeClientId: null });
+  },
 }));

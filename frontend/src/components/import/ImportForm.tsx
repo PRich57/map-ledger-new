@@ -58,6 +58,50 @@ const normalizeMonthKey = (glMonth?: string): string => {
   return normalizeGlMonth(glMonth ?? '') || 'unspecified';
 };
 
+const ACCOUNT_PREFIX_PATTERN = /^(\d{2,3})[-_.\s]+(.+)$/;
+const PREFIX_COVERAGE_THRESHOLD = 0.6;
+const IGNORED_ACCOUNT_ID_PATTERNS = [
+  /^account\s*(id|number)?$/i,
+  /^gl\s*id$/i,
+  /\btrial\s+balance\b/i,
+];
+const MAX_DETECTED_ACCOUNTS = 50;
+
+const shouldSkipAccountId = (value: string): boolean => {
+  const normalized = value
+    .trim()
+    .replace(/[^a-z0-9\s]/gi, ' ')
+    .replace(/\s+/g, ' ');
+  if (!normalized) {
+    return true;
+  }
+
+  return IGNORED_ACCOUNT_ID_PATTERNS.some((pattern) => pattern.test(normalized));
+};
+
+const extractAccountPrefix = (
+  value: string,
+): { prefix: string; suffix: string } | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const match = trimmed.match(ACCOUNT_PREFIX_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  const prefix = match[1];
+  const suffix = match[2]?.trim() ?? '';
+
+  if (!suffix) {
+    return null;
+  }
+
+  return { prefix, suffix };
+};
+
 const extractRowGlMonth = (row: ParsedRow | TrialBalanceRow): string => {
   const normalizeCandidate = (value: unknown): string => {
     if (typeof value !== 'string' && typeof value !== 'number') {
@@ -105,17 +149,37 @@ const extractGlMonthsFromRows = (rows: TrialBalanceRow[]): string[] => {
   return Array.from(monthsSet).sort();
 };
 
-const inferEntitySlotsFromRows = (
+const buildSlotSummaries = (
   rows: TrialBalanceRow[],
-): {
-  requiredEntities: number;
-  rowSlots: number[];
-  slotSummaries: EntitySlotSummary[];
-} => {
-  if (rows.length === 0) {
-    return { requiredEntities: 0, rowSlots: [], slotSummaries: [] };
-  }
+  rowSlots: number[],
+  requiredEntities: number,
+): EntitySlotSummary[] =>
+  Array.from({ length: requiredEntities }, (_, idx) => {
+    const slot = idx + 1;
+    const slotRows = rows
+      .map((row, rowIdx) => ({ row, slotIndex: rowSlots[rowIdx] }))
+      .filter(({ slotIndex }) => slotIndex === slot)
+      .map(({ row }) => row);
 
+    const glMonths = new Set<string>();
+    const accountIds = new Set<string>();
+
+    slotRows.forEach((row) => {
+      glMonths.add(normalizeMonthKey(row.glMonth));
+      accountIds.add((row.accountId ?? '').toString().trim() || 'unknown-account');
+    });
+
+    return {
+      slot,
+      glMonths: Array.from(glMonths),
+      accountIds: Array.from(accountIds),
+      rowCount: slotRows.length,
+    } satisfies EntitySlotSummary;
+  });
+
+const inferEntitySlotsFromDuplicateAccounts = (
+  rows: TrialBalanceRow[],
+): { requiredEntities: number; rowSlots: number[] } => {
   const perAccountMonthCounts = new Map<string, number>();
   const rowSlots: number[] = [];
 
@@ -129,33 +193,101 @@ const inferEntitySlotsFromRows = (
   });
 
   const requiredEntities = Math.max(...perAccountMonthCounts.values());
-  const slotSummaries: EntitySlotSummary[] = Array.from(
-    { length: requiredEntities },
-    (_, idx) => {
-      const slot = idx + 1;
-      const slotRows = rows
-        .map((row, rowIdx) => ({ row, slotIndex: rowSlots[rowIdx] }))
-        .filter(({ slotIndex }) => slotIndex === slot)
-        .map(({ row }) => row);
+  return { requiredEntities, rowSlots };
+};
 
-      const glMonths = new Set<string>();
-      const accountIds = new Set<string>();
+type PrefixRowInfo = { prefix: string; suffix: string; monthKey: string };
 
-      slotRows.forEach((row) => {
-        glMonths.add(normalizeMonthKey(row.glMonth));
-        accountIds.add((row.accountId ?? '').toString().trim() || 'unknown-account');
-      });
+const inferEntitySlotsFromAccountPrefixes = (
+  rows: TrialBalanceRow[],
+): { requiredEntities: number; rowSlots: number[] } | null => {
+  if (rows.length === 0) {
+    return null;
+  }
 
-      return {
-        slot,
-        glMonths: Array.from(glMonths),
-        accountIds: Array.from(accountIds),
-        rowCount: slotRows.length,
-      } satisfies EntitySlotSummary;
-    },
+  const rowPrefixInfo = rows.map((row) => {
+    const accountId = (row.accountId ?? '').toString().trim();
+    if (!accountId) {
+      return null;
+    }
+
+    const parsed = extractAccountPrefix(accountId);
+    if (!parsed) {
+      return null;
+    }
+
+    return {
+      prefix: parsed.prefix,
+      suffix: parsed.suffix,
+      monthKey: normalizeMonthKey(row.glMonth),
+    } satisfies PrefixRowInfo;
+  });
+
+  const parsedRows = rowPrefixInfo.filter((entry): entry is PrefixRowInfo => entry !== null);
+  if (parsedRows.length === 0) {
+    return null;
+  }
+
+  const coverage = parsedRows.length / rows.length;
+  if (coverage < PREFIX_COVERAGE_THRESHOLD) {
+    return null;
+  }
+
+  const prefixes = new Set(parsedRows.map((entry) => entry.prefix));
+  if (prefixes.size < 2) {
+    return null;
+  }
+
+  const suffixMonthPrefixes = new Map<string, Set<string>>();
+  parsedRows.forEach((entry) => {
+    const suffixKey = entry.suffix.toLowerCase();
+    const key = `${entry.monthKey}__${suffixKey}`;
+    const set = suffixMonthPrefixes.get(key) ?? new Set<string>();
+    set.add(entry.prefix);
+    suffixMonthPrefixes.set(key, set);
+  });
+
+  const maxPrefixesPerKey = Math.max(
+    ...Array.from(suffixMonthPrefixes.values()).map((set) => set.size),
+  );
+  if (maxPrefixesPerKey < 2) {
+    return null;
+  }
+
+  const orderedPrefixes = Array.from(prefixes).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
+  const prefixToSlot = new Map<string, number>(
+    orderedPrefixes.map((prefix, index) => [prefix, index + 1]),
   );
 
-  return { requiredEntities, rowSlots, slotSummaries };
+  const rowSlots = rowPrefixInfo.map((entry) =>
+    entry ? prefixToSlot.get(entry.prefix) ?? 1 : 1,
+  );
+
+  return { requiredEntities: orderedPrefixes.length, rowSlots };
+};
+
+const inferEntitySlotsFromRows = (
+  rows: TrialBalanceRow[],
+): {
+  requiredEntities: number;
+  rowSlots: number[];
+  slotSummaries: EntitySlotSummary[];
+} => {
+  if (rows.length === 0) {
+    return { requiredEntities: 0, rowSlots: [], slotSummaries: [] };
+  }
+
+  const duplicateResult = inferEntitySlotsFromDuplicateAccounts(rows);
+  const prefixResult = inferEntitySlotsFromAccountPrefixes(rows);
+  const resolved = prefixResult ?? duplicateResult;
+
+  return {
+    requiredEntities: resolved.requiredEntities,
+    rowSlots: resolved.rowSlots,
+    slotSummaries: buildSlotSummaries(rows, resolved.rowSlots, resolved.requiredEntities),
+  };
 };
 
 const ensureAssignmentCount = (
@@ -220,6 +352,18 @@ const normalizeEntityLabel = (entity: ClientEntity | null): string => {
   return entity.displayName ?? entity.name;
 };
 
+const formatDetectedAccountSummary = (accountIds?: string[]): string => {
+  if (!accountIds || accountIds.length === 0) {
+    return 'Multiple accounts';
+  }
+
+  const visibleAccounts = accountIds.slice(0, MAX_DETECTED_ACCOUNTS);
+  const hasMoreAccounts = accountIds.length > visibleAccounts.length;
+  const summary = visibleAccounts.join(', ');
+
+  return hasMoreAccounts ? `${summary}, ...` : summary;
+};
+
 const filterRowsByGlMonth = (
   rows: TrialBalanceRow[],
   glMonth: string,
@@ -248,6 +392,14 @@ const normalizeEntityValue = (value: unknown): string => {
     return normalized.length > 0 ? normalized : '';
   }
   return '';
+};
+
+const normalizeEntityMatchKey = (value?: string | null): string => {
+  const slug = slugify(value ?? '');
+  if (slug) {
+    return slug;
+  }
+  return (value ?? '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
 };
 
 const extractEntitiesFromRows = (rows: TrialBalanceRow[]): DetectedEntityOption[] => {
@@ -307,6 +459,100 @@ const extractEntitiesFromRows = (rows: TrialBalanceRow[]): DetectedEntityOption[
       const bLabel = b.displayName ?? b.name ?? b.id;
       return aLabel.localeCompare(bLabel, undefined, { sensitivity: 'base' });
     });
+};
+
+const buildEntitySlotsFromColumn = (
+  rows: TrialBalanceRow[],
+  detectedEntities: DetectedEntityOption[],
+): { requiredEntities: number; rowSlots: number[]; slotSummaries: EntitySlotSummary[] } | null => {
+  if (detectedEntities.length === 0) {
+    return null;
+  }
+
+  const slotLookup = new Map<string, number>();
+  detectedEntities.forEach((entity, index) => {
+    const slot = index + 1;
+    const candidates = [entity.id, entity.name, entity.displayName, ...(entity.aliases ?? [])];
+    candidates.forEach((candidate) => {
+      const key = normalizeEntityMatchKey(candidate);
+      if (key && !slotLookup.has(key)) {
+        slotLookup.set(key, slot);
+      }
+    });
+  });
+
+  const rowSlots = rows.map((row) => {
+    const rawValue =
+      normalizeEntityValue(row.entityId) ||
+      normalizeEntityValue(row.entityName) ||
+      normalizeEntityValue(row.entity);
+    const key = normalizeEntityMatchKey(rawValue);
+    return key ? slotLookup.get(key) ?? 1 : 1;
+  });
+
+  return {
+    requiredEntities: detectedEntities.length,
+    rowSlots,
+    slotSummaries: buildSlotSummaries(rows, rowSlots, detectedEntities.length),
+  };
+};
+
+const buildEntityMatchLookup = (entities: ClientEntity[]): Map<string, ClientEntity> => {
+  const lookup = new Map<string, ClientEntity>();
+  entities.forEach((entity) => {
+    const variants = new Set([
+      entity.id,
+      entity.name,
+      entity.displayName,
+      entity.entityName,
+      ...(entity.aliases ?? []),
+    ]);
+    variants.forEach((variant) => {
+      const key = normalizeEntityMatchKey(variant);
+      if (key && !lookup.has(key)) {
+        lookup.set(key, entity);
+      }
+    });
+  });
+  return lookup;
+};
+
+const buildAssignmentsFromDetectedEntities = (
+  detectedEntities: DetectedEntityOption[],
+  availableEntities: ClientEntity[],
+): EntityAssignment[] => {
+  const matchLookup = buildEntityMatchLookup(availableEntities);
+
+  return detectedEntities.map((entity, index) => {
+    const slot = index + 1;
+    const candidates = [entity.id, entity.name, entity.displayName, ...(entity.aliases ?? [])];
+    const matched = candidates.reduce<ClientEntity | null>((found, candidate) => {
+      if (found) {
+        return found;
+      }
+      const key = normalizeEntityMatchKey(candidate);
+      return key ? matchLookup.get(key) ?? null : null;
+    }, null);
+
+    if (matched) {
+      return {
+        slot,
+        entityId: matched.id,
+        name: normalizeEntityLabel(matched),
+        isCustom: false,
+      };
+    }
+
+    const fallbackName = entity.displayName ?? entity.name ?? entity.id;
+    const fallbackId = entity.id || slugify(fallbackName) || `custom-entity-${slot}`;
+
+    return {
+      slot,
+      entityId: fallbackId,
+      name: fallbackName,
+      isCustom: true,
+    };
+  });
 };
 
 interface ImportFormProps {
@@ -420,6 +666,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     () => (headerMap?.['Entity'] ? extractEntitiesFromRows(combinedRows) : []),
     [combinedRows, headerMap],
   );
+  const detectedEntityCount = detectedEntityOptions.length;
+  const hasEntityColumnValues = Boolean(headerMap?.['Entity']) && detectedEntityCount > 0;
 
   const availableEntityOptions = useMemo(() => {
     const merged = new Map<string, { entity: ClientEntity; detectedCount: number }>();
@@ -472,6 +720,8 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
     () => ensureAssignmentCount(requiredEntityCount, entityAssignments),
     [entityAssignments, requiredEntityCount],
   );
+  const allowDuplicateAssignments =
+    hasEntityColumnValues && requiredEntityCount > detectedEntityCount;
 
   const assignedEntities = useMemo(() => {
     const seen = new Set<string>();
@@ -514,9 +764,13 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
       return false;
     }
 
+    if (allowDuplicateAssignments) {
+      return true;
+    }
+
     const uniqueIds = new Set(completedAssignments.map((assignment) => assignment.entityId.trim()));
     return uniqueIds.size === requiredEntityCount;
-  }, [requiredEntityCount, resolvedAssignments]);
+  }, [allowDuplicateAssignments, requiredEntityCount, resolvedAssignments]);
 
   const rowsWithEntityAssignments = useMemo(() => {
     if (combinedRows.length === 0) {
@@ -535,7 +789,9 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [combinedRows, resolvedAssignments, rowEntitySlots]);
 
   const entityAssignmentNeedsCustom =
-    requiredEntityCount > 0 && availableEntityOptions.length < requiredEntityCount;
+    !allowDuplicateAssignments &&
+    requiredEntityCount > 0 &&
+    availableEntityOptions.length < requiredEntityCount;
 
   useEffect(() => {
     if (clientId) {
@@ -577,19 +833,31 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [clientId, toHeaderMappingRecord]);
 
   useEffect(() => {
-    const { requiredEntities, rowSlots, slotSummaries } = inferEntitySlotsFromRows(
-      combinedRows,
-    );
-    const normalizedRequired = combinedRows.length > 0 ? Math.max(requiredEntities, 1) : 0;
-
-    setRowEntitySlots(rowSlots);
-    setEntitySlotSummaries(slotSummaries);
-    setRequiredEntityCount(normalizedRequired);
-
     if (combinedRows.length === 0) {
+      setRowEntitySlots([]);
+      setEntitySlotSummaries([]);
+      setRequiredEntityCount(0);
       setEntityAssignments([]);
+      return;
     }
-  }, [combinedRows]);
+
+    const inferred = inferEntitySlotsFromRows(combinedRows);
+    const normalizedRequired = Math.max(inferred.requiredEntities, 1);
+
+    const columnGrouping = hasEntityColumnValues
+      ? buildEntitySlotsFromColumn(combinedRows, detectedEntityOptions)
+      : null;
+
+    if (columnGrouping && normalizedRequired <= detectedEntityCount) {
+      setRowEntitySlots(columnGrouping.rowSlots);
+      setEntitySlotSummaries(columnGrouping.slotSummaries);
+      setRequiredEntityCount(columnGrouping.requiredEntities);
+    } else {
+      setRowEntitySlots(inferred.rowSlots);
+      setEntitySlotSummaries(inferred.slotSummaries);
+      setRequiredEntityCount(normalizedRequired);
+    }
+  }, [combinedRows, detectedEntityCount, detectedEntityOptions, hasEntityColumnValues]);
 
   useEffect(() => {
     if (requiredEntityCount === 0) {
@@ -601,7 +869,15 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
 
     const nextAssignments = hasManualEntitySelection
       ? ensureAssignmentCount(requiredEntityCount, entityAssignments)
-      : prepareEntityAssignments(requiredEntityCount, availableEntityOptions, entityAssignments);
+      : hasEntityColumnValues
+        ? ensureAssignmentCount(
+            requiredEntityCount,
+            buildAssignmentsFromDetectedEntities(
+              detectedEntityOptions,
+              clientEntityOptions,
+            ),
+          )
+        : prepareEntityAssignments(requiredEntityCount, availableEntityOptions, entityAssignments);
 
     const hasChanged =
       nextAssignments.length !== entityAssignments.length ||
@@ -622,13 +898,17 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [
     entityAssignments,
     availableEntityOptions,
+    clientEntityOptions,
+    detectedEntityOptions,
     hasManualEntitySelection,
+    hasEntityColumnValues,
     requiredEntityCount,
   ]);
 
   useEffect(() => {
     if (
       hasManualEntitySelection ||
+      hasEntityColumnValues ||
       availableEntityOptions.length === 0 ||
       uploads.length === 0 ||
       requiredEntityCount === 0
@@ -676,6 +956,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
   }, [
     combinedRows,
     availableEntityOptions,
+    hasEntityColumnValues,
     hasManualEntitySelection,
     requiredEntityCount,
     selectedFile?.name,
@@ -900,7 +1181,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
               ? descriptionValue.toString().trim()
               : '';
 
-          if (!accountId || !description) {
+          if (!accountId || !description || shouldSkipAccountId(accountId)) {
             return null;
           }
 
@@ -1149,8 +1430,7 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Entity assignment</h3>
                   <p className="text-sm text-slate-600 dark:text-slate-300">
-                    Duplicate account IDs were found within the same GL month. Assign{' '}
-                    {requiredEntityCount} entity
+                    Account IDs indicate {requiredEntityCount} entity
                     {requiredEntityCount > 1 ? ' groups' : ' group'} before moving on to mapping.
                   </p>
                 </div>
@@ -1170,16 +1450,18 @@ export default function ImportForm({ onImport, isImporting }: ImportFormProps) {
                 {resolvedAssignments.map((assignment) => {
                   const summary = entitySlotSummaries.find((slot) => slot.slot === assignment.slot);
                   const glMonthSummary = summary?.glMonths.join(', ') || 'Unspecified month';
-                  const accountSummary = summary?.accountIds.join(', ') || 'Multiple accounts';
-                  const usedEntityIds = new Set(
-                    resolvedAssignments
-                      .filter((other) => other.slot !== assignment.slot)
-                      .map((other) => other.entityId.trim())
-                      .filter(Boolean),
-                  );
-                  const selectableEntities = availableEntityOptions.filter(
-                    (entity) => !usedEntityIds.has(entity.id),
-                  );
+                  const accountSummary = formatDetectedAccountSummary(summary?.accountIds);
+                  const usedEntityIds = allowDuplicateAssignments
+                    ? new Set<string>()
+                    : new Set(
+                        resolvedAssignments
+                          .filter((other) => other.slot !== assignment.slot)
+                          .map((other) => other.entityId.trim())
+                          .filter(Boolean),
+                      );
+                  const selectableEntities = allowDuplicateAssignments
+                    ? availableEntityOptions
+                    : availableEntityOptions.filter((entity) => !usedEntityIds.has(entity.id));
 
                   return (
                     <div

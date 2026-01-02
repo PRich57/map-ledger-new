@@ -94,6 +94,23 @@ describe('entity slot inference', () => {
     expect(result.rowSlots).toEqual([1, 2, 1, 2, 3]);
     expect(result.slotSummaries.find((summary) => summary.slot === 3)?.glMonths).toContain('2024-02-01');
   });
+
+  it('detects entity slots from account id prefixes with shared base accounts', () => {
+    const rows: TrialBalanceRow[] = [
+      { accountId: '001-4000', description: 'Jan A', netChange: 10, entity: '', glMonth: '2024-01-01' },
+      { accountId: '002-4000', description: 'Jan B', netChange: 20, entity: '', glMonth: '2024-01-01' },
+      { accountId: '001-5000', description: 'Jan C', netChange: 30, entity: '', glMonth: '2024-01-01' },
+      { accountId: '002-5000', description: 'Jan D', netChange: 40, entity: '', glMonth: '2024-01-01' },
+    ];
+
+    const result = inferEntitySlotsFromRows(rows);
+
+    expect(result.requiredEntities).toBe(2);
+    expect(result.rowSlots).toEqual([1, 2, 1, 2]);
+    expect(result.slotSummaries.find((summary) => summary.slot === 2)?.accountIds).toEqual(
+      expect.arrayContaining(['002-4000', '002-5000']),
+    );
+  });
 });
 
 describe('extractEntitiesFromRows', () => {

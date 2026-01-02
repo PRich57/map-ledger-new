@@ -1,17 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FileSpreadsheet,
   CheckCircle2,
   XCircle,
+  Clock,
   Search,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  ArrowRight,
-  RotateCcw,
 } from 'lucide-react';
-import { Import } from '../../types';
+import { Import, ImportEntity } from '../../types';
 import { formatPeriodLabel, parsePeriodString } from '../../utils/period';
+import { useClientEntityStore } from '../../store/clientEntityStore';
 
 interface ImportHistoryProps {
   imports: Import[];
@@ -21,7 +21,6 @@ interface ImportHistoryProps {
   total: number;
   onPageChange: (page: number) => void;
   onDelete?: (importId: string) => Promise<void>;
-  onStartMapping?: (importItem: Import, mode: 'resume' | 'restart') => void;
 }
 
 type SortField = 'fileName' | 'clientId' | 'period' | 'status' | 'importedBy' | 'timestamp';
@@ -31,7 +30,7 @@ type SortDirection = 'asc' | 'desc';
 const sortableColumns: Record<SortField, string> = {
   fileName: 'File Details',
   clientId: 'Client',
-  period: 'Period',
+  period: 'Period Range',
   status: 'Status',
   importedBy: 'Imported By',
   timestamp: 'Uploaded At',
@@ -77,7 +76,6 @@ export default function ImportHistory({
   total,
   onPageChange,
   onDelete,
-  onStartMapping,
 }: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('timestamp');
@@ -85,8 +83,49 @@ export default function ImportHistory({
   const [previewImport, setPreviewImport] = useState<Import | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [workflowImport, setWorkflowImport] = useState<Import | null>(null);
-  const columnCount = sortableFields.length + 2;
+  const entitiesByClient = useClientEntityStore((state) => state.entitiesByClient);
+  const fetchClientEntities = useClientEntityStore((state) => state.fetchForClient);
+  const showStatusLabel = useMemo(() => {
+    if (imports.length === 0) {
+      return false;
+    }
+    const uniqueStatuses = new Set(imports.map((entry) => entry.status));
+    return uniqueStatuses.size > 1;
+  }, [imports]);
+  const previewEntityNameLookup = useMemo(() => {
+    if (!previewImport?.clientId) {
+      return new Map<string, string>();
+    }
+    const entities = entitiesByClient[previewImport.clientId] ?? [];
+    const lookup = new Map<string, string>();
+    entities.forEach((entity) => {
+      lookup.set(
+        entity.id,
+        entity.displayName ?? entity.name ?? entity.entityName ?? entity.id
+      );
+    });
+    return lookup;
+  }, [entitiesByClient, previewImport?.clientId]);
+  const resolveEntityLabel = (entity: ImportEntity): string => {
+    const fromClient = entity.entityId ? previewEntityNameLookup.get(entity.entityId) : undefined;
+    return (
+      fromClient ??
+      entity.displayName ??
+      entity.entityName ??
+      entity.entityId ??
+      'Unknown entity'
+    );
+  };
+
+  useEffect(() => {
+    if (!previewImport?.clientId) {
+      return;
+    }
+
+    void fetchClientEntities(previewImport.clientId);
+  }, [fetchClientEntities, previewImport?.clientId]);
+
+  const columnCount = sortableFields.length + 1;
 
   const filteredImports = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -117,7 +156,7 @@ export default function ImportHistory({
           case 'clientId':
             return (entry.clientName ?? entry.clientId).toLowerCase();
           case 'status':
-            return entry.status;
+            return showStatusLabel ? entry.status : entry.rowCount ?? 0;
           case 'importedBy':
             return (entry.importedBy ?? '').toLowerCase();
           case 'period': {
@@ -152,7 +191,8 @@ export default function ImportHistory({
     });
 
     return sorted;
-  }, [imports, searchTerm, sortDirection, sortField]);
+  }, [imports, searchTerm, sortDirection, sortField, showStatusLabel]);
+
 
   const handleSort = (field: SortField) => {
     setSortField((currentField) => {
@@ -178,6 +218,42 @@ export default function ImportHistory({
     ) : (
       <ArrowDown className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
     );
+  };
+
+  const getStatusConfig = (status: Import['status']) => {
+    switch (status) {
+      case 'completed':
+        return {
+          label: 'Completed',
+          icon: <CheckCircle2 className="mr-2 h-5 w-5 text-green-500" aria-hidden="true" />,
+        };
+      case 'failed':
+        return {
+          label: 'Failed',
+          icon: <XCircle className="mr-2 h-5 w-5 text-red-500" aria-hidden="true" />,
+        };
+      case 'mapping':
+        return {
+          label: 'Mapping',
+          icon: <Clock className="mr-2 h-5 w-5 text-blue-500" aria-hidden="true" />,
+        };
+      case 'distribution':
+        return {
+          label: 'Distribution',
+          icon: <Clock className="mr-2 h-5 w-5 text-indigo-500" aria-hidden="true" />,
+        };
+      case 'review':
+        return {
+          label: 'Review',
+          icon: <Clock className="mr-2 h-5 w-5 text-amber-500" aria-hidden="true" />,
+        };
+      case 'uploaded':
+      default:
+        return {
+          label: 'Uploaded',
+          icon: <Clock className="mr-2 h-5 w-5 text-gray-500" aria-hidden="true" />,
+        };
+    }
   };
 
   const closePreview = () => setPreviewImport(null);
@@ -265,10 +341,14 @@ export default function ImportHistory({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full table-compact divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {sortableFields.map((field) => (
+              {sortableFields.map((field) => {
+                const columnLabel =
+                  field === 'status' && !showStatusLabel ? 'Rows' : sortableColumns[field];
+
+                return (
                 <th
                   key={field}
                   scope="col"
@@ -279,11 +359,12 @@ export default function ImportHistory({
                     onClick={() => handleSort(field)}
                     className="flex items-center gap-1 text-gray-600 transition-colors hover:text-blue-600"
                   >
-                    <span>{sortableColumns[field]}</span>
+                    <span>{columnLabel}</span>
                     {renderSortIcon(field)}
                   </button>
                 </th>
-              ))}
+                );
+              })}
               <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                 Actions
               </th>
@@ -333,23 +414,25 @@ export default function ImportHistory({
                       {formatPeriodLabel(importItem.period)}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      {importItem.status === 'completed' ? (
-                        <>
-                          <CheckCircle2 className="mr-2 h-5 w-5 text-green-500" aria-hidden="true" />
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {showStatusLabel ? (
+                        <div className="flex items-center">
+                          {getStatusConfig(importItem.status).icon}
                           <span className="text-sm text-gray-900">
-                            Completed ({importItem.rowCount ?? 0} rows)
+                            {getStatusConfig(importItem.status).label}
+                            {typeof importItem.rowCount === 'number'
+                              ? ` (${importItem.rowCount.toLocaleString()} rows)`
+                              : ''}
                           </span>
-                        </>
+                        </div>
                       ) : (
-                        <>
-                          <XCircle className="mr-2 h-5 w-5 text-red-500" aria-hidden="true" />
-                          <span className="text-sm text-gray-900">Failed</span>
-                        </>
+                        <span className="text-sm text-gray-900">
+                          {typeof importItem.rowCount === 'number'
+                            ? `${importItem.rowCount.toLocaleString()} rows`
+                            : 'N/A'}
+                        </span>
                       )}
-                    </div>
-                  </td>
+                    </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{importItem.importedBy || '—'}</div>
                   </td>
@@ -360,15 +443,6 @@ export default function ImportHistory({
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <div className="flex justify-end gap-3">
-                      {onStartMapping && (
-                        <button
-                          type="button"
-                          onClick={() => setWorkflowImport(importItem)}
-                          className="text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
-                        >
-                          Open
-                        </button>
-                      )}
                       <button
                         type="button"
                         onClick={() => setPreviewImport(importItem)}
@@ -435,12 +509,12 @@ export default function ImportHistory({
                   <p className="text-sm text-gray-900">{previewImport.importedBy || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase text-gray-500">Period</p>
+                  <p className="text-xs font-semibold uppercase text-gray-500">Period Range</p>
                   <p className="text-sm text-gray-900">{formatPeriodLabel(previewImport.period)}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold uppercase text-gray-500">Status</p>
-                  <p className="text-sm text-gray-900 capitalize">{previewImport.status}</p>
+                  <p className="text-sm text-gray-900">{getStatusConfig(previewImport.status).label}</p>
                 </div>
               </div>
 
@@ -470,7 +544,7 @@ export default function ImportHistory({
                         key={entity.entityId ?? entity.entityName}
                         className="flex justify-between"
                       >
-                        <span>{entity.displayName ?? entity.entityName}</span>
+                        <span>{resolveEntityLabel(entity)}</span>
                         <span className="text-gray-500">
                           {(entity.rowCount ?? 0).toLocaleString()} rows
                         </span>
@@ -479,67 +553,6 @@ export default function ImportHistory({
                   </ul>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {workflowImport && onStartMapping && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 px-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="workflow-start-title"
-        >
-          <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <div>
-                <h3 id="workflow-start-title" className="text-lg font-semibold text-gray-900">
-                  Continue mapping?
-                </h3>
-                <p className="text-sm text-gray-600">
-                  Resume your previous work or start fresh with automated suggestions.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setWorkflowImport(null)}
-                className="rounded-md px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-100"
-              >
-                Close
-              </button>
-            </div>
-            <div className="space-y-4 px-6 py-5">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">{workflowImport.fileName}</p>
-                <p className="text-sm text-gray-600">{formatPeriodLabel(workflowImport.period)}</p>
-              </div>
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onStartMapping(workflowImport, 'resume');
-                    setWorkflowImport(null);
-                  }}
-                  className="flex w-full items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-                  aria-label="Resume mapping workflow"
-                >
-                  <span>Resume</span>
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onStartMapping(workflowImport, 'restart');
-                    setWorkflowImport(null);
-                  }}
-                  className="flex w-full items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-                  aria-label="Restart mapping workflow"
-                >
-                  <span>Restart</span>
-                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </div>
             </div>
           </div>
         </div>

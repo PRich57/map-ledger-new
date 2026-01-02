@@ -327,7 +327,7 @@ export default function DistributionSplitRow({
 
       {operationsDraft.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+          <table className="min-w-full table-compact divide-y divide-slate-200 text-sm dark:divide-slate-700">
             <thead className="bg-white dark:bg-slate-900/60">
               <tr>
                 <th className="px-3 py-2 text-left font-medium text-slate-600 dark:text-slate-300">Target</th>

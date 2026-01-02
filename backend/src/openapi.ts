@@ -33,8 +33,14 @@ const openApiSpec = {
     '/coa-manager/industry/{industry}/cost-type/batch': {
       patch: { summary: 'Batch update cost types for COA records' }
     },
+    '/coa-manager/industry/{industry}/is-financial': {
+      patch: { summary: 'Update financial flag for a single COA record' }
+    },
+    '/coa-manager/industry/{industry}/is-financial/batch': {
+      patch: { summary: 'Batch update financial flags for COA records' }
+    },
     '/coa-manager/import': {
-      post: { summary: 'Import chart of accounts for an industry' }
+      post: { summary: 'Import chart of accounts for an industry (CSV or Excel)' }
     },
     '/user-clients': {
       get: { summary: 'List clients available to the current user' }
@@ -60,7 +66,7 @@ const openApiSpec = {
       put: { summary: 'Replace client header mappings for specific template headers' }
     },
     '/file-records': {
-      get: { summary: 'List ingested file records for a file upload' }
+      get: { summary: 'List ingested file records for a file upload or client aggregation' }
     },
     '/file-records/ingest': {
       post: { summary: 'Ingest mapped file records for a file upload' }

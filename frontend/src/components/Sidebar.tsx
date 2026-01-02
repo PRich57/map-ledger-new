@@ -72,7 +72,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
     {
       label: 'GL Mapping',
       icon: <BarChart3 className="h-5 w-5" />,
-      to: '/gl/mapping/demo',
+      to: '/gl/mapping/client',
       isActiveOverride: isMappingRoute,
     },
     {

@@ -6,6 +6,7 @@ export interface ClientHeaderMappingRecord {
   templateHeader: string;
   sourceHeader: string;
   mappingMethod: string;
+  fileUploadGuid?: string | null;
   insertedAt?: string;
   updatedAt?: string;
   updatedBy?: string | null;
@@ -15,12 +16,19 @@ export interface ClientHeaderMappingInput {
   templateHeader: string;
   sourceHeader?: string | null;
   mappingMethod?: string | null;
+  fileUploadGuid?: string | null;
   updatedBy?: string | null;
+}
+
+export interface UserDefinedHeaderMapping {
+  templateHeader: string;
+  sourceHeader: string;
 }
 
 const TABLE_NAME = 'ml.CLIENT_HEADER_MAPPING';
 const logPrefix = '[clientHeaderMappingRepository]';
 const shouldLog = process.env.NODE_ENV !== 'test';
+const USER_DEFINED_TEMPLATES = ['User Defined 1', 'User Defined 2', 'User Defined 3'];
 
 const logInfo = (...args: unknown[]) => {
   if (!shouldLog) {
@@ -43,6 +51,7 @@ type NormalizedMapping = {
   templateHeader: string;
   sourceHeader: string | null;
   mappingMethod: string | null;
+  fileUploadGuid: string | null;
   updatedBy: string | null;
 };
 
@@ -51,10 +60,11 @@ const normalizeMappings = (
 ): NormalizedMapping[] => {
   const unique = new Map<string, NormalizedMapping>();
 
-  mappings.forEach(({ templateHeader, sourceHeader, mappingMethod, updatedBy }) => {
+  mappings.forEach(({ templateHeader, sourceHeader, mappingMethod, fileUploadGuid, updatedBy }) => {
     const normalizedTemplate = normalizeHeader(templateHeader);
     const normalizedSource = normalizeHeader(sourceHeader ?? null);
     const normalizedMethod = normalizeHeader(mappingMethod ?? null);
+    const normalizedFileUploadGuid = normalizeHeader(fileUploadGuid ?? null);
     const normalizedUpdatedBy = normalizeHeader(updatedBy ?? null);
 
     if (!normalizedTemplate) {
@@ -65,6 +75,7 @@ const normalizeMappings = (
       templateHeader: normalizedTemplate,
       sourceHeader: normalizedSource,
       mappingMethod: normalizedMethod,
+      fileUploadGuid: normalizedFileUploadGuid,
       updatedBy: normalizedUpdatedBy,
     });
   });
@@ -78,6 +89,7 @@ const mapRowToRecord = (row: {
   template_header: string;
   source_header: string;
   mapping_method: string;
+  file_upload_guid?: string | null;
   inserted_dttm?: Date | string | null;
   updated_dttm?: Date | string | null;
   updated_by?: string | null;
@@ -87,6 +99,7 @@ const mapRowToRecord = (row: {
   templateHeader: row.template_header,
   sourceHeader: row.source_header,
   mappingMethod: row.mapping_method,
+  fileUploadGuid: row.file_upload_guid ?? null,
   insertedAt: row.inserted_dttm
     ? new Date(row.inserted_dttm).toISOString()
     : undefined,
@@ -107,6 +120,7 @@ export const listClientHeaderMappings = async (
     template_header: string;
     source_header: string;
     mapping_method: string;
+    file_upload_guid?: string | null;
     inserted_dttm?: Date | string | null;
     updated_dttm?: Date | string | null;
     updated_by?: string | null;
@@ -117,6 +131,7 @@ export const listClientHeaderMappings = async (
       TEMPLATE_HEADER AS template_header,
       SOURCE_HEADER AS source_header,
       MAPPING_METHOD AS mapping_method,
+      FILE_UPLOAD_GUID AS file_upload_guid,
       CASE
         WHEN COL_LENGTH('ml.CLIENT_HEADER_MAPPING', 'INSERTED_DTTM') IS NOT NULL THEN INSERTED_DTTM
         ELSE NULL
@@ -174,10 +189,13 @@ export const upsertClientHeaderMappings = async (
       (existing && existing.sourceHeader === mapping.sourceHeader
         ? existing.mappingMethod
         : 'manual');
+    const resolvedFileUploadGuid =
+      mapping.fileUploadGuid ?? existing?.fileUploadGuid ?? null;
 
     return {
       ...mapping,
       mappingMethod: resolvedMethod ?? 'manual',
+      fileUploadGuid: resolvedFileUploadGuid,
     };
   });
 
@@ -190,26 +208,30 @@ export const upsertClientHeaderMappings = async (
       const templateKey = `templateHeader${index}`;
       const sourceKey = `sourceHeader${index}`;
       const methodKey = `mappingMethod${index}`;
+      const fileKey = `fileUploadGuid${index}`;
       const updatedByKey = `updatedBy${index}`;
       params[templateKey] = mapping.templateHeader;
       params[sourceKey] = mapping.sourceHeader;
       params[methodKey] = mapping.mappingMethod;
+      params[fileKey] = mapping.fileUploadGuid;
       params[updatedByKey] = mapping.updatedBy;
-      return `(@clientId, @${templateKey}, @${sourceKey}, @${methodKey}, @${updatedByKey})`;
+      return `(@clientId, @${templateKey}, @${sourceKey}, @${methodKey}, @${fileKey}, @${updatedByKey})`;
     })
     .join(', ');
 
   await runQuery(
     `MERGE ${TABLE_NAME} AS target
-    USING (VALUES ${valuesClause}) AS source (CLIENT_ID, TEMPLATE_HEADER, SOURCE_HEADER, MAPPING_METHOD, UPDATED_BY)
+    USING (VALUES ${valuesClause}) AS source (CLIENT_ID, TEMPLATE_HEADER, SOURCE_HEADER, MAPPING_METHOD, FILE_UPLOAD_GUID, UPDATED_BY)
       ON target.CLIENT_ID = source.CLIENT_ID AND target.TEMPLATE_HEADER = source.TEMPLATE_HEADER
     WHEN MATCHED AND (
       ISNULL(target.SOURCE_HEADER, '') <> ISNULL(source.SOURCE_HEADER, '') OR
-      ISNULL(target.MAPPING_METHOD, '') <> ISNULL(source.MAPPING_METHOD, '')
+      ISNULL(target.MAPPING_METHOD, '') <> ISNULL(source.MAPPING_METHOD, '') OR
+      ISNULL(target.FILE_UPLOAD_GUID, '') <> ISNULL(source.FILE_UPLOAD_GUID, '')
     ) THEN
       UPDATE SET
         SOURCE_HEADER = source.SOURCE_HEADER,
         MAPPING_METHOD = source.MAPPING_METHOD,
+        FILE_UPLOAD_GUID = source.FILE_UPLOAD_GUID,
         UPDATED_BY = source.UPDATED_BY,
         UPDATED_DTTM = SYSUTCDATETIME()
     WHEN NOT MATCHED AND source.SOURCE_HEADER IS NOT NULL THEN
@@ -218,6 +240,7 @@ export const upsertClientHeaderMappings = async (
         TEMPLATE_HEADER,
         SOURCE_HEADER,
         MAPPING_METHOD,
+        FILE_UPLOAD_GUID,
         INSERTED_DTTM
       )
       VALUES (
@@ -225,6 +248,7 @@ export const upsertClientHeaderMappings = async (
         source.TEMPLATE_HEADER,
         source.SOURCE_HEADER,
         source.MAPPING_METHOD,
+        source.FILE_UPLOAD_GUID,
         SYSUTCDATETIME()
       );`,
     params
@@ -253,6 +277,47 @@ export const replaceClientHeaderMappings = async (
     normalizedMappings: normalizedMappings.length,
   });
   return upsertClientHeaderMappings(normalizedClientId, normalizedMappings);
+};
+
+export const listUserDefinedHeaderMappingsForFileUpload = async (
+  fileUploadGuid: string,
+): Promise<UserDefinedHeaderMapping[]> => {
+  const normalizedFileUploadGuid = normalizeHeader(fileUploadGuid);
+  if (!normalizedFileUploadGuid) {
+    return [];
+  }
+
+  const params: Record<string, unknown> = {
+    fileUploadGuid: normalizedFileUploadGuid,
+  };
+
+  USER_DEFINED_TEMPLATES.forEach((header, index) => {
+    params[`templateHeader${index}`] = header;
+  });
+
+  const templateParams = USER_DEFINED_TEMPLATES.map(
+    (_header, index) => `@templateHeader${index}`,
+  ).join(', ');
+
+  const result = await runQuery<{
+    template_header: string;
+    source_header: string;
+  }>(
+    `SELECT
+      TEMPLATE_HEADER as template_header,
+      SOURCE_HEADER as source_header
+    FROM ${TABLE_NAME}
+    WHERE FILE_UPLOAD_GUID = @fileUploadGuid
+      AND TEMPLATE_HEADER IN (${templateParams})
+      AND LTRIM(RTRIM(ISNULL(SOURCE_HEADER, ''))) <> ''
+    ORDER BY TEMPLATE_HEADER ASC`,
+    params,
+  );
+
+  return (result.recordset ?? []).map((row) => ({
+    templateHeader: row.template_header,
+    sourceHeader: row.source_header,
+  }));
 };
 
 export default listClientHeaderMappings;

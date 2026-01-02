@@ -17,6 +17,17 @@ import { getBasisValue, getGroupMembersWithValues } from '../../utils/dynamicAll
 const formatCurrency = (value: number): string =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 
+const normalizeAccountId = (value?: string | null): string => (value ?? '').trim();
+
+const compareAccountIds = (left: string, right: string): number =>
+  normalizeAccountId(left).localeCompare(normalizeAccountId(right), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+
+const sortByAccountId = <T extends { id: string },>(options: T[]): T[] =>
+  [...options].sort((a, b) => compareAccountIds(a.id, b.id));
+
 export type RatioAllocationTargetCatalogOption = {
   id: string;
   label: string;
@@ -24,6 +35,8 @@ export type RatioAllocationTargetCatalogOption = {
 
 interface RatioAllocationBuilderProps {
   initialSourceAccountId?: string | null;
+  applyToSourceAccountIds?: string[];
+  onPresetApplied?: (presetId: string, sourceAccountIds: string[]) => void;
   targetCatalog?: RatioAllocationTargetCatalogOption[];
   resolveCanonicalTargetId?: (targetId?: string | null) => string | null;
   targetLabel?: string;
@@ -34,6 +47,8 @@ interface RatioAllocationBuilderProps {
 
 const RatioAllocationBuilder = ({
   initialSourceAccountId,
+  applyToSourceAccountIds,
+  onPresetApplied,
   targetCatalog,
   resolveCanonicalTargetId,
   targetLabel = 'Target account',
@@ -56,6 +71,7 @@ const RatioAllocationBuilder = ({
     getPresetAvailableDynamicAccounts,
     toggleAllocationPresetTargets,
     toggleTargetExclusion,
+    setActivePresetForSource,
   } = useRatioAllocationStore();
 
   const resolvedPresetContext = presetContext ?? DEFAULT_PRESET_CONTEXT;
@@ -69,9 +85,12 @@ const RatioAllocationBuilder = ({
 
   const [selectedAllocationId, setSelectedAllocationId] = useState<string | null>(null);
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [isNewPresetNameEdited, setIsNewPresetNameEdited] = useState(false);
   const [newPresetRows, setNewPresetRows] = useState<DynamicAllocationPresetRow[]>([]);
   const { options: chartOfAccountOptions } = useChartOfAccountsStore();
 
+  const newPresetNameId = useId();
   const newPresetBasisHeaderId = useId();
   const newPresetTargetHeaderId = useId();
   const newPresetAmountHeaderId = useId();
@@ -114,7 +133,7 @@ const RatioAllocationBuilder = ({
         seen.set(id, { id, label });
       }
     });
-    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return sortByAccountId(Array.from(seen.values()));
   }, [defaultTargetCatalog, targetCatalog]);
 
   const selectedAllocation = useMemo(() => {
@@ -130,9 +149,24 @@ const RatioAllocationBuilder = ({
     return allocations[0] ?? null;
   }, [allocations, initialSourceAccountId, selectedAllocationId]);
 
-  const { newPresetDynamicUsage, newPresetCanonicalUsage } = useMemo(() => {
+  const defaultPresetName = useMemo(() => {
+    return (
+      selectedAllocation?.sourceAccount.name?.trim() ||
+      selectedAllocation?.sourceAccount.description?.trim() ||
+      selectedAllocation?.sourceAccount.number?.trim() ||
+      selectedAllocation?.sourceAccount.id?.trim() ||
+      'Dynamic preset'
+    );
+  }, [selectedAllocation]);
+
+  const {
+    newPresetDynamicUsage,
+    newPresetBasisCanonicalUsage,
+    newPresetTargetCanonicalUsage,
+  } = useMemo(() => {
     const dynamicUsage = new Map<string, Set<string>>();
-    const canonicalUsage = new Map<string, Set<string>>();
+    const basisCanonicalUsage = new Map<string, Set<string>>();
+    const targetCanonicalUsage = new Map<string, Set<string>>();
 
     const addUsage = (map: Map<string, Set<string>>, id: string | null, key: string) => {
       if (!id) {
@@ -151,13 +185,17 @@ const RatioAllocationBuilder = ({
         addUsage(dynamicUsage, row.dynamicAccountId, basisKey);
         const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
         const canonicalId = canonicalTargetResolver(basisAccount?.mappedTargetId);
-        addUsage(canonicalUsage, canonicalId, basisKey);
+        addUsage(basisCanonicalUsage, canonicalId, basisKey);
       }
       const targetCanonicalId = canonicalTargetResolver(row.targetAccountId);
-      addUsage(canonicalUsage, targetCanonicalId, targetKey);
+      addUsage(targetCanonicalUsage, targetCanonicalId, targetKey);
     });
 
-    return { newPresetDynamicUsage: dynamicUsage, newPresetCanonicalUsage: canonicalUsage };
+    return {
+      newPresetDynamicUsage: dynamicUsage,
+      newPresetBasisCanonicalUsage: basisCanonicalUsage,
+      newPresetTargetCanonicalUsage: targetCanonicalUsage,
+    };
   }, [basisAccounts, canonicalTargetResolver, newPresetRows]);
 
   const computeNewPresetDynamicOptions = useCallback(
@@ -165,8 +203,7 @@ const RatioAllocationBuilder = ({
       const dropdownKey = typeof rowIndex === 'number' ? `basis-${rowIndex}` : null;
       // Get the source account ID to exclude from basis options (prevents circular reference)
       const sourceAccountId = selectedAllocation?.sourceAccount.id;
-      return basisAccounts
-        .filter(account => {
+      const availableAccounts = basisAccounts.filter(account => {
           // Exclude the source account to prevent circular logic
           if (sourceAccountId && account.id === sourceAccountId) {
             return false;
@@ -177,54 +214,63 @@ const RatioAllocationBuilder = ({
               return false;
             }
           }
-          const canonicalId = resolveTargetAccountId(account.mappedTargetId);
+          const canonicalId = canonicalTargetResolver(account.mappedTargetId);
           if (!canonicalId) {
             return true;
           }
-          const canonicalUsers = newPresetCanonicalUsage.get(canonicalId);
-          if (!canonicalUsers || canonicalUsers.size === 0) {
+          const targetUsers = newPresetTargetCanonicalUsage.get(canonicalId);
+          if (!targetUsers || targetUsers.size === 0) {
             return true;
           }
           return (
             dropdownKey !== null &&
-            canonicalUsers.size === 1 &&
-            canonicalUsers.has(dropdownKey)
+            targetUsers.size === 1 &&
+            targetUsers.has(dropdownKey)
           );
-        })
+        });
+
+      return sortByAccountId(availableAccounts)
         .map(account => ({ id: account.id, value: account.id, label: account.name }));
     },
-    [basisAccounts, newPresetDynamicUsage, newPresetCanonicalUsage, selectedAllocation?.sourceAccount.id],
+    [
+      basisAccounts,
+      canonicalTargetResolver,
+      newPresetDynamicUsage,
+      newPresetTargetCanonicalUsage,
+      selectedAllocation?.sourceAccount.id,
+    ],
   );
 
   const computeNewPresetTargetOptions = useCallback(
-    (rowIndex?: number) => {
-      const dropdownKey = typeof rowIndex === 'number' ? `target-${rowIndex}` : null;
+    () => {
       return preparedTargetCatalog
         .filter(option => {
           const canonicalId = canonicalTargetResolver(option.id);
-          const canonicalUsers = canonicalId ? newPresetCanonicalUsage.get(canonicalId) : undefined;
-        if (!canonicalUsers || canonicalUsers.size === 0) {
-          return true;
-        }
-        return (
-          dropdownKey !== null &&
-          canonicalUsers.size === 1 &&
-          canonicalUsers.has(dropdownKey)
-        );
-      })
+          const basisUsers = canonicalId
+            ? newPresetBasisCanonicalUsage.get(canonicalId)
+            : undefined;
+          if (!basisUsers || basisUsers.size === 0) {
+            return true;
+          }
+          return false;
+        })
         .map(option => ({ id: option.id, value: option.id, label: option.label }));
     },
-    [canonicalTargetResolver, newPresetCanonicalUsage, preparedTargetCatalog],
+    [canonicalTargetResolver, newPresetBasisCanonicalUsage, preparedTargetCatalog],
   );
 
   const getPresetTargetOptions = useCallback(
-      (presetId: string, rowIndex?: number) => {
-        const preset = contextPresets.find(item => item.id === presetId);
-        if (!preset) {
-          return preparedTargetCatalog.map(option => ({ id: option.id, value: option.id, label: option.label }));
-        }
+    (presetId: string) => {
+      const preset = contextPresets.find(item => item.id === presetId);
+      if (!preset) {
+        return preparedTargetCatalog.map(option => ({
+          id: option.id,
+          value: option.id,
+          label: option.label,
+        }));
+      }
 
-      const canonicalUsage = new Map<string, Set<string>>();
+      const basisCanonicalUsage = new Map<string, Set<string>>();
 
       const addUsage = (map: Map<string, Set<string>>, id: string | null, key: string) => {
         if (!id) {
@@ -238,17 +284,12 @@ const RatioAllocationBuilder = ({
 
       preset.rows.forEach((row, index) => {
         const basisKey = `basis-${index}`;
-        const targetKey = `target-${index}`;
         if (row.dynamicAccountId) {
           const basisAccount = basisAccounts.find(account => account.id === row.dynamicAccountId);
           const canonicalId = canonicalTargetResolver(basisAccount?.mappedTargetId);
-          addUsage(canonicalUsage, canonicalId, basisKey);
+          addUsage(basisCanonicalUsage, canonicalId, basisKey);
         }
-        const targetCanonicalId = canonicalTargetResolver(row.targetAccountId);
-        addUsage(canonicalUsage, targetCanonicalId, targetKey);
       });
-
-      const dropdownKey = typeof rowIndex === 'number' ? `target-${rowIndex}` : null;
 
       return preparedTargetCatalog
         .filter(option => {
@@ -256,15 +297,11 @@ const RatioAllocationBuilder = ({
           if (!canonicalId) {
             return true;
           }
-          const canonicalUsers = canonicalUsage.get(canonicalId);
-          if (!canonicalUsers || canonicalUsers.size === 0) {
+          const basisUsers = basisCanonicalUsage.get(canonicalId);
+          if (!basisUsers || basisUsers.size === 0) {
             return true;
           }
-          return (
-            dropdownKey !== null &&
-            canonicalUsers.size === 1 &&
-            canonicalUsers.has(dropdownKey)
-          );
+          return false;
         })
         .map(option => ({ id: option.id, value: option.id, label: option.label }));
     },
@@ -305,6 +342,21 @@ const RatioAllocationBuilder = ({
     initialSourceAccountId,
     selectedAllocationId,
   ]);
+
+  useEffect(() => {
+    if (!isCreatingPreset) {
+      if (newPresetName !== '') {
+        setNewPresetName('');
+      }
+      if (isNewPresetNameEdited) {
+        setIsNewPresetNameEdited(false);
+      }
+      return;
+    }
+    if (!isNewPresetNameEdited && newPresetName !== defaultPresetName) {
+      setNewPresetName(defaultPresetName);
+    }
+  }, [defaultPresetName, isCreatingPreset, isNewPresetNameEdited, newPresetName]);
 
   useEffect(() => {
     if (!isCreatingPreset) {
@@ -378,10 +430,10 @@ const RatioAllocationBuilder = ({
     (presetId: string, rowIndex?: number) => {
       const options = getPresetAvailableDynamicAccounts(presetId, rowIndex);
       const sourceAccountId = selectedAllocation?.sourceAccount.id;
-      if (!sourceAccountId) {
-        return options;
-      }
-      return options.filter(account => account.id !== sourceAccountId);
+      const filtered = sourceAccountId
+        ? options.filter(account => account.id !== sourceAccountId)
+        : options;
+      return sortByAccountId(filtered);
     },
     [getPresetAvailableDynamicAccounts, selectedAllocation?.sourceAccount.id],
   );
@@ -412,19 +464,28 @@ const RatioAllocationBuilder = ({
     if (sanitizedRows.length === 0 || sanitizedRows.length !== newPresetRows.length) {
       return;
     }
-    const presetName =
-      selectedAllocation?.sourceAccount.name?.trim() ||
-      selectedAllocation?.sourceAccount.description?.trim() ||
-      selectedAllocation?.sourceAccount.number?.trim() ||
-      selectedAllocation?.sourceAccount.id?.trim() ||
-      'Dynamic preset';
+    const presetName = newPresetName.trim() || defaultPresetName;
 
-    createPreset({
+    const shouldApplyToSelection = Boolean(
+      applyToSourceAccountIds && applyToSourceAccountIds.length > 0,
+    );
+    const newPresetId = createPreset({
       name: presetName,
       rows: sanitizedRows,
-      applyToAllocationId: selectedAllocation?.id,
+      applyToAllocationId: shouldApplyToSelection ? null : selectedAllocation?.id,
       context: presetContext,
     });
+    if (shouldApplyToSelection && newPresetId) {
+      const uniqueIds = Array.from(
+        new Set(applyToSourceAccountIds?.filter(Boolean)),
+      );
+      uniqueIds.forEach(accountId => {
+        setActivePresetForSource(accountId, newPresetId);
+      });
+      if (uniqueIds.length > 0) {
+        onPresetApplied?.(newPresetId, uniqueIds);
+      }
+    }
     setIsCreatingPreset(false);
     setNewPresetRows([]);
   };
@@ -462,8 +523,26 @@ const RatioAllocationBuilder = ({
 
           {isCreatingPreset && (
             <form onSubmit={handleCreatePreset} className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex flex-col gap-2">
+                <label htmlFor={newPresetNameId} className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Preset name
+                </label>
+                <input
+                  id={newPresetNameId}
+                  type="text"
+                  value={newPresetName}
+                  onChange={event => {
+                    setNewPresetName(event.target.value);
+                    if (!isNewPresetNameEdited) {
+                      setIsNewPresetNameEdited(true);
+                    }
+                  }}
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder={defaultPresetName}
+                />
+              </div>
               <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-separate border-spacing-y-2">
+                <table className="min-w-full table-compact border-separate border-spacing-y-2">
                   <thead className="bg-slate-100 dark:bg-slate-800/40">
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                       <th id={newPresetBasisHeaderId} scope="col" className="px-3 py-2">
@@ -483,7 +562,7 @@ const RatioAllocationBuilder = ({
                   <tbody>
                     {newPresetRows.map((row, index) => {
                       const dynamicOptions = computeNewPresetDynamicOptions(index);
-                      const targetOptions = computeNewPresetTargetOptions(index);
+                      const targetOptions = computeNewPresetTargetOptions();
                       const basisSelectId = `new-preset-row-${index}-basis`;
                       const targetSelectId = `new-preset-row-${index}-target`;
 
@@ -674,7 +753,7 @@ const RatioAllocationBuilder = ({
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="overflow-visible rounded-lg border border-slate-200 dark:border-slate-700">
-                      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                      <table className="min-w-full table-compact divide-y divide-slate-200 dark:divide-slate-700">
                         <thead className="bg-slate-50 dark:bg-slate-900">
                           <tr>
                             <th
@@ -714,7 +793,7 @@ const RatioAllocationBuilder = ({
                             preset.rows.map((row, index) => {
                               const basisValue = formatCurrency(resolveBasisValue(row.dynamicAccountId));
                               const dynamicOptions = getFilteredPresetDynamicAccounts(preset.id, index);
-                              const targetOptions = getPresetTargetOptions(preset.id, index);
+                              const targetOptions = getPresetTargetOptions(preset.id);
 
                               return (
                                 <tr key={`${row.dynamicAccountId}-${row.targetAccountId}-${index}`}>

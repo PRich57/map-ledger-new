@@ -3,7 +3,7 @@ import {
   getAccountExcludedAmount,
   selectAccounts,
   selectActiveEntityId,
-  selectStandardScoaSummaries,
+  selectDistributionTargets,
   selectSummaryMetrics,
   useMappingStore,
 } from '../../store/mappingStore';
@@ -15,7 +15,7 @@ import { formatCurrencyAmount } from '../../utils/currency';
 const SummaryCards = () => {
   const accounts = useMappingStore(selectAccounts);
   const { totalAccounts, mappedAccounts, grossTotal, excludedTotal } = useMappingStore(selectSummaryMetrics);
-  const standardScoaSummaries = useMappingStore(selectStandardScoaSummaries);
+  const distributionTargets = useMappingStore(selectDistributionTargets);
   const activeEntityId = useMappingStore(selectActiveEntityId);
   const { allocations, results, selectedPeriod, basisAccounts, groups } = useRatioAllocationStore(state => ({
     allocations: state.allocations,
@@ -37,8 +37,8 @@ const SummaryCards = () => {
   }));
 
   const scoaSummarySignature = useMemo(
-    () => standardScoaSummaries.map(summary => `${summary.id}:${summary.mappedAmount}`).join('|'),
-    [standardScoaSummaries],
+    () => distributionTargets.map(summary => `${summary.id}:${summary.mappedAmount}`).join('|'),
+    [distributionTargets],
   );
   const previousScoaSignature = useRef<string | null>(null);
 
@@ -47,8 +47,8 @@ const SummaryCards = () => {
       return;
     }
     previousScoaSignature.current = scoaSummarySignature;
-    syncRowsFromStandardTargets(standardScoaSummaries);
-  }, [scoaSummarySignature, standardScoaSummaries, syncRowsFromStandardTargets]);
+    syncRowsFromStandardTargets(distributionTargets);
+  }, [distributionTargets, scoaSummarySignature, syncRowsFromStandardTargets]);
 
   useEffect(() => {
     if (!activeEntityId) {

@@ -41,6 +41,13 @@ describe('extractDateFromText', () => {
     });
   });
 
+  describe('MM.YY format', () => {
+    it('should extract MM.YY format', () => {
+      expect(extractDateFromText('NTS 11.25 TB')).toBe('2025-11-01');
+      expect(extractDateFromText('Report 03.24')).toBe('2024-03-01');
+    });
+  });
+
   describe('Month name with year', () => {
     it('should extract full month names with 4-digit year', () => {
       expect(extractDateFromText('August 2024 Report')).toBe('2024-08-01');
@@ -127,6 +134,11 @@ describe('normalizeGlMonth', () => {
     expect(normalizeGlMonth('08/2024')).toBe('2024-08-01');
     expect(normalizeGlMonth('8/2024')).toBe('2024-08-01');
     expect(normalizeGlMonth('01/2025')).toBe('2025-01-01');
+  });
+
+  it('should normalize MM.YY format', () => {
+    expect(normalizeGlMonth('11.25')).toBe('2025-11-01');
+    expect(normalizeGlMonth('3.24')).toBe('2024-03-01');
   });
 
   it('should normalize month name formats', () => {

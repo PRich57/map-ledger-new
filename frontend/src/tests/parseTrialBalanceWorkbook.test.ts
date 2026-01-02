@@ -75,4 +75,76 @@ describe('parseTrialBalanceWorkbook', () => {
 
     expect(result.rows[1]['Account Number']).toBe(4060);
   });
+
+  it('skips metadata rows to find trial balance headers lower in the sheet', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('NTS 11.25 TB');
+
+    sheet.getCell('B1').value = 'System:';
+    sheet.getCell('C1').value = 'TRIAL BALANCE SUMMARY FOR 2025';
+    sheet.getCell('B2').value = 'Nussbaum Transportation Services, Inc.';
+    sheet.getCell('B3').value = 'General Ledger';
+    sheet.getCell('B6').value = 'Account:';
+    sheet.getCell('C6').value = 'First';
+    sheet.getCell('D6').value = 'Last';
+
+    sheet.getRow(8).values = [
+      undefined,
+      'Inactive',
+      'Account',
+      'Description',
+      'Beginning Balance',
+      'Debit',
+      'Credit',
+      'Net Change',
+      'Ending Balance',
+    ];
+
+    sheet.getRow(9).values = [
+      undefined,
+      'X',
+      '1008-0-0-000',
+      'SQUARE',
+      0,
+      0,
+      0,
+      0,
+      0,
+    ];
+    sheet.getRow(10).values = [
+      undefined,
+      '',
+      '1009-0-0-000',
+      'TMT DUMMY CHECKING ACCOUNT',
+      0,
+      0,
+      0,
+      0,
+      0,
+    ];
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const file = {
+      arrayBuffer: async () => buffer,
+    } as unknown as File;
+
+    const parsed = await parseTrialBalanceWorkbook(file);
+
+    expect(parsed).toHaveLength(1);
+
+    const [result] = parsed;
+    expect(result.headers).toEqual([
+      'Inactive',
+      'Account',
+      'Description',
+      'Beginning Balance',
+      'Debit',
+      'Credit',
+      'Net Change',
+      'Ending Balance',
+    ]);
+    expect(result.firstDataRowIndex).toBe(9);
+    expect(result.rows[0]['Account']).toBe('1008-0-0-000');
+    expect(result.rows[0]['Description']).toBe('SQUARE');
+  });
 });
